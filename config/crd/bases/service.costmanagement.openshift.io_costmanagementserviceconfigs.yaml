@@ -1151,6 +1151,14 @@ spec:
                             type: object
                         type: object
                     type: object
+                  dataRetentionMonths:
+                    default: 4
+                    description: DataRetentionMonths is how many months of cost report
+                      data to retain.
+                    format: int32
+                    maximum: 60
+                    minimum: 1
+                    type: integer
                   listener:
                     properties:
                       enabled:

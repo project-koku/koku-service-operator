@@ -430,6 +430,11 @@ type CostManagementConfig struct {
 	// Cron expression for report download checks.
 	// +kubebuilder:default:="*/5 * * * *"
 	ReportDownloadSchedule string `json:"reportDownloadSchedule,omitempty"`
+	// DataRetentionMonths is how many months of cost report data to retain.
+	// +kubebuilder:default:=4
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=60
+	DataRetentionMonths int32 `json:"dataRetentionMonths,omitempty"`
 
 	Storage        CostManagementStorageSpec `json:"storage,omitempty"`
 	API            KokuAPISpec               `json:"api,omitempty"`

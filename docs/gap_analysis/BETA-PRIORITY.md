@@ -54,7 +54,6 @@ Several paths report success while the underlying dependency is wrong or while a
 | Sensitive / unconstrained `Env map[string]string` | [7678 R1](COST-7678.md) | **P1** (tighten before GA; warn in beta docs) |
 | CEL / OpenAPI validation (ports, `sslMode`, BYOI required-when-not-deployed, etc.) | [7678 G2](COST-7678.md), [7679 G3](COST-7679.md) | **P1** |
 | Admission webhooks (`defaults.go` / `validation.go`) | [7678 G1](COST-7678.md) | **P1** (OpenAPI/CEL first; webhook for rules CEL cannot express) |
-| `dataRetentionMonths` missing | [7678 G3](COST-7678.md) | **P2** or formal defer |
 
 ---
 
@@ -174,9 +173,9 @@ Tickets marked ✅ in `tasks.md` that gap audits found incomplete: **7683, 7684,
 24. Full NetworkPolicy / dedicated SA matrix for **core** ([7691](COST-7691.md)). ROS/Kruize matrix → COST-8054.
 25. Route admission gating ([7691 G4](COST-7691.md)); UI Route global-domain fallback ([7691 R4](COST-7691.md)); `Available` vs `StorageReady` policy ([7683 R2](COST-7683.md)).
 26. Wait-path exponential backoff ([7680 G2](COST-7680.md)); richer Events ([7692 G4](COST-7692.md)).
-27. `dataRetentionMonths` ([7678 G3](COST-7678.md)).
-28. Secret rotation annotation (COST-7694); upgrade rollback / rolling strategy (COST-7693).
-29. E2E + OpenShift CI (COST-7697–7699); tighten `Env` maps ([7678 R1](COST-7678.md)).
+27. Secret rotation annotation (COST-7694); upgrade rollback / rolling strategy (COST-7693).
+28. E2E + OpenShift CI (COST-7697–7699); tighten `Env` maps ([7678 R1](COST-7678.md)).
+29. Wire `dataRetentionMonths` → `RETAIN_NUM_MONTHS` (field present; [7678 G3](COST-7678.md) closed for API).
 
 ### → [COST-8054](../jira/COST-8054.md) — ROS and Kruize (not Cost beta)
 
