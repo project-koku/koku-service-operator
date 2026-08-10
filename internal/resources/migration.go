@@ -116,7 +116,7 @@ func ROSMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag str
 		EnvVal("LOG_LEVEL", "INFO"),
 	}
 
-	script := rosMigrationScript(host, int32String(port))
+	script := rosMigrationScript()
 
 	vols := []corev1.Volume{{
 		Name:         "tmp",
@@ -129,11 +129,11 @@ func ROSMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag str
 	)
 }
 
-func rosMigrationScript(host, port string) string {
+func rosMigrationScript() string {
+	// DB_HOST and DB_PORT are injected as env vars by rosDBEnv() — never
+	// interpolate CR spec fields into shell source (shell injection risk).
 	return `set -e
 echo "=== ROS Database Migrations ==="
-DB_HOST="${DB_HOST:-` + host + `}"
-DB_PORT="${DB_PORT:-` + port + `}"
 ELAPSED=0
 echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
 while true; do
@@ -160,7 +160,7 @@ func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag st
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
 	env := rbacMigrationEnv(cfg)
-	script := rbacMigrationScript(DatabaseHost(cfg), int32String(cfg.Spec.Database.Port))
+	script := rbacMigrationScript()
 
 	vols := []corev1.Volume{{
 		Name:         "tmp",
@@ -182,16 +182,16 @@ func rbacMigrationEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.En
 	)
 }
 
-func rbacMigrationScript(host, port string) string {
+func rbacMigrationScript() string {
+	// DATABASE_HOST and DATABASE_PORT are injected as env vars by rbacMigrationEnv()
+	// — never interpolate CR spec fields into shell source (shell injection risk).
 	return `set -e
 echo "=== insights-rbac migration job ==="
-DB_HOST="${DATABASE_HOST:-` + host + `}"
-DB_PORT="${DATABASE_PORT:-` + port + `}"
 ELAPSED=0
-echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+echo "Waiting for database at ${DATABASE_HOST}:${DATABASE_PORT}..."
 while true; do
   if [ $ELAPSED -ge 300 ]; then echo "ERROR: DB not ready after 300s"; exit 1; fi
-  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then break; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DATABASE_HOST}/${DATABASE_PORT}" 2>/dev/null; then break; fi
   echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
   sleep 5; ELAPSED=$((ELAPSED + 5))
 done
@@ -379,7 +379,7 @@ func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag s
 		EnvVal("SYNC_ORG_ID", id.OrgID),
 		EnvVal("SYNC_ACCOUNT_NUMBER", id.AccountNumber),
 	)
-	script := rbacAdminBootstrapScript(DatabaseHost(cfg), int32String(cfg.Spec.Database.Port))
+	script := rbacAdminBootstrapScript()
 	vols := []corev1.Volume{{
 		Name:         "tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
@@ -391,19 +391,19 @@ func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag s
 	)
 }
 
-func rbacAdminBootstrapScript(host, port string) string {
+func rbacAdminBootstrapScript() string {
+	// DATABASE_HOST and DATABASE_PORT are injected as env vars by rbacMigrationEnv()
+	// — never interpolate CR spec fields into shell source (shell injection risk).
 	return `set -e
 echo "=== insights-rbac admin bootstrap job ==="
-DB_HOST="${DATABASE_HOST:-` + host + `}"
-DB_PORT="${DATABASE_PORT:-` + port + `}"
 ELAPSED=0
 echo "Username: ${SYNC_USERNAME}"
 echo "Org ID: ${SYNC_ORG_ID}"
 echo "Account Number: ${SYNC_ACCOUNT_NUMBER}"
-echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+echo "Waiting for database at ${DATABASE_HOST}:${DATABASE_PORT}..."
 while true; do
   if [ $ELAPSED -ge 300 ]; then echo "ERROR: DB not ready after 300s"; exit 1; fi
-  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then break; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DATABASE_HOST}/${DATABASE_PORT}" 2>/dev/null; then break; fi
   echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
   sleep 5; ELAPSED=$((ELAPSED + 5))
 done
