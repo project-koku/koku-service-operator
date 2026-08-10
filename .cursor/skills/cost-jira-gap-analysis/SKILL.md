@@ -70,7 +70,6 @@ Every ticket item goes in exactly one bucket:
 | **Done** | Meets or supersedes ticket intent |
 | **Intentional deviation** | Differs from Jira; justified in design docs or CLAUDE.md |
 | **Gap** | Required by ticket (or blocking GA API surface) and not done |
-| **Docs drift** | Tracker/docs stale vs code — note only; do not fix unless asked |
 
 Separate **ticket-scoped gaps** from **related GA risks** found in the same surface (e.g. passwords in Spec) so the consumer can prioritize.
 
