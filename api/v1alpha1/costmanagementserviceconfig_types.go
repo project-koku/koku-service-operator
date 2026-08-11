@@ -234,9 +234,8 @@ type S3Options struct {
 // -----------------------------------------------------------------------------
 
 type AuthConfig struct {
-	Envoy      EnvoySpec    `json:"envoy,omitempty"`
-	Keycloak   KeycloakSpec `json:"keycloak,omitempty"`
-	RealmUsers []RealmUser  `json:"realmUsers,omitempty"`
+	Envoy    EnvoySpec    `json:"envoy,omitempty"`
+	Keycloak KeycloakSpec `json:"keycloak,omitempty"`
 }
 
 type EnvoySpec struct {
@@ -279,21 +278,6 @@ type KeycloakTLSSpec struct {
 	CACertSecretName string `json:"caCertSecretName,omitempty"`
 }
 
-// RealmUser defines an initial Keycloak user created by the operator.
-// NOTE: do not put production credentials here — the Password field is stored
-// in etcd. Use a Secret reference instead once secret-backed user provisioning
-// is implemented (COST-7694).
-type RealmUser struct {
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	Email         string `json:"email,omitempty"`
-	FirstName     string `json:"firstName,omitempty"`
-	LastName      string `json:"lastName,omitempty"`
-	OrgID         string `json:"orgId,omitempty"`
-	AccountNumber string `json:"accountNumber,omitempty"`
-	OrgAdmin      bool   `json:"orgAdmin,omitempty"`
-}
-
 // -----------------------------------------------------------------------------
 // RBACConfig (insights-rbac)
 // -----------------------------------------------------------------------------
@@ -314,6 +298,14 @@ type RBACComponentSpec struct {
 
 type BootstrapAdminSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
+	// OrgID of the organisation that receives Cost Administrator RBAC privileges.
+	OrgID string `json:"orgId,omitempty"`
+	// AccountNumber for the Tenant record created in insights-rbac.
+	AccountNumber string `json:"accountNumber,omitempty"`
+	// Username of the RBAC Principal created for the bootstrap admin.
+	// Defaults to "admin" when empty.
+	// +kubebuilder:default:=admin
+	Username string `json:"username,omitempty"`
 }
 
 type KeycloakSyncSpec struct {

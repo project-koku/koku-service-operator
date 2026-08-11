@@ -68,11 +68,11 @@ func TestAdminBootstrapJobGated(t *testing.T) {
 	}
 	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
 	if job := AdminBootstrapJob(cfg, "test"); job != nil {
-		t.Fatal("expected nil when no orgAdmin realm user")
+		t.Fatal("expected nil when orgId is empty")
 	}
-	cfg.Spec.Auth.RealmUsers = []costv1alpha1.RealmUser{{
-		Username: "admin", OrgID: "org1234567", AccountNumber: "7890123", OrgAdmin: true,
-	}}
+	cfg.Spec.RBAC.BootstrapAdmin.OrgID = "org1234567"
+	cfg.Spec.RBAC.BootstrapAdmin.AccountNumber = "7890123"
+	cfg.Spec.RBAC.BootstrapAdmin.Username = "admin"
 	job := AdminBootstrapJob(cfg, "test")
 	if job == nil {
 		t.Fatal("expected AdminBootstrapJob when enabled with orgAdmin user")
@@ -96,12 +96,15 @@ func TestAdminBootstrapJobGated(t *testing.T) {
 func TestResolveBootstrapAdmin(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
 	if _, ok := ResolveBootstrapAdmin(cfg); ok {
-		t.Fatal("expected no identity")
+		t.Fatal("expected no identity when disabled")
 	}
-	cfg.Spec.Auth.RealmUsers = []costv1alpha1.RealmUser{
-		{Username: "viewer", OrgAdmin: false},
-		{Username: "admin", OrgID: "org9", AccountNumber: "acct9", OrgAdmin: true},
+	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
+	if _, ok := ResolveBootstrapAdmin(cfg); ok {
+		t.Fatal("expected no identity when orgId is empty")
 	}
+	cfg.Spec.RBAC.BootstrapAdmin.OrgID = "org9"
+	cfg.Spec.RBAC.BootstrapAdmin.AccountNumber = "acct9"
+	cfg.Spec.RBAC.BootstrapAdmin.Username = "admin"
 	id, ok := ResolveBootstrapAdmin(cfg)
 	if !ok || id.Username != "admin" || id.OrgID != "org9" {
 		t.Fatalf("got %+v ok=%v", id, ok)

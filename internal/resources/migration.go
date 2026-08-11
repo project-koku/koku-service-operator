@@ -334,30 +334,24 @@ type BootstrapAdminIdentity struct {
 	AccountNumber string
 }
 
-// ResolveBootstrapAdmin returns the first Auth.RealmUsers entry with OrgAdmin
-// set, matching the Helm chart helpers. Empty fields fall back to chart defaults.
+// ResolveBootstrapAdmin reads the bootstrap admin identity directly from
+// spec.rbac.bootstrapAdmin. Keycloak/RHBK is BYOI — the operator has no
+// responsibility for user credentials, so there is no password anywhere here.
+// Returns false when bootstrapAdmin is not enabled or orgId is not set.
 func ResolveBootstrapAdmin(cfg *costv1alpha1.CostManagementServiceConfig) (BootstrapAdminIdentity, bool) {
-	for _, u := range cfg.Spec.Auth.RealmUsers {
-		if !u.OrgAdmin {
-			continue
-		}
-		id := BootstrapAdminIdentity{
-			Username:      u.Username,
-			OrgID:         u.OrgID,
-			AccountNumber: u.AccountNumber,
-		}
-		if id.Username == "" {
-			id.Username = "admin"
-		}
-		if id.OrgID == "" {
-			id.OrgID = "org1234567"
-		}
-		if id.AccountNumber == "" {
-			id.AccountNumber = "7890123"
-		}
-		return id, true
+	ba := cfg.Spec.RBAC.BootstrapAdmin
+	if !ba.Enabled || ba.OrgID == "" {
+		return BootstrapAdminIdentity{}, false
 	}
-	return BootstrapAdminIdentity{}, false
+	username := ba.Username
+	if username == "" {
+		username = "admin"
+	}
+	return BootstrapAdminIdentity{
+		Username:      username,
+		OrgID:         ba.OrgID,
+		AccountNumber: ba.AccountNumber,
+	}, true
 }
 
 // AdminBootstrapJob builds the post-migrate Job that creates Tenant/Principal

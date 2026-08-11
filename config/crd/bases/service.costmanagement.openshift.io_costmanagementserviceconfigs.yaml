@@ -179,35 +179,6 @@ spec:
                           Example: http://keycloak-service.keycloak.svc.cluster.local:8080
                         type: string
                     type: object
-                  realmUsers:
-                    items:
-                      description: |-
-                        RealmUser defines an initial Keycloak user created by the operator.
-                        NOTE: do not put production credentials here — the Password field is stored
-                        in etcd. Use a Secret reference instead once secret-backed user provisioning
-                        is implemented (COST-7694).
-                      properties:
-                        accountNumber:
-                          type: string
-                        email:
-                          type: string
-                        firstName:
-                          type: string
-                        lastName:
-                          type: string
-                        orgAdmin:
-                          type: boolean
-                        orgId:
-                          type: string
-                        password:
-                          type: string
-                        username:
-                          type: string
-                      required:
-                      - password
-                      - username
-                      type: object
-                    type: array
                 type: object
               cache:
                 properties:
@@ -1930,8 +1901,22 @@ spec:
                     type: object
                   bootstrapAdmin:
                     properties:
+                      accountNumber:
+                        description: AccountNumber for the Tenant record created in
+                          insights-rbac.
+                        type: string
                       enabled:
                         type: boolean
+                      orgId:
+                        description: OrgID of the organisation that receives Cost
+                          Administrator RBAC privileges.
+                        type: string
+                      username:
+                        default: admin
+                        description: |-
+                          Username of the RBAC Principal created for the bootstrap admin.
+                          Defaults to "admin" when empty.
+                        type: string
                     type: object
                   image:
                     properties:
