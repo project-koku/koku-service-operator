@@ -1901,27 +1901,24 @@ spec:
                     type: object
                   bootstrapAdmin:
                     properties:
-                      accountNumber:
-                        description: |-
-                          AccountNumber for the Tenant record created in insights-rbac.
-                          Required when Enabled is true.
-                        minLength: 1
-                        type: string
                       enabled:
                         type: boolean
-                      orgId:
+                      secretRef:
                         description: |-
-                          OrgID of the organisation that receives Cost Administrator RBAC privileges.
-                          Required when Enabled is true.
-                        minLength: 1
-                        type: string
-                      username:
-                        default: admin
-                        description: |-
-                          Username of the RBAC Principal created for the bootstrap admin.
-                          Defaults to "admin" when empty.
-                        minLength: 1
-                        type: string
+                          SecretRef references a Secret containing the bootstrap admin identity.
+                          Required keys: org-id, account-number, username.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                     type: object
                   image:
                     properties:

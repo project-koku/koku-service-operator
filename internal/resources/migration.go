@@ -327,51 +327,21 @@ echo "✓ Platform default cleanup complete"
 echo "=== insights-rbac migration job completed ==="`
 }
 
-// BootstrapAdminIdentity holds the org-admin user used by AdminBootstrapJob.
-type BootstrapAdminIdentity struct {
-	Username      string
-	OrgID         string
-	AccountNumber string
-}
-
-// ResolveBootstrapAdmin reads the bootstrap admin identity directly from
-// spec.rbac.bootstrapAdmin. Keycloak/RHBK is BYOI — the operator has no
-// responsibility for user credentials, so there is no password anywhere here.
-// Returns false when bootstrapAdmin is not enabled or orgId is not set.
-func ResolveBootstrapAdmin(cfg *costv1alpha1.CostManagementServiceConfig) (BootstrapAdminIdentity, bool) {
-	ba := cfg.Spec.RBAC.BootstrapAdmin
-	if !ba.Enabled || ba.OrgID == "" {
-		return BootstrapAdminIdentity{}, false
-	}
-	username := ba.Username
-	if username == "" {
-		username = "admin"
-	}
-	return BootstrapAdminIdentity{
-		Username:      username,
-		OrgID:         ba.OrgID,
-		AccountNumber: ba.AccountNumber,
-	}, true
-}
-
-// AdminBootstrapJob builds the post-migrate Job that creates Tenant/Principal
-// and attaches admin_default roles for the configured org-admin user.
-// Returns nil when bootstrapAdmin.enabled is false or no orgAdmin realm user exists.
+// AdminBootstrapJob builds the post-migrate Job that seeds a Tenant/Principal
+// in insights-rbac. Returns nil when disabled or secretRef.name is empty.
 func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	if !cfg.Spec.RBAC.BootstrapAdmin.Enabled {
+	ba := cfg.Spec.RBAC.BootstrapAdmin
+	if !ba.Enabled || ba.SecretRef.Name == "" {
 		return nil
 	}
-	id, ok := ResolveBootstrapAdmin(cfg)
-	if !ok {
-		return nil
-	}
+	secretName := ba.SecretRef.Name
 
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
 	env := append(rbacEnv(cfg),
-		EnvVal("SYNC_USERNAME", id.Username),
-		EnvVal("SYNC_ORG_ID", id.OrgID),
-		EnvVal("SYNC_ACCOUNT_NUMBER", id.AccountNumber),
+		EnvFromSecret("SYNC_ORG_ID", secretName, "org-id"),
+		EnvFromSecret("SYNC_ACCOUNT_NUMBER", secretName, "account-number"),
+		EnvFromSecretOptional("SYNC_USERNAME", secretName, "username"),
 	)
 	script := rbacAdminBootstrapScript(DatabaseHost(cfg), int32String(cfg.Spec.Database.Port))
 	vols := []corev1.Volume{{
