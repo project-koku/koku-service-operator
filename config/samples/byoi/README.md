@@ -8,7 +8,12 @@ does **not** provision DB/cache; it only connects.
 |-----------|----------|
 | `cost-byoi-infra` | PostgreSQL, Valkey, MinIO (+ optional Redpanda — see below) |
 | `kafka` | AMQ Streams (recommended) — via `deploy-kafka.sh`, not the infra kustomize |
-| `cost-byoi` | App Secrets + `CostManagementServiceConfig` |
+| `cost-byoi` | App Secrets + `CostManagementServiceConfig` **and** the OwnNamespace operator instance |
+
+The operator install NS must be the CR NS (`cost-byoi` here). BYOI infra in
+`cost-byoi-infra` / `kafka` is connected via CR fields; the operator does not
+watch or own those namespaces. See
+[docs/development/ownnamespace.md](../../docs/development/ownnamespace.md).
 
 **Kafka options**
 

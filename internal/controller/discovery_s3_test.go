@@ -176,6 +176,38 @@ func TestResolveS3_NooBaa(t *testing.T) {
 	}
 }
 
+// TestResolveS3_NooBaaPrefersAPIReader simulates OwnNamespace cache: the
+// cached Client cannot see openshift-storage/noobaa-admin, but APIReader can.
+func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
+	scheme := testScheme(t)
+	cached := fake.NewClientBuilder().WithScheme(scheme).Build()
+	apiReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(noobaaAdminSecret("ak-api", "sk-api")).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: cached, APIReader: apiReader}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	got, err := r.resolveS3(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Endpoint != "https://s3.openshift-storage.svc.cluster.local:443" {
+		t.Errorf("Endpoint: got %q", got.Endpoint)
+	}
+	wantSecret := testCRName + "-storage-credentials"
+	sec := &corev1.Secret{}
+	if err := cached.Get(context.Background(), types.NamespacedName{Namespace: testNamespace, Name: wantSecret}, sec); err != nil {
+		t.Fatalf("storage secret not created in watch NS: %v", err)
+	}
+	if string(sec.Data["access-key"]) != "ak-api" || string(sec.Data["secret-key"]) != "sk-api" {
+		t.Errorf("secret data: access=%q secret=%q", sec.Data["access-key"], sec.Data["secret-key"])
+	}
+}
+
 func TestResolveS3_None(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	r := &CostManagementServiceConfigReconciler{Client: c}

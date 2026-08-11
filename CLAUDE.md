@@ -16,6 +16,7 @@ external infrastructure.
 | Field manager | `koku-service-operator` |
 | Leader election ID | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
 | Finalizer | `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` |
+| Install model | OwnNamespace — operator NS == CR NS; see [docs/development/ownnamespace.md](docs/development/ownnamespace.md) |
 
 ## Build
 
@@ -23,7 +24,7 @@ external infrastructure.
 make generate          # regenerate deep-copy methods
 make manifests         # regenerate CRD YAML + RBAC ClusterRole
 make build             # compile manager binary to bin/manager
-make run               # run locally against current kubeconfig
+NAMESPACE=<cr-ns> make run   # run locally (OwnNamespace requires NAMESPACE)
 go test -race ./internal/...
 golangci-lint run ./...
 govulncheck ./...
@@ -93,6 +94,7 @@ Full analysis in [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md).
 
 ## Reference material
 
+- [docs/development/ownnamespace.md](docs/development/ownnamespace.md) — OwnNamespace install/watch model and RBAC shape
 - [docs/development/crc-testing.md](docs/development/crc-testing.md) — local development and CRC testing guide
 - [docs/tasks.md](docs/tasks.md) — implementation status per JIRA ticket
 - [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) — design decisions and best-practice analysis
