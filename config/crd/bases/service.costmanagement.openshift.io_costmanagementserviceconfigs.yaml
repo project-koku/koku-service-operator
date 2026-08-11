@@ -1902,20 +1902,25 @@ spec:
                   bootstrapAdmin:
                     properties:
                       accountNumber:
-                        description: AccountNumber for the Tenant record created in
-                          insights-rbac.
+                        description: |-
+                          AccountNumber for the Tenant record created in insights-rbac.
+                          Required when Enabled is true.
+                        minLength: 1
                         type: string
                       enabled:
                         type: boolean
                       orgId:
-                        description: OrgID of the organisation that receives Cost
-                          Administrator RBAC privileges.
+                        description: |-
+                          OrgID of the organisation that receives Cost Administrator RBAC privileges.
+                          Required when Enabled is true.
+                        minLength: 1
                         type: string
                       username:
                         default: admin
                         description: |-
                           Username of the RBAC Principal created for the bootstrap admin.
                           Defaults to "admin" when empty.
+                        minLength: 1
                         type: string
                     type: object
                   image:

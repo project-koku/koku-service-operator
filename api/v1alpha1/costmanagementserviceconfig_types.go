@@ -299,12 +299,17 @@ type RBACComponentSpec struct {
 type BootstrapAdminSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 	// OrgID of the organisation that receives Cost Administrator RBAC privileges.
+	// Required when Enabled is true.
+	// +kubebuilder:validation:MinLength=1
 	OrgID string `json:"orgId,omitempty"`
 	// AccountNumber for the Tenant record created in insights-rbac.
+	// Required when Enabled is true.
+	// +kubebuilder:validation:MinLength=1
 	AccountNumber string `json:"accountNumber,omitempty"`
 	// Username of the RBAC Principal created for the bootstrap admin.
 	// Defaults to "admin" when empty.
 	// +kubebuilder:default:=admin
+	// +kubebuilder:validation:MinLength=1
 	Username string `json:"username,omitempty"`
 }
 
