@@ -6,3 +6,20 @@ images:
 - name: controller
   newName: quay.io/martin_povolny/koku-service-operator
   newTag: dev
+# Keep --operator-image arg in sync with the container image so init containers
+# automatically use the same registry/tag without a separate image pull.
+# args array layout: 0=--leader-elect, 1=--health-probe-bind-address, 2=--operator-image
+replacements:
+- source:
+    kind: Deployment
+    name: controller-manager
+    fieldPath: spec.template.spec.containers.0.image
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.0.args.2
+    options:
+      delimiter: "="
+      index: 1

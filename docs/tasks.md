@@ -80,6 +80,17 @@ Short version: bundled infra is dev-only (intentional), profile-based sizing is 
 
 ---
 
+## Technical Debt
+
+| Item | Notes |
+|------|-------|
+| **waitForTCP Go binary** | Implemented in `cmd/wait-for/` using wait4x.dev/v3. See `docs/design/wait-for-patterns.md` for rationale. |
+| **Image digest pinning** | All operator and component image references use tags only (e.g. `registry.redhat.io/rhel10/postgresql-16:10.1`). Tags are mutable; pinning to `tag@sha256:digest` enables Dependabot `docker` ecosystem to track and auto-bump them. See [jordigilh's review](https://github.com/project-koku/koku-service-operator/pull/22#issuecomment-5253476144). Priority: before GA. |
+| **`relatedImages` in OLM bundle** | Images constructed at runtime in `internal/resources/*.go` (Postgres, Valkey, Kruize, Koku, ROS, RBAC…) are not captured in the CSV `relatedImages` list, so airgapped/`oc-mirror` deployments cannot discover them. Needs a `RELATED_IMAGE_*` env-var convention on the manager Deployment + bundle generation integration. Tracked under COST-7695. |
+| **RBAC migration/bootstrap code provenance** | `rbacMigrationScript` and `rbacAdminBootstrapScript` embed 60-130 lines of Django ORM Python (permission/role seeding, tenant/group/principal bootstrap) as Go string literals in this repo, executed via `manage.py shell <<'HEREDOC'`. This fails the code-provenance question an audit asks: the executed code is not independently reviewed, CI-tested, signed, or traceable in an SBOM — it's assembled from a string at deploy time. **Recommended fix (cross-repo):** add custom Django management commands to `insights-rbac` (e.g. `manage.py seed_cost_management_rbac`, `manage.py bootstrap_admin_user --username=... --org-id=...`). The operator's Job then calls `Command: ["python", "manage.py", "seed_cost_management_rbac"]` — no shell, no heredoc, code goes through `insights-rbac`'s own PR/CI/SAST/signing pipeline. **Long-term option:** expose as a versioned REST/gRPC API instead of a CLI subcommand, removing exec-into-container coupling entirely. **Requires:** `insights-rbac` maintainer buy-in, their release cycle, and behavioral parity during migration of the heredoc logic. See [jordigilh's review](https://github.com/project-koku/koku-service-operator/pull/22#issuecomment-5257084580) for full analysis including dropped alternatives (why `manage.py shell -c` and ConfigMap-mounted scripts don't fully solve the code-provenance gap). |
+
+---
+
 ## Next Priority
 
 1. **[COST-7695](https://redhat.atlassian.net/browse/COST-7695)** — OLM bundle generation and validation

@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func TestRBACMigrationScriptSeedsCostManagementAndSources(t *testing.T) {
-	script := rbacMigrationScript("db", "5432")
+	script := rbacMigrationScript()
 	for _, want := range []string{
 		"sources:*:*",
 		"Cost Administrator",
@@ -105,5 +106,28 @@ func TestResolveBootstrapAdmin(t *testing.T) {
 	id, ok := ResolveBootstrapAdmin(cfg)
 	if !ok || id.Username != "admin" || id.OrgID != "org9" {
 		t.Fatalf("got %+v ok=%v", id, ok)
+	}
+}
+
+// TestMigrationScriptsSyntax runs bash -n on every migration script string to
+// catch syntax errors (orphaned loop bodies, unclosed heredocs, etc.) that
+// pattern-match tests would miss.
+func TestMigrationScriptsSyntax(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scripts := map[string]string{
+		"kokuMigrationScript":      kokuMigrationScript(),
+		"rosMigrationScript":       rosMigrationScript(),
+		"rbacMigrationScript":      rbacMigrationScript(),
+		"rbacAdminBootstrapScript": rbacAdminBootstrapScript(),
+	}
+	for name, script := range scripts {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command("bash", "-n", "-c", script)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("%s has a bash syntax error:\n%s", name, string(out))
+			}
+		})
 	}
 }
