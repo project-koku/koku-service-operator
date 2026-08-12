@@ -38,6 +38,14 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resourceNames:
+  - noobaa-admin
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
   - apps
   resources:
   - daemonsets
@@ -86,10 +94,8 @@ rules:
   - create
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - custom.metrics.k8s.io
   resources:
@@ -135,6 +141,15 @@ rules:
   resources:
   - clusterrolebindings
   - clusterroles
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
   - rolebindings
   - roles
   verbs:

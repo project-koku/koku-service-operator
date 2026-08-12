@@ -151,7 +151,13 @@ func (r *CostManagementServiceConfigReconciler) findBoundOBC(ctx context.Context
 
 func (r *CostManagementServiceConfigReconciler) discoverNooBaa(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (*costv1alpha1.DiscoveredS3, error) {
 	src := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: noobaaAdminNamespace, Name: noobaaAdminSecretName}, src); err != nil {
+	// Use APIReader: noobaa-admin lives in openshift-storage, outside the
+	// OwnNamespace informer cache (Cache.DefaultNamespaces).
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: noobaaAdminNamespace, Name: noobaaAdminSecretName}, src); err != nil {
 		return nil, fmt.Errorf("noobaa-admin secret: %w", err)
 	}
 	accessKey := string(src.Data["AWS_ACCESS_KEY_ID"])

@@ -1,4 +1,9 @@
 # Adds namespace to all resources.
+#
+# OwnNamespace: the operator watches/manages only this namespace. The
+# CostManagementServiceConfig CR must live here (or change this value when
+# packaging so install NS == CR NS). BYOI infra may still live elsewhere.
+# See docs/development/ownnamespace.md.
 namespace: koku-service-operator-system
 
 # Value of this field is prepended to the

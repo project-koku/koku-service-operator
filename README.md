@@ -37,7 +37,7 @@ running against a local CRC cluster.
 | CRD name | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
 | Short name | `cmsc` |
 | `apiVersion` in CR | `service.costmanagement.openshift.io/v1alpha1` |
-| Operator namespace | `koku-service-operator-system` |
+| Operator install model | OwnNamespace — operator NS == CR NS ([docs](docs/development/ownnamespace.md)); `make deploy` scaffold NS is `koku-service-operator-system` |
 | Field manager | `koku-service-operator` |
 | Leader election ID | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
 | Finalizer | `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` |

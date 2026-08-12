@@ -163,8 +163,18 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
+<<<<<<< HEAD
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go --operator-image=$(IMG)
+=======
+run: manifests generate fmt vet ## Run a controller from your host (OwnNamespace).
+	@if [ -z "$${NAMESPACE}" ]; then \
+		echo "NAMESPACE is required for out-of-cluster runs (OwnNamespace)."; \
+		echo "Example: NAMESPACE=cost-onprem make run"; \
+		exit 1; \
+	fi
+	NAMESPACE=$(NAMESPACE) go run ./cmd/main.go
+>>>>>>> origin/fix/ownnamespace-rbac-cache
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
