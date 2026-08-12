@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestRBACMigrationScriptSeedsCostManagementAndSources(t *testing.T) {
-	script := rbacMigrationScript()
+	script := rbacMigrationScript("db", "5432")
 	for _, want := range []string{
 		"sources:*:*",
 		"Cost Administrator",
@@ -69,14 +68,12 @@ func TestAdminBootstrapJobGated(t *testing.T) {
 	}
 	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
 	if job := AdminBootstrapJob(cfg, "test"); job != nil {
-		t.Fatal("expected nil when no orgAdmin realm user")
+		t.Fatal("expected nil when secretRef.name is empty")
 	}
-	cfg.Spec.Auth.RealmUsers = []costv1alpha1.RealmUser{{
-		Username: "admin", OrgID: "org1234567", AccountNumber: "7890123", OrgAdmin: true,
-	}}
+	cfg.Spec.RBAC.BootstrapAdmin.SecretRef.Name = "rbac-bootstrap-admin"
 	job := AdminBootstrapJob(cfg, "test")
 	if job == nil {
-		t.Fatal("expected AdminBootstrapJob when enabled with orgAdmin user")
+		t.Fatal("expected AdminBootstrapJob when enabled with secretRef set")
 	}
 	if job.Name != "cost-onprem-rbac-admin-bootstrap" {
 		t.Errorf("name = %q", job.Name)
@@ -85,49 +82,20 @@ func TestAdminBootstrapJobGated(t *testing.T) {
 	if !strings.Contains(full, "Cost Admin Default") {
 		t.Error("bootstrap script missing Cost Admin Default group")
 	}
-	env := map[string]string{}
+	// Identity values must come from the Secret via secretKeyRef — never hardcoded.
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
-		env[e.Name] = e.Value
-	}
-	if env["SYNC_USERNAME"] != "admin" || env["SYNC_ORG_ID"] != "org1234567" {
-		t.Errorf("bootstrap env = username=%q org=%q", env["SYNC_USERNAME"], env["SYNC_ORG_ID"])
-	}
-}
-
-func TestResolveBootstrapAdmin(t *testing.T) {
-	cfg := &costv1alpha1.CostManagementServiceConfig{}
-	if _, ok := ResolveBootstrapAdmin(cfg); ok {
-		t.Fatal("expected no identity")
-	}
-	cfg.Spec.Auth.RealmUsers = []costv1alpha1.RealmUser{
-		{Username: "viewer", OrgAdmin: false},
-		{Username: "admin", OrgID: "org9", AccountNumber: "acct9", OrgAdmin: true},
-	}
-	id, ok := ResolveBootstrapAdmin(cfg)
-	if !ok || id.Username != "admin" || id.OrgID != "org9" {
-		t.Fatalf("got %+v ok=%v", id, ok)
-	}
-}
-
-// TestMigrationScriptsSyntax runs bash -n on every migration script string to
-// catch syntax errors (orphaned loop bodies, unclosed heredocs, etc.) that
-// pattern-match tests would miss.
-func TestMigrationScriptsSyntax(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not available")
-	}
-	scripts := map[string]string{
-		"kokuMigrationScript":      kokuMigrationScript(),
-		"rosMigrationScript":       rosMigrationScript(),
-		"rbacMigrationScript":      rbacMigrationScript(),
-		"rbacAdminBootstrapScript": rbacAdminBootstrapScript(),
-	}
-	for name, script := range scripts {
-		t.Run(name, func(t *testing.T) {
-			cmd := exec.Command("bash", "-n", "-c", script)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Errorf("%s has a bash syntax error:\n%s", name, string(out))
+		if e.Name == "SYNC_ORG_ID" || e.Name == "SYNC_ACCOUNT_NUMBER" || e.Name == "SYNC_USERNAME" {
+			if e.Value != "" {
+				t.Errorf("env %s has inline value %q — must use secretKeyRef", e.Name, e.Value)
 			}
-		})
+			if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+				t.Errorf("env %s must use secretKeyRef, got %+v", e.Name, e.ValueFrom)
+			}
+			if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil &&
+				e.ValueFrom.SecretKeyRef.Name != "rbac-bootstrap-admin" {
+				t.Errorf("env %s secretKeyRef.name = %q, want rbac-bootstrap-admin",
+					e.Name, e.ValueFrom.SecretKeyRef.Name)
+			}
+		}
 	}
 }

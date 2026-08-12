@@ -183,25 +183,6 @@ spec:
                         pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                     type: object
-                  realmUsers:
-                    items:
-                      description: |-
-                        RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
-                        is bootstrapped into the RBAC database by AdminBootstrapJob.
-                        Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
-                      properties:
-                        accountNumber:
-                          type: string
-                        orgAdmin:
-                          type: boolean
-                        orgId:
-                          type: string
-                        username:
-                          type: string
-                      required:
-                      - username
-                      type: object
-                    type: array
                 type: object
               cache:
                 properties:
@@ -1926,6 +1907,22 @@ spec:
                     properties:
                       enabled:
                         type: boolean
+                      secretRef:
+                        description: |-
+                          SecretRef references a Secret containing the bootstrap admin identity.
+                          Required keys: org-id, account-number, username.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                     type: object
                   image:
                     properties:

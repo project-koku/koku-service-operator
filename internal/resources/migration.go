@@ -63,29 +63,32 @@ func MigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string
 		EnvVal("DJANGO_LOG_LEVEL", "INFO"),
 	)
 
-	host := DatabaseHost(cfg)
-	dbPort := cfg.Spec.Database.Port
-	if dbPort == 0 {
-		dbPort = 5432
-	}
 	return migrationJob(cfg, NameKokuMigration(cfg), image, imageTag,
-		"cost-management-migration", kokuMigrationScript(), env,
+		"cost-management-migration", migrationScript(), env,
 		KokuVolumeMounts(cfg), KokuVolumes(cfg),
-		[]corev1.Container{
-			CACombineInitContainer(cfg),
-			// DB wait via init container — no /dev/tcp expansion in the script.
-			waitForPostgres(cfg, host, int32String(dbPort)),
-		},
+		[]corev1.Container{CACombineInitContainer(cfg)},
 	)
 }
 
-func kokuMigrationScript() string {
-	// DB readiness is handled by the waitForPostgres init container above.
+func migrationScript() string {
 	return `set -e
+echo "=== Koku Django Migrations ==="
+DB_HOST="${DATABASE_SERVICE_HOST}"
+DB_PORT="${DATABASE_SERVICE_PORT:-5432}"
+ELAPSED=0
+echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+while true; do
+  if [ $ELAPSED -ge 600 ]; then echo "ERROR: DB not ready after 600s"; exit 1; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then break; fi
+  echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
+  sleep 5; ELAPSED=$((ELAPSED + 5))
+done
+echo "DB ready after ${ELAPSED}s"
 mkdir -p /tmp/prometheus
 cd /opt/koku/koku
 python manage.py migrate --noinput
-echo "=== Koku migrations completed ==="`
+echo "Migrations completed successfully"
+echo "=== Migrations completed ==="`
 }
 
 // -----------------------------------------------------------------------------
@@ -113,6 +116,8 @@ func ROSMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag str
 		EnvVal("LOG_LEVEL", "INFO"),
 	}
 
+	script := rosMigrationScript(host, int32String(port))
+
 	vols := []corev1.Volume{{
 		Name:         "tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
@@ -120,15 +125,26 @@ func ROSMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag str
 	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
 
 	return migrationJob(cfg, NameROSMigration(cfg), image, imageTag,
-		"ros-migration", rosMigrationScript(), env, mounts, vols,
-		[]corev1.Container{waitForPostgres(cfg, host, int32String(port))},
+		"ros-migration", script, env, mounts, vols, nil,
 	)
 }
 
-func rosMigrationScript() string {
-	// DB readiness is handled by the waitForPostgres init container.
+func rosMigrationScript(host, port string) string {
 	return `set -e
 echo "=== ROS Database Migrations ==="
+DB_HOST="${DB_HOST:-` + host + `}"
+DB_PORT="${DB_PORT:-` + port + `}"
+ELAPSED=0
+echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+while true; do
+  if [ $ELAPSED -ge 600 ]; then echo "ERROR: DB not ready after 600s"; exit 1; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then
+    sleep 5; break
+  fi
+  echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
+  sleep 5; ELAPSED=$((ELAPSED + 5))
+done
+echo "DB ready after ${ELAPSED}s"
 ./rosocp db migrate up
 echo "=== ROS migrations completed ==="`
 }
@@ -144,7 +160,7 @@ func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag st
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
 	env := rbacMigrationEnv(cfg)
-	script := rbacMigrationScript()
+	script := rbacMigrationScript(DatabaseHost(cfg), int32String(cfg.Spec.Database.Port))
 
 	vols := []corev1.Volume{{
 		Name:         "tmp",
@@ -152,14 +168,8 @@ func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag st
 	}}
 	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
 
-	host := DatabaseHost(cfg)
-	dbPort := cfg.Spec.Database.Port
-	if dbPort == 0 {
-		dbPort = 5432
-	}
 	return migrationJob(cfg, NameRBACMigration(cfg), image, RBACSeedJobTag(imageTag),
-		"rbac-migration", script, env, mounts, vols,
-		[]corev1.Container{waitForPostgres(cfg, host, int32String(dbPort))},
+		"rbac-migration", script, env, mounts, vols, nil,
 	)
 }
 
@@ -172,10 +182,20 @@ func rbacMigrationEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.En
 	)
 }
 
-func rbacMigrationScript() string {
-	// DB readiness is handled by the waitForPostgres init container.
+func rbacMigrationScript(host, port string) string {
 	return `set -e
 echo "=== insights-rbac migration job ==="
+DB_HOST="${DATABASE_HOST:-` + host + `}"
+DB_PORT="${DATABASE_PORT:-` + port + `}"
+ELAPSED=0
+echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+while true; do
+  if [ $ELAPSED -ge 300 ]; then echo "ERROR: DB not ready after 300s"; exit 1; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then break; fi
+  echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
+  sleep 5; ELAPSED=$((ELAPSED + 5))
+done
+echo "DB ready after ${ELAPSED}s"
 cd /opt/rbac/rbac
 python manage.py migrate --noinput
 echo "✓ Migrations complete"
@@ -307,83 +327,51 @@ echo "✓ Platform default cleanup complete"
 echo "=== insights-rbac migration job completed ==="`
 }
 
-// BootstrapAdminIdentity holds the org-admin user used by AdminBootstrapJob.
-type BootstrapAdminIdentity struct {
-	Username      string
-	OrgID         string
-	AccountNumber string
-}
-
-// ResolveBootstrapAdmin returns the first Auth.RealmUsers entry with OrgAdmin
-// set, matching the Helm chart helpers. Empty fields fall back to chart defaults.
-func ResolveBootstrapAdmin(cfg *costv1alpha1.CostManagementServiceConfig) (BootstrapAdminIdentity, bool) {
-	for _, u := range cfg.Spec.Auth.RealmUsers {
-		if !u.OrgAdmin {
-			continue
-		}
-		id := BootstrapAdminIdentity{
-			Username:      u.Username,
-			OrgID:         u.OrgID,
-			AccountNumber: u.AccountNumber,
-		}
-		if id.Username == "" {
-			id.Username = "admin"
-		}
-		if id.OrgID == "" {
-			id.OrgID = "org1234567"
-		}
-		if id.AccountNumber == "" {
-			id.AccountNumber = "7890123"
-		}
-		return id, true
-	}
-	return BootstrapAdminIdentity{}, false
-}
-
-// AdminBootstrapJob builds the post-migrate Job that creates Tenant/Principal
-// and attaches admin_default roles for the configured org-admin user.
-// Returns nil when bootstrapAdmin.enabled is false or no orgAdmin realm user exists.
+// AdminBootstrapJob builds the post-migrate Job that seeds a Tenant/Principal
+// in insights-rbac. Returns nil when disabled or secretRef.name is empty.
 func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	if !cfg.Spec.RBAC.BootstrapAdmin.Enabled {
+	ba := cfg.Spec.RBAC.BootstrapAdmin
+	if !ba.Enabled || ba.SecretRef.Name == "" {
 		return nil
 	}
-	id, ok := ResolveBootstrapAdmin(cfg)
-	if !ok {
-		return nil
-	}
+	secretName := ba.SecretRef.Name
 
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
 	env := append(rbacEnv(cfg),
-		EnvVal("SYNC_USERNAME", id.Username),
-		EnvVal("SYNC_ORG_ID", id.OrgID),
-		EnvVal("SYNC_ACCOUNT_NUMBER", id.AccountNumber),
+		EnvFromSecret("SYNC_ORG_ID", secretName, "org-id"),
+		EnvFromSecret("SYNC_ACCOUNT_NUMBER", secretName, "account-number"),
+		EnvFromSecretOptional("SYNC_USERNAME", secretName, "username"),
 	)
-	script := rbacAdminBootstrapScript()
+	script := rbacAdminBootstrapScript(DatabaseHost(cfg), int32String(cfg.Spec.Database.Port))
 	vols := []corev1.Volume{{
 		Name:         "tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	}}
 	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
 
-	host := DatabaseHost(cfg)
-	dbPort := cfg.Spec.Database.Port
-	if dbPort == 0 {
-		dbPort = 5432
-	}
 	return migrationJob(cfg, NameRBACAdminBootstrap(cfg), image, RBACSeedJobTag(imageTag),
-		"rbac-admin-bootstrap", script, env, mounts, vols,
-		[]corev1.Container{waitForPostgres(cfg, host, int32String(dbPort))},
+		"rbac-admin-bootstrap", script, env, mounts, vols, nil,
 	)
 }
 
-func rbacAdminBootstrapScript() string {
-	// DB readiness is handled by the waitForPostgres init container.
+func rbacAdminBootstrapScript(host, port string) string {
 	return `set -e
 echo "=== insights-rbac admin bootstrap job ==="
+DB_HOST="${DATABASE_HOST:-` + host + `}"
+DB_PORT="${DATABASE_PORT:-` + port + `}"
+ELAPSED=0
 echo "Username: ${SYNC_USERNAME}"
 echo "Org ID: ${SYNC_ORG_ID}"
 echo "Account Number: ${SYNC_ACCOUNT_NUMBER}"
+echo "Waiting for database at ${DB_HOST}:${DB_PORT}..."
+while true; do
+  if [ $ELAPSED -ge 300 ]; then echo "ERROR: DB not ready after 300s"; exit 1; fi
+  if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/dev/null; then break; fi
+  echo "DB not reachable (${ELAPSED}s elapsed), waiting..."
+  sleep 5; ELAPSED=$((ELAPSED + 5))
+done
+echo "DB ready after ${ELAPSED}s"
 cd /opt/rbac/rbac
 python manage.py shell <<'BOOTSTRAP_SCRIPT'
 import os

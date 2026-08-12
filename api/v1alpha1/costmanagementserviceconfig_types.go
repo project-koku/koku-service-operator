@@ -234,9 +234,8 @@ type S3Options struct {
 // -----------------------------------------------------------------------------
 
 type AuthConfig struct {
-	Envoy      EnvoySpec    `json:"envoy,omitempty"`
-	Keycloak   KeycloakSpec `json:"keycloak,omitempty"`
-	RealmUsers []RealmUser  `json:"realmUsers,omitempty"`
+	Envoy    EnvoySpec    `json:"envoy,omitempty"`
+	Keycloak KeycloakSpec `json:"keycloak,omitempty"`
 }
 
 type EnvoySpec struct {
@@ -283,16 +282,6 @@ type KeycloakTLSSpec struct {
 	CACertSecretName string `json:"caCertSecretName,omitempty"`
 }
 
-// RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
-// is bootstrapped into the RBAC database by AdminBootstrapJob.
-// Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
-type RealmUser struct {
-	Username      string `json:"username"`
-	OrgID         string `json:"orgId,omitempty"`
-	AccountNumber string `json:"accountNumber,omitempty"`
-	OrgAdmin      bool   `json:"orgAdmin,omitempty"`
-}
-
 // -----------------------------------------------------------------------------
 // RBACConfig (insights-rbac)
 // -----------------------------------------------------------------------------
@@ -313,6 +302,9 @@ type RBACComponentSpec struct {
 
 type BootstrapAdminSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
+	// SecretRef references a Secret containing the bootstrap admin identity.
+	// Required keys: org-id, account-number, username.
+	SecretRef corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 type KeycloakSyncSpec struct {
