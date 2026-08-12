@@ -10,7 +10,7 @@ import (
 )
 
 func TestRBACMigrationScriptSeedsCostManagementAndSources(t *testing.T) {
-	script := rbacMigrationScript("db", "5432")
+	script := rbacMigrationScript()
 	for _, want := range []string{
 		"sources:*:*",
 		"Cost Administrator",
