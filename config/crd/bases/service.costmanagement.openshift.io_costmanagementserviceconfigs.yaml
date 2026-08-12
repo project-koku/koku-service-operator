@@ -140,6 +140,7 @@ spec:
                         - cost-management-ui
                         description: JWT audiences accepted by the gateway.
                         items:
+                          pattern: ^[^\x00-\x1f\x7f]*$
                           type: string
                         type: array
                       issuerURL:
@@ -149,12 +150,14 @@ spec:
                           as iss even when clients obtain them via the in-cluster Service — set
                           this to that frontend base URL (or the full .../realms/<realm> issuer).
                           When empty, issuer is derived from url + realm.
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                       namespace:
                         description: Keycloak namespace. Defaults to "keycloak".
                         type: string
                       realm:
                         default: kubernetes
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                       tls:
                         properties:
@@ -177,34 +180,25 @@ spec:
                           issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
                           can reach JWKS without depending on the OpenShift router.
                           Example: http://keycloak-service.keycloak.svc.cluster.local:8080
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                     type: object
                   realmUsers:
                     items:
                       description: |-
-                        RealmUser defines an initial Keycloak user created by the operator.
-                        NOTE: do not put production credentials here — the Password field is stored
-                        in etcd. Use a Secret reference instead once secret-backed user provisioning
-                        is implemented (COST-7694).
+                        RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
+                        is bootstrapped into the RBAC database by AdminBootstrapJob.
+                        Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
                       properties:
                         accountNumber:
-                          type: string
-                        email:
-                          type: string
-                        firstName:
-                          type: string
-                        lastName:
                           type: string
                         orgAdmin:
                           type: boolean
                         orgId:
                           type: string
-                        password:
-                          type: string
                         username:
                           type: string
                       required:
-                      - password
                       - username
                       type: object
                     type: array

@@ -251,19 +251,23 @@ type KeycloakSpec struct {
 	// issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
 	// can reach JWKS without depending on the OpenShift router.
 	// Example: http://keycloak-service.keycloak.svc.cluster.local:8080
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	URL string `json:"url,omitempty"`
 	// IssuerURL is the JWT iss value Envoy validates (must match tokens).
 	// RHBK with a configured hostname issues tokens with the public Route URL
 	// as iss even when clients obtain them via the in-cluster Service — set
 	// this to that frontend base URL (or the full .../realms/<realm> issuer).
 	// When empty, issuer is derived from url + realm.
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	IssuerURL string `json:"issuerURL,omitempty"`
 	// Keycloak namespace. Defaults to "keycloak".
 	Namespace string `json:"namespace,omitempty"`
 	// +kubebuilder:default:=kubernetes
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	Realm string `json:"realm,omitempty"`
 	// JWT audiences accepted by the gateway.
 	// +kubebuilder:default:={"cost-management-operator","cost-management-ui"}
+	// +kubebuilder:validation:items:Pattern=`^[^\x00-\x1f\x7f]*$`
 	Audiences []string        `json:"audiences,omitempty"`
 	TLS       KeycloakTLSSpec `json:"tls,omitempty"`
 }
@@ -279,16 +283,11 @@ type KeycloakTLSSpec struct {
 	CACertSecretName string `json:"caCertSecretName,omitempty"`
 }
 
-// RealmUser defines an initial Keycloak user created by the operator.
-// NOTE: do not put production credentials here — the Password field is stored
-// in etcd. Use a Secret reference instead once secret-backed user provisioning
-// is implemented (COST-7694).
+// RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
+// is bootstrapped into the RBAC database by AdminBootstrapJob.
+// Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
 type RealmUser struct {
 	Username      string `json:"username"`
-	Password      string `json:"password"`
-	Email         string `json:"email,omitempty"`
-	FirstName     string `json:"firstName,omitempty"`
-	LastName      string `json:"lastName,omitempty"`
 	OrgID         string `json:"orgId,omitempty"`
 	AccountNumber string `json:"accountNumber,omitempty"`
 	OrgAdmin      bool   `json:"orgAdmin,omitempty"`

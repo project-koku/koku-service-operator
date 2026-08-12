@@ -291,17 +291,42 @@ func envoyVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume
 	return vols
 }
 
+// yamlScalar returns a YAML-safe representation of s for inline embedding.
+// Two classes of characters break plain YAML scalars:
+//   - Line-break characters (\n, \r, \x00): break out of the current line and
+//     allow the remainder to be parsed as new YAML structure (injection).
+//   - Colon+space/tab/end-of-value (": ", ":\t", or trailing ":"): YAML treats
+//     this as a mapping-value indicator even inside a scalar — silently changes
+//     the type of a list entry to a mapping, or causes a parse error in a scalar
+//     position. A trailing colon triggers this because the template always places
+//     a newline immediately after each interpolated value.
+//
+// Affected strings are double-quoted using strconv.Quote, which escapes all
+// control characters as \n, \r, \x00, etc. Everything else is returned as-is.
+func yamlScalar(s string) string {
+	for i, c := range s {
+		switch {
+		case c == '\n' || c == '\r' || c == '\x00':
+			return strconv.Quote(s)
+		case c == ':' && (i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t'):
+			return strconv.Quote(s)
+		}
+	}
+	return s
+}
+
 // EnvoyYAML renders the Envoy static config from the CR (ported from the Helm chart).
 // Uses token replacement (not fmt.Sprintf) so Lua source with %s is left intact.
 func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	issuer := KeycloakIssuerURL(cfg)
-	jwks := KeycloakJWKSURL(cfg)
+	issuer := yamlScalar(KeycloakIssuerURL(cfg))
+	jwks := yamlScalar(KeycloakJWKSURL(cfg))
 	kcHost, kcPort, useTLS := keycloakHostPort(cfg)
+	kcHost = yamlScalar(kcHost)
 
 	var audYAML strings.Builder
 	for _, a := range KeycloakAudiences(cfg) {
 		audYAML.WriteString("                        - ")
-		audYAML.WriteString(a)
+		audYAML.WriteString(yamlScalar(a))
 		audYAML.WriteByte('\n')
 	}
 
