@@ -105,22 +105,14 @@ func rbacAppContainerSC() *corev1.SecurityContext {
 	}
 }
 
-// waitForRBACDB blocks until the RBAC database port is open.
+// waitForRBACDB blocks until the database is ready to accept RBAC connections.
 func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
 	host := DatabaseHost(cfg)
 	port := cfg.Spec.Database.Port
 	if port == 0 {
 		port = 5432
 	}
-	return corev1.Container{
-		Name:  "wait-for-db",
-		Image: UBIMinimalImage,
-		Command: []string{
-			"bash", "-c",
-			`until bash -c "echo >/dev/tcp/` + host + `/` + int32String(port) + `" 2>/dev/null; do echo 'waiting for rbac db'; sleep 2; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	return waitForPostgres(cfg, host, int32String(port))
 }
 
 // -----------------------------------------------------------------------------

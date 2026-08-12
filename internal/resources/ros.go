@@ -140,67 +140,34 @@ func rosKafkaEnv(cfg *costv1alpha1.CostManagementServiceConfig, base []corev1.En
 	return base
 }
 
-// waitForROSDB returns an init container that blocks until the ROS database port is open.
+// waitForROSDB returns an init container that blocks until the database is
+// ready to accept ROS connections.
 func waitForROSDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
 	host := DatabaseHost(cfg)
 	port := cfg.Spec.Database.Port
 	if port == 0 {
 		port = 5432
 	}
-	return corev1.Container{
-		Name:  "wait-for-db",
-		Image: UBIMinimalImage,
-		Command: []string{
-			"bash", "-c",
-			`until bash -c "echo >/dev/tcp/` + host + `/` + int32String(port) + `" 2>/dev/null; do echo 'waiting for db'; sleep 2; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	return waitForPostgres(cfg, host, int32String(port))
 }
 
 // waitForKafka returns an init container that blocks until the Kafka broker is reachable.
 func waitForKafka(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
-	host := KafkaHost(cfg)
-	port := KafkaPort(cfg)
-	return corev1.Container{
-		Name:  "wait-for-kafka",
-		Image: UBIMinimalImage,
-		Command: []string{
-			"bash", "-c",
-			`until bash -c "echo >/dev/tcp/` + host + `/` + port + `" 2>/dev/null; do echo 'waiting for kafka'; sleep 2; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	return waitForTCP("wait-for-kafka", KafkaHost(cfg), KafkaPort(cfg))
 }
 
 // waitForKruize returns an init container that polls Kruize's HTTP endpoint.
+// curl is used instead of a raw TCP check because Kruize is only truly ready
+// once the HTTP API responds — the port may be open before the JVM has
+// finished initialisation.
 func waitForKruize(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
-	host := NameKruize(cfg)
-	return corev1.Container{
-		Name:  "wait-for-kruize",
-		Image: UBIMinimalImage,
-		Command: []string{
-			"bash", "-c",
-			`until curl -sf http://` + host + `:8080/listPerformanceProfiles >/dev/null 2>&1; do echo 'waiting for kruize'; sleep 5; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	url := "http://" + NameKruize(cfg) + ":8080/listPerformanceProfiles"
+	return waitForHTTP("wait-for-kruize", url)
 }
 
 // waitForKoku returns an init container that waits for the Koku API Service.
-// Matches the chart: TCP connect to the Service port (8000). Probes/metrics
-// listen on 9000 inside the pod, but that port is not exposed on the Service.
 func waitForKoku(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
-	host := NameKokuAPI(cfg)
-	return corev1.Container{
-		Name:  "wait-for-koku",
-		Image: UBIMinimalImage,
-		Command: []string{
-			"bash", "-c",
-			`until timeout 3 bash -c "echo > /dev/tcp/` + host + `/8000" 2>/dev/null; do echo 'waiting for koku'; sleep 5; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	return waitForTCP("wait-for-koku", NameKokuAPI(cfg), "8000")
 }
 
 // cdappVolumeAndMount returns the cdapp-config volume + mount pair used by processor/poller.

@@ -17,6 +17,7 @@ import (
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/controller"
+	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
 var (
@@ -39,6 +40,7 @@ func main() {
 		leaderElect      bool
 		leaderElectionID string
 		developmentMode  bool
+		operatorImage    string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address for the metrics endpoint.")
@@ -46,9 +48,21 @@ func main() {
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
 	flag.StringVar(&leaderElectionID, "leader-election-id", "costmanagementserviceconfigs.service.costmanagement.openshift.io", "Leader election resource ID.")
 	flag.BoolVar(&developmentMode, "dev", false, "Enable development mode (verbose logging).")
+	// --operator-image is the fully-qualified image reference for this operator pod.
+	// It is used as the image for wait-for init containers so no separate image is needed.
+	// Set it to match the registry and tag in your environment:
+	//   --operator-image=quay.io/my-org/koku-service-operator:v1.2.3
+	// In OLM deployments the CSV injects this via the Deployment args.
+	flag.StringVar(&operatorImage, "operator-image", "", "operator image used for init containers (registry/name:tag)")
 	opts := zap.Options{Development: developmentMode}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	if operatorImage == "" {
+		setupLog.Error(nil, "--operator-image is required: set it to the fully-qualified image reference of this operator pod (e.g. quay.io/project-koku/koku-service-operator:v1.0.0)")
+		os.Exit(1)
+	}
+	resources.OperatorImage = operatorImage
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 

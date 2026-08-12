@@ -67,7 +67,7 @@ linters:
       # Test files: relax errcheck, gosec, unparam, and goconst.
       # Repeated string literals in test data are intentional — they are the
       # actual values under test, not code duplication.
-      - linters: [errcheck, gosec, unparam, goconst]
+      - linters: [errcheck, gosec, unparam, goconst, gocyclo]
         path: _test\.go
       # test/utils uses kubectl exec with variable args by design
       - linters: [gosec]
