@@ -57,9 +57,27 @@ func ingressS3UseSSL(cfg *costv1alpha1.CostManagementServiceConfig) string {
 // IngressDeployment builds the insights-ingress-go Deployment.
 // Traffic arrives pre-authenticated from the Envoy JWT gateway, so the ingress
 // binary trusts the X-Rh-Identity header injected by Envoy.
+const (
+	defaultIngressImageRepo = "quay.io/iop/ingress"
+	defaultIngressImageTag  = "master"
+)
+
+// ingressImage returns repository:tag, defaulting to the chart's insights-ingress-go image.
+func ingressImage(spec costv1alpha1.IngressConfig) string {
+	repo := spec.Image.Repository
+	tag := spec.Image.Tag
+	if repo == "" {
+		repo = defaultIngressImageRepo
+	}
+	if tag == "" {
+		tag = defaultIngressImageTag
+	}
+	return repo + ":" + tag
+}
+
 func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.Ingress
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image := ingressImage(spec)
 	selLabels := SelectorLabels(cfg, "ingress")
 	allLabels := Labels(cfg, "ingress")
 	replicas := int32(1)

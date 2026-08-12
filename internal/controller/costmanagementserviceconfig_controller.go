@@ -54,6 +54,12 @@ type CostManagementServiceConfigReconciler struct {
 // +kubebuilder:rbac:groups=console.openshift.io,resources=consolelinks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// Permissions held so the operator can create the Kruize ClusterRole (RBAC
+// escalation rules require the creator to already hold any granted verbs).
+// +kubebuilder:rbac:groups=core,resources=pods;nodes;endpoints,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=daemonsets;replicasets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metrics.k8s.io,resources=nodes;pods,verbs=get;list
+// +kubebuilder:rbac:groups=custom.metrics.k8s.io,resources=*,verbs=get;list
 
 func (r *CostManagementServiceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)

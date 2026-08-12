@@ -35,13 +35,15 @@ spec:
   costManagement:
     api:
       image:
-        repository: quay.io/martin_povolny/koku
-        tag: "latest"
+        # arm64 CRC: quay.io/martin_povolny/koku:latest
+        # amd64 clusterbot/CI: use cost-mgmt-dev-tenant (multi-arch) below
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
       replicas: 1
     masu:
       image:
-        repository: quay.io/martin_povolny/koku
-        tag: "latest"
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
       replicas: 1
     listener:
       replicas: 2
@@ -80,6 +82,11 @@ spec:
       repository: quay.io/redhat-services-prod/kruize-autotune-tenant/autotune
       tag: "d1f0140"
 
+  ingress:
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
   # Envoy JWT gateway requires a reachable Keycloak/RHBK JWKS endpoint.
   # Without it, gateway pods can become Ready while API calls return 401.
   auth:
@@ -107,7 +114,9 @@ spec:
     #   name: cost-management-ui-oauth-client
     oauthProxy:
       image:
-        repository: registry.access.redhat.com/rhceph/oauth2-proxy-rhel9
+        # Use registry.redhat.io (not registry.access.redhat.com) — access.redhat.com
+        # rejects pulls that require terms acceptance on OpenShift CI/clusterbot.
+        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
         tag: "v7.6.0"
     app:
       image:

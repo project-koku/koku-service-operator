@@ -143,6 +143,11 @@ spec:
       repository: quay.io/redhat-services-prod/kruize-autotune-tenant/autotune
       tag: "d1f0140"
 
+  ingress:
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
   ui:
     replicaCount: 1
     # User-provided OAuth client Secret (keys: client-id, client-secret).

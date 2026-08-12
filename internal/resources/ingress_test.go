@@ -39,7 +39,6 @@ func TestIngressS3EndpointFromDiscovered(t *testing.T) {
 
 func TestIngressS3EndpointDiscoveredTakesPrecedence(t *testing.T) {
 	cfg := ingressCfg()
-	// Spec still has minio…:9000 from ingressCfg(); discovered must win.
 	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{
 		S3: &costv1alpha1.DiscoveredS3{Endpoint: "http://obc-bucket.openshift-storage.svc:443"},
 	}
@@ -156,5 +155,32 @@ func TestIngressDeploymentStorageCredentialEnv(t *testing.T) {
 		if got := byName[name]; got != wantRef {
 			t.Errorf("%s: got %q, want %q", name, got, wantRef)
 		}
+	}
+}
+
+func TestIngressImageDefaults(t *testing.T) {
+	if got := ingressImage(costv1alpha1.IngressConfig{}); got != "quay.io/iop/ingress:master" {
+		t.Fatalf("empty IngressConfig image = %q", got)
+	}
+	cfg := costv1alpha1.IngressConfig{}
+	cfg.Image.Repository = "quay.io/example/ingress"
+	if got := ingressImage(cfg); got != "quay.io/example/ingress:master" {
+		t.Fatalf("repo-only image = %q", got)
+	}
+	cfg.Image.Tag = "v1"
+	if got := ingressImage(cfg); got != "quay.io/example/ingress:v1" {
+		t.Fatalf("full image = %q", got)
+	}
+}
+
+func TestIngressDeploymentUsesDefaultImage(t *testing.T) {
+	cfg := testCfg()
+	dep := IngressDeployment(cfg)
+	if len(dep.Spec.Template.Spec.Containers) == 0 {
+		t.Fatal("no containers")
+	}
+	got := dep.Spec.Template.Spec.Containers[0].Image
+	if got != "quay.io/iop/ingress:master" {
+		t.Fatalf("IngressDeployment image = %q, want default", got)
 	}
 }
