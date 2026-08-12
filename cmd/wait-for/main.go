@@ -27,39 +27,64 @@ func main() {
 	interval := flag.Duration("interval", 2*time.Second, "poll interval")
 	flag.Parse()
 
-	args := flag.Args()
+	if err := run(flag.Args(), *timeout, *interval); err != nil {
+		log.Fatal(err)
+	}
+}
+
+type mode int
+
+const (
+	modeTCP  mode = iota
+	modeHTTP mode = iota
+)
+
+type target struct {
+	mode mode
+	addr string // "host:port" for TCP, URL for HTTP
+}
+
+func parseTarget(args []string) (target, error) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: wait-for [flags] -- host port")
-		fmt.Fprintln(os.Stderr, "       wait-for [flags] http://url")
-		os.Exit(1)
+		return target{}, fmt.Errorf("usage: wait-for [flags] -- host port\n       wait-for [flags] http://url")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	if len(args) == 1 && (strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://")) {
+		return target{mode: modeHTTP, addr: args[0]}, nil
+	}
+
+	if len(args) == 2 {
+		return target{mode: modeTCP, addr: args[0] + ":" + args[1]}, nil
+	}
+
+	return target{}, fmt.Errorf("wait-for: unexpected arguments: %v", args)
+}
+
+func run(args []string, timeout, interval time.Duration) error {
+	t, err := parseTarget(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	opts := []waiter.Option{waiter.WithInterval(*interval)}
+	opts := []waiter.Option{waiter.WithInterval(interval)}
 
-	// HTTP URL: single argument starting with http:// or https://
-	if len(args) == 1 && (strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://")) {
-		log.Printf("waiting for HTTP %s", args[0])
-		checker := httpchecker.New(args[0], httpchecker.WithExpectStatusCode(200))
+	switch t.mode {
+	case modeHTTP:
+		log.Printf("waiting for HTTP %s", t.addr)
+		checker := httpchecker.New(t.addr, httpchecker.WithExpectStatusCode(200))
 		if err := waiter.WaitContext(ctx, checker, opts...); err != nil {
-			log.Fatalf("wait-for: %v", err)
+			return fmt.Errorf("wait-for: %w", err)
 		}
-		return
-	}
-
-	// TCP: two arguments — host and port (no shell joining)
-	if len(args) == 2 {
-		addr := args[0] + ":" + args[1]
-		log.Printf("waiting for TCP %s", addr)
-		checker := tcpchecker.New(addr)
+	case modeTCP:
+		log.Printf("waiting for TCP %s", t.addr)
+		checker := tcpchecker.New(t.addr)
 		if err := waiter.WaitContext(ctx, checker, opts...); err != nil {
-			log.Fatalf("wait-for: %v", err)
+			return fmt.Errorf("wait-for: %w", err)
 		}
-		return
 	}
-
-	fmt.Fprintf(os.Stderr, "wait-for: unexpected arguments: %v\n", args)
-	os.Exit(1)
+	return nil
 }
