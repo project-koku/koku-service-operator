@@ -53,6 +53,7 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		EnvFromSecret("DJANGO_SECRET_KEY", djangoSecret, "secret-key"),
 		EnvVal("SCHEDULE_REPORT_CHECKS", boolStr(costv1alpha1.BoolVal(cfg.Spec.CostManagement.ScheduleReportChecks, true))),
 		EnvVal("REPORT_DOWNLOAD_SCHEDULE", cfg.Spec.CostManagement.ReportDownloadSchedule),
+		EnvVal("RETAIN_NUM_MONTHS", fmt.Sprintf("%d", cfg.Spec.CostManagement.DataRetentionMonths)),
 		EnvVal("RBAC_SERVICE_HOST", NameRBACAPI(cfg)),
 		EnvVal("RBAC_SERVICE_PORT", "8080"),
 		EnvVal("RBAC_SERVICE_PATH", "/api/rbac/v1/access/"),
