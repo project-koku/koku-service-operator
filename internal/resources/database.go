@@ -56,7 +56,8 @@ func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
-					SecurityContext: dbPodSC(),
+					SecurityContext:  dbPodSC(),
+					ImagePullSecrets: imagePullSecrets(cfg),
 					Containers: []corev1.Container{
 						{
 							Name:            "postgres",
@@ -185,23 +186,4 @@ func dbContainerSC() *corev1.SecurityContext {
 		Privileged:               &f,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
-}
-
-// helpers used across multiple builders
-
-func nonRootPodSC() *corev1.PodSecurityContext {
-	nonRoot := true
-	return &corev1.PodSecurityContext{
-		RunAsNonRoot: &nonRoot,
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-	}
-}
-
-func pullPolicy(cfg *costv1alpha1.CostManagementServiceConfig) corev1.PullPolicy {
-	if cfg.Spec.Global.PullPolicy != "" {
-		return cfg.Spec.Global.PullPolicy
-	}
-	return corev1.PullIfNotPresent
 }

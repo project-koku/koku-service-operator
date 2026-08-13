@@ -50,6 +50,13 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		EnvVal("REQUESTED_ROS_BUCKET", cfg.Spec.CostManagement.Storage.ROSBucketName),
 		EnvVal("AWS_CA_BUNDLE", "/etc/pki/ca-trust/combined/ca-bundle.crt"),
 		EnvVal("REQUESTS_CA_BUNDLE", "/etc/pki/ca-trust/combined/ca-bundle.crt"),
+		// Koku EnvConfigurator reads S3_ACCESS_KEY / S3_SECRET into settings.S3_*
+		// (see koku/koku/configurator.py). Masu builds S3 clients from those
+		// settings explicitly — AWS_* alone is not enough.
+		EnvFromSecretOptional("S3_ACCESS_KEY", storageSecret, "access-key"),
+		EnvFromSecretOptional("S3_SECRET", storageSecret, "secret-key"),
+		// Also set the standard AWS SDK names for boto3's default credential
+		// chain and any code that does not go through settings.S3_*.
 		EnvFromSecretOptional("AWS_ACCESS_KEY_ID", storageSecret, "access-key"),
 		EnvFromSecretOptional("AWS_SECRET_ACCESS_KEY", storageSecret, "secret-key"),
 		EnvVal("S3_REGION", cfg.Spec.ObjectStorage.S3.Region),

@@ -18,7 +18,7 @@ import (
 // rosCleanupObjects returns every ROS/Kruize object the operator creates.
 // Used to tear the stack down when spec.ros.enabled flips to false.
 func rosCleanupObjects(cfg *costv1alpha1.CostManagementServiceConfig) []client.Object {
-	return []client.Object{
+	objs := []client.Object{
 		// Cluster-scoped (no ownerRef — must delete explicitly).
 		resources.KruizeClusterRoleBinding(cfg),
 		resources.KruizeClusterRole(cfg),
@@ -40,7 +40,6 @@ func rosCleanupObjects(cfg *costv1alpha1.CostManagementServiceConfig) []client.O
 		resources.ROSHousekeeperDeployment(cfg),
 		resources.ROSPartitionCleanerCronJob(cfg),
 		resources.CdappConfigMap(cfg),
-		resources.ROSServiceAccount(cfg),
 
 		// Completed ROS migration Job (if any).
 		&batchv1.Job{
@@ -50,6 +49,11 @@ func rosCleanupObjects(cfg *costv1alpha1.CostManagementServiceConfig) []client.O
 			},
 		},
 	}
+	// Only delete the ROS ServiceAccount when the operator created it.
+	if costv1alpha1.BoolVal(cfg.Spec.ROS.ServiceAccount.Create, true) {
+		objs = append(objs, resources.ROSServiceAccount(cfg))
+	}
+	return objs
 }
 
 // reconcileROSFeature is reconciler policy bookkeeping, not a provisioning

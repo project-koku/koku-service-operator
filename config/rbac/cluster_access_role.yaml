@@ -1,0 +1,34 @@
+# Minimal ClusterRole for resources that are genuinely cluster-scoped (or a
+# single cross-namespace read). Bound via ClusterRoleBinding.
+#
+# Namespace-scoped manage rights (Secrets, Jobs, Deployments, …) are NOT here —
+# they come from manager-role bound with a namespaced RoleBinding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-cluster-role
+  labels:
+    app.kubernetes.io/name: koku-service-operator
+    app.kubernetes.io/managed-by: kustomize
+rules:
+# Discovery: OpenShift ingress domain + default StorageClass.
+- apiGroups: [config.openshift.io]
+  resources: [ingresses]
+  verbs: [get]
+- apiGroups: [storage.k8s.io]
+  resources: [storageclasses]
+  verbs: [get, list]
+# UI Application Menu entry.
+- apiGroups: [console.openshift.io]
+  resources: [consolelinks]
+  verbs: [create, delete, get, patch, update]
+# Kruize workload monitoring. list/watch omitted — SSA Patch; Get for delete.
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [clusterroles, clusterrolebindings]
+  verbs: [create, delete, get, patch, update]
+# NooBaa discovery: read only the named admin Secret (any namespace with that
+# name — typically openshift-storage). Not a blanket secrets grant.
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [noobaa-admin]
+  verbs: [get]

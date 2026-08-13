@@ -128,6 +128,19 @@ func RBACAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 }
 
 // -----------------------------------------------------------------------------
+// ROS API
+// -----------------------------------------------------------------------------
+
+// ROSAPINetworkPolicy restricts ingress to the ROS API to the Envoy gateway only.
+// Without this, any pod in the namespace can reach ros-api:8000 directly,
+// bypassing the Envoy JWT authentication layer entirely.
+func ROSAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	return netpol(cfg, cfg.Name+"-ros-api", "ros-api", []networkingv1.NetworkPolicyIngressRule{
+		podFrom(cfg, "gateway", rosAPIPort),
+	})
+}
+
+// -----------------------------------------------------------------------------
 // Koku API
 // -----------------------------------------------------------------------------
 

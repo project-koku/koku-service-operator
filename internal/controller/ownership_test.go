@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
 // ownershipScheme registers all types needed for ownership tests.
@@ -129,11 +130,14 @@ func TestReconcileDelete_RemovesClusterScopedResourcesAndFinalizer(t *testing.T)
 	controllerutil.AddFinalizer(cr, finalizerName)
 
 	// Pre-create the ClusterRole and ClusterRoleBinding that Kruize creates.
+	// Use resources.NameKruizeClusterRole so the test follows the real naming
+	// function (which includes a namespace hash since the F1 fix).
+	kruizeName := resources.NameKruizeClusterRole(cr)
 	kruizeCR := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{Name: testCRName + "-kruize"},
+		ObjectMeta: metav1.ObjectMeta{Name: kruizeName},
 	}
 	kruizeCRB := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: testCRName + "-kruize"},
+		ObjectMeta: metav1.ObjectMeta{Name: kruizeName},
 	}
 
 	now := metav1.Now()
@@ -166,12 +170,12 @@ func TestReconcileDelete_RemovesClusterScopedResourcesAndFinalizer(t *testing.T)
 	// err == NotFound is also acceptable (fake client deleted it after last finalizer removed).
 
 	// ClusterRole should be gone.
-	if err := c.Get(context.Background(), types.NamespacedName{Name: testCRName + "-kruize"}, &rbacv1.ClusterRole{}); err == nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: kruizeName}, &rbacv1.ClusterRole{}); err == nil {
 		t.Error("KruizeClusterRole should have been deleted")
 	}
 
 	// ClusterRoleBinding should be gone.
-	if err := c.Get(context.Background(), types.NamespacedName{Name: testCRName + "-kruize"}, &rbacv1.ClusterRoleBinding{}); err == nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: kruizeName}, &rbacv1.ClusterRoleBinding{}); err == nil {
 		t.Error("KruizeClusterRoleBinding should have been deleted")
 	}
 }

@@ -112,6 +112,14 @@ func DatabaseHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Spec.Database.Host
 }
 
+// cachePortStr returns the cache port as a string, defaulting to "6379".
+func cachePortStr(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if cfg.Spec.Cache.Port != 0 {
+		return int32String(cfg.Spec.Cache.Port)
+	}
+	return "6379"
+}
+
 // CacheHost returns the hostname of the Valkey/Redis instance.
 func CacheHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
@@ -120,9 +128,18 @@ func CacheHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Spec.Cache.Host
 }
 
-// KafkaHost parses the bootstrap servers string and returns just the hostname.
+// firstBroker returns the first broker from a comma-separated bootstrap servers
+// string. "a:9092,b:9093" → "a:9092".
+func firstBroker(bootstrapServers string) string {
+	first, _, _ := strings.Cut(bootstrapServers, ",")
+	return first
+}
+
+// KafkaHost returns the hostname of the first Kafka broker.
+// BootstrapServers may be comma-separated ("a:9092,b:9092"); only the first
+// broker is used for template values that need a single host string.
 func KafkaHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	bs := cfg.Spec.Kafka.BootstrapServers
+	bs := firstBroker(cfg.Spec.Kafka.BootstrapServers)
 	for i := len(bs) - 1; i >= 0; i-- {
 		if bs[i] == ':' {
 			return bs[:i]
@@ -131,9 +148,9 @@ func KafkaHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return bs
 }
 
-// KafkaPort parses the bootstrap servers string and returns just the port.
+// KafkaPort returns the port of the first Kafka broker.
 func KafkaPort(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	bs := cfg.Spec.Kafka.BootstrapServers
+	bs := firstBroker(cfg.Spec.Kafka.BootstrapServers)
 	for i := len(bs) - 1; i >= 0; i-- {
 		if bs[i] == ':' {
 			return bs[i+1:]

@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 
@@ -25,8 +26,13 @@ func NameKruizeConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
 }
 
 // NameKruizeClusterRole returns the ClusterRole name for Kruize.
+// Format: "{crName}-kruize-{nsHash8}" where nsHash8 is the first 4 bytes
+// (8 hex chars) of sha256(namespace). This keeps the CR name readable in
+// `kubectl get clusterrole` while ensuring uniqueness across namespaces
+// and staying well under the 253-char Kubernetes name limit.
 func NameKruizeClusterRole(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	return cfg.Name + "-kruize"
+	h := sha256.Sum256([]byte(cfg.Namespace))
+	return fmt.Sprintf("%s-kruize-%x", cfg.Name, h[:4])
 }
 
 // NameKruizeServiceAccount returns the Kruize service account name.
@@ -55,7 +61,7 @@ func KruizeClusterRole(cfg *costv1alpha1.CostManagementServiceConfig) *rbacv1.Cl
 			Labels: Labels(cfg, "ros-optimization"),
 		},
 		Rules: []rbacv1.PolicyRule{
-			{APIGroups: []string{""}, Resources: []string{"pods", "services", "configmaps", "secrets", "nodes", "endpoints"}, Verbs: []string{"get", "list", "watch"}},
+			{APIGroups: []string{""}, Resources: []string{"pods", "services", "configmaps", "nodes", "endpoints"}, Verbs: []string{"get", "list", "watch"}},
 			{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets", "statefulsets", "daemonsets"}, Verbs: []string{"get", "list", "watch"}},
 			{APIGroups: []string{"metrics.k8s.io"}, Resources: []string{"nodes", "pods"}, Verbs: []string{"get", "list"}},
 			{APIGroups: []string{"custom.metrics.k8s.io"}, Resources: []string{"*"}, Verbs: []string{"get", "list"}},
@@ -250,6 +256,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 				Spec: corev1.PodSpec{
 					ServiceAccountName: NameKruizeServiceAccount(cfg),
 					SecurityContext:    nonRootPodSC(),
+					ImagePullSecrets:   imagePullSecrets(cfg),
 					InitContainers:     initContainers,
 					Containers: []corev1.Container{{
 						Name:            "kruize",
@@ -329,8 +336,9 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, "ros-optimization-maintenance")},
 						Spec: corev1.PodSpec{
-							RestartPolicy:   onFailure,
-							SecurityContext: nonRootPodSC(),
+							RestartPolicy:    onFailure,
+							SecurityContext:  nonRootPodSC(),
+							ImagePullSecrets: imagePullSecrets(cfg),
 							Containers: []corev1.Container{{
 								Name:            "delete-kruize-partitions",
 								Image:           image,

@@ -140,6 +140,7 @@ spec:
                         - cost-management-ui
                         description: JWT audiences accepted by the gateway.
                         items:
+                          pattern: ^[^\x00-\x1f\x7f]*$
                           type: string
                         type: array
                       issuerURL:
@@ -149,12 +150,14 @@ spec:
                           as iss even when clients obtain them via the in-cluster Service — set
                           this to that frontend base URL (or the full .../realms/<realm> issuer).
                           When empty, issuer is derived from url + realm.
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                       namespace:
                         description: Keycloak namespace. Defaults to "keycloak".
                         type: string
                       realm:
                         default: kubernetes
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                       tls:
                         properties:
@@ -177,34 +180,25 @@ spec:
                           issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
                           can reach JWKS without depending on the OpenShift router.
                           Example: http://keycloak-service.keycloak.svc.cluster.local:8080
+                        pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                     type: object
                   realmUsers:
                     items:
                       description: |-
-                        RealmUser defines an initial Keycloak user created by the operator.
-                        NOTE: do not put production credentials here — the Password field is stored
-                        in etcd. Use a Secret reference instead once secret-backed user provisioning
-                        is implemented (COST-7694).
+                        RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
+                        is bootstrapped into the RBAC database by AdminBootstrapJob.
+                        Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
                       properties:
                         accountNumber:
-                          type: string
-                        email:
-                          type: string
-                        firstName:
-                          type: string
-                        lastName:
                           type: string
                         orgAdmin:
                           type: boolean
                         orgId:
                           type: string
-                        password:
-                          type: string
                         username:
                           type: string
                       required:
-                      - password
                       - username
                       type: object
                     type: array
@@ -1333,8 +1327,15 @@ spec:
                     properties:
                       create:
                         default: true
+                        description: |-
+                          Create controls whether the operator creates and owns the ServiceAccount.
+                          When false, the operator references Name (or the default name) without
+                          applying or adopting the object — the SA must already exist.
                         type: boolean
                       name:
+                        description: |-
+                          Name is the ServiceAccount name used by pods. When empty, a default
+                          name derived from the CR is used.
                         type: string
                     type: object
                   storage:
@@ -1465,26 +1466,10 @@ spec:
                     additionalProperties:
                       type: string
                     type: object
-                  hosts:
-                    items:
-                      properties:
-                        host:
-                          description: Empty host uses the cluster's default ingress
-                            domain.
-                          type: string
-                        paths:
-                          items:
-                            properties:
-                              path:
-                                default: /
-                                type: string
-                              pathType:
-                                default: Prefix
-                                type: string
-                            type: object
-                          type: array
-                      type: object
-                    type: array
+                  host:
+                    description: Custom hostname for the OpenShift Route. Leave empty
+                      to derive from clusterDomain.
+                    type: string
                   tls:
                     properties:
                       insecureEdgeTerminationPolicy:
@@ -1512,6 +1497,9 @@ spec:
                       Auto-detected by the Discovery phase when empty.
                     type: string
                   imagePullSecrets:
+                    description: |-
+                      ImagePullSecrets are applied to every Pod the operator creates (Deployments,
+                      StatefulSets, Jobs, CronJobs) so workloads can pull from private registries.
                     items:
                       description: |-
                         LocalObjectReference contains enough information to let you locate the
@@ -1867,11 +1855,12 @@ spec:
                 type: object
               profile:
                 default: standard
-                description: Profile selects pre-defined resource sizing. Defaults
-                  to standard.
+                description: |-
+                  Profile selects pre-defined resource sizing. Defaults to standard.
+                  NOT YET IMPLEMENTED — accepted but not read by the reconciler (COST-7678).
+                  Use per-component resources fields until profile sizing is wired.
                 enum:
                 - standard
-                - ha
                 type: string
               rbac:
                 properties:
@@ -2480,8 +2469,15 @@ spec:
                     properties:
                       create:
                         default: true
+                        description: |-
+                          Create controls whether the operator creates and owns the ServiceAccount.
+                          When false, the operator references Name (or the default name) without
+                          applying or adopting the object — the SA must already exist.
                         type: boolean
                       name:
+                        description: |-
+                          Name is the ServiceAccount name used by pods. When empty, a default
+                          name derived from the CR is used.
                         type: string
                     type: object
                 type: object

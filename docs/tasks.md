@@ -14,7 +14,7 @@ Last audited: 2026-08-09 against implementation in `internal/controller/` and `i
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | 🔄 | `*bool` for 12 defaulted fields ✅, `metav1.Condition` replacing `ComponentStatuses` ✅, `DiscoveredConfig` in status ✅, `Profile` enum (standard/ha) ✅, phase names fixed (Pending/Progressing/Ready/Degraded) ✅, Django key charset ✅. File split skipped intentionally (see design doc §3). Missing: webhooks (`defaults.go`, `validation.go`). |
+| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | 🔄 | `*bool` for 12 defaulted fields ✅, `metav1.Condition` replacing `ComponentStatuses` ✅, `DiscoveredConfig` in status ✅, `Profile` enum (standard only; `ha` removed until sizing maps are implemented) ✅, phase names fixed (Pending/Progressing/Ready/Degraded) ✅, Django key charset ✅. File split skipped intentionally (see design doc §3). Missing: webhooks (`defaults.go`, `validation.go`), **profile-based sizing** (`spec.profile` is accepted but not read by the reconciler — the Helm chart's 4 sizing overlays need operator equivalents; use per-component `resources` fields until then). |
 | [COST-7679](https://redhat.atlassian.net/browse/COST-7679) | Create sample CRs and generate manifests | 🔄 | Bundled CR ✅, BYOI CR ✅, BYOI kustomize fixture ✅, CRD installs on CRC ✅. Missing: HA profile sample, CEL validation verified. |
 
 ## Reconciler Core
@@ -56,7 +56,7 @@ Last audited: 2026-08-09 against implementation in `internal/controller/` and `i
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7695](https://redhat.atlassian.net/browse/COST-7695) | Create OLM bundle | 🔄 | `make bundle` target wired, `PROJECT` file and `config/manifests/` kustomize bases present. Bundle not yet generated; CSV not written; `operator-sdk bundle validate` not yet run. |
+| [COST-7695](https://redhat.atlassian.net/browse/COST-7695) | Create OLM bundle | 🔄 | Channel `beta`, CSV base polished, generated `bundle/` validates. Makefile: `bundle`, `bundle-build`, `bundle-push`, `bundle-run`, `bundle-cleanup`. Remaining: commit/PR review; optional `minKubeVersion`. |
 | [COST-7696](https://redhat.atlassian.net/browse/COST-7696) | Build CI pipeline for bundle | ❌ | GitHub Actions CI with lint/build/test/check-generated/container-build ✅. Missing: bundle validation, scorecard tests, CatalogSource, OLM install verification. |
 | [COST-7697](https://redhat.atlassian.net/browse/COST-7697) | Adapt existing E2E suite for operator | ❌ | |
 | [COST-7698](https://redhat.atlassian.net/browse/COST-7698) | Implement operator-specific E2E scenarios | ❌ | Unit tests for discovery, ownership, migration pipeline present. Full operator E2E not written. |
@@ -77,6 +77,18 @@ remains tracked under COST-7686 / COST-7687 for post-Beta.
 
 See [docs/design/design-vs-jira.md](design/design-vs-jira.md) for the full analysis.
 Short version: bundled infra is dev-only (intentional), profile-based sizing is not yet implemented (COST-7693 gap), `RealmUser.Password` in spec is a security issue to fix pre-GA.
+
+---
+
+## Technical Debt
+
+| Item | Notes |
+|------|-------|
+| **waitForTCP Go binary** | Implemented in `cmd/wait-for/` using wait4x.dev/v3. See `docs/design/wait-for-patterns.md` for rationale. |
+| **Image digest pinning** | Tags are mutable; pin to `tag@sha256:digest` for Dependabot tracking. Priority: before GA. See [review follow-ups](review-follow-ups.md#2-image-digest-pinning). |
+| **`relatedImages` in OLM bundle** | Runtime-constructed images not in CSV `relatedImages`; breaks airgapped deployments. COST-7695. See [review follow-ups](review-follow-ups.md#3-relatedimages-in-olm-bundle-cost-7695). |
+| **RBAC migration/bootstrap code provenance** | Heredoc-embedded Django ORM scripts fail code-provenance audit. Needs `insights-rbac` management commands. See [review follow-ups](review-follow-ups.md#4-rbac-migrationbootstrap-code-provenance). |
+| **`ResolveBootstrapAdmin` fallback values** | Silently substitutes test-fixture IDs (`org1234567`) when CR fields are empty. Pre-existing. See [review follow-ups](review-follow-ups.md#1-resolvebootstrapadmin-silently-substitutes-test-fixture-ids). |
 
 ---
 

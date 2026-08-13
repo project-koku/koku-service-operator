@@ -64,8 +64,10 @@ linters:
         path: internal/controller/
       - linters: [lll]
         path: cmd/
-      # Test files: relax errcheck, gosec, and unparam
-      - linters: [errcheck, gosec, unparam]
+      # Test files: relax errcheck, gosec, unparam, and goconst.
+      # Repeated string literals in test data are intentional — they are the
+      # actual values under test, not code duplication.
+      - linters: [errcheck, gosec, unparam, goconst, gocyclo]
         path: _test\.go
       # test/utils uses kubectl exec with variable args by design
       - linters: [gosec]
@@ -74,6 +76,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - zz_generated\.
 
 formatters:
   enable:
@@ -85,3 +88,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - zz_generated\.

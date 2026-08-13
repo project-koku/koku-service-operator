@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -100,6 +101,13 @@ func serviceFQDN(name, namespace string) string {
 	return name + "." + namespace + ".svc.cluster.local"
 }
 
+// envoyConfigHash returns a short SHA-256 digest of the rendered envoy.yaml.
+// Embedded in the pod template so ConfigMap changes trigger a rolling restart.
+func envoyConfigHash(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	h := sha256.Sum256([]byte(EnvoyYAML(cfg)))
+	return fmt.Sprintf("%x", h[:8])
+}
+
 // EnvoyConfigMap builds the ConfigMap containing envoy.yaml.
 func EnvoyConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
@@ -167,10 +175,20 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: sel},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: all},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: all,
+					// Hash of the rendered envoy.yaml content so that ConfigMap
+					// changes (e.g. OIDC issuer URL update) trigger a rolling restart.
+					// Envoy reads its config at startup only (static --config flag),
+					// so a pod restart is the correct mechanism for config propagation.
+					Annotations: map[string]string{
+						"koku.costmanagement.io/envoy-config-hash": envoyConfigHash(cfg),
+					},
+				},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
+					ImagePullSecrets:             imagePullSecrets(cfg),
 					InitContainers: []corev1.Container{
 						CACombineInitContainer(cfg),
 					},
@@ -214,55 +232,101 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 						Resources:       cfg.Spec.Auth.Envoy.Resources,
 						SecurityContext: restrictedContainerSC(),
 					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: "envoy-config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: NameEnvoyConfigMap(cfg)},
-									Items:                []corev1.KeyToPath{{Key: "envoy.yaml", Path: "envoy.yaml"}},
-								},
-							},
-						},
-						{
-							Name: "ca-scripts",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: NameCACombineConfigMap(cfg)},
-									Items: []corev1.KeyToPath{
-										{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: int32Ptr(0755)},
-									},
-								},
-							},
-						},
-						{
-							Name: "ca-source",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: NameServiceCAConfigMap(cfg)},
-								},
-							},
-						},
-						{Name: "combined-ca-bundle", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-					},
+					Volumes: envoyVolumes(cfg),
 				},
 			},
 		},
 	}
 }
 
+// envoyVolumes builds the volume list for the Envoy Deployment.
+// When auth.keycloak.tls.caCertSecretName is set, the named Secret is added
+// as an extra ca-source so CACombineInitContainer merges its CA into the
+// bundle that Envoy uses for JWKS endpoint TLS verification. Without this,
+// Envoy cannot verify Keycloak Route certificates signed by the router CA.
+func envoyVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume {
+	vols := []corev1.Volume{
+		{
+			Name: "envoy-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: NameEnvoyConfigMap(cfg)},
+					Items:                []corev1.KeyToPath{{Key: "envoy.yaml", Path: "envoy.yaml"}},
+				},
+			},
+		},
+		{
+			Name: "ca-scripts",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: NameCACombineConfigMap(cfg)},
+					Items: []corev1.KeyToPath{
+						{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: int32Ptr(0755)},
+					},
+				},
+			},
+		},
+		{
+			Name: "ca-source",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: NameServiceCAConfigMap(cfg)},
+				},
+			},
+		},
+		{Name: "combined-ca-bundle", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
+	if secret := cfg.Spec.Auth.Keycloak.TLS.CACertSecretName; secret != "" {
+		vols = append(vols, corev1.Volume{
+			Name: "keycloak-ca",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: secret,
+					Items:      []corev1.KeyToPath{{Key: "ca.crt", Path: "keycloak-ca.crt"}},
+				},
+			},
+		})
+	}
+	return vols
+}
+
+// yamlScalar returns a YAML-safe representation of s for inline embedding.
+// Two classes of characters break plain YAML scalars:
+//   - Line-break characters (\n, \r, \x00): break out of the current line and
+//     allow the remainder to be parsed as new YAML structure (injection).
+//   - Colon+space/tab/end-of-value (": ", ":\t", or trailing ":"): YAML treats
+//     this as a mapping-value indicator even inside a scalar — silently changes
+//     the type of a list entry to a mapping, or causes a parse error in a scalar
+//     position. A trailing colon triggers this because the template always places
+//     a newline immediately after each interpolated value.
+//
+// Affected strings are double-quoted using strconv.Quote, which escapes all
+// control characters as \n, \r, \x00, etc. Everything else is returned as-is.
+func yamlScalar(s string) string {
+	for i, c := range s {
+		switch {
+		case c == '\n' || c == '\r' || c == '\x00':
+			return strconv.Quote(s)
+		case c == ':' && (i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t'):
+			return strconv.Quote(s)
+		}
+	}
+	return s
+}
+
 // EnvoyYAML renders the Envoy static config from the CR (ported from the Helm chart).
 // Uses token replacement (not fmt.Sprintf) so Lua source with %s is left intact.
 func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	issuer := KeycloakIssuerURL(cfg)
-	jwks := KeycloakJWKSURL(cfg)
+	issuer := yamlScalar(KeycloakIssuerURL(cfg))
+	jwks := yamlScalar(KeycloakJWKSURL(cfg))
 	kcHost, kcPort, useTLS := keycloakHostPort(cfg)
+	kcHost = yamlScalar(kcHost)
 
 	var audYAML strings.Builder
 	for _, a := range KeycloakAudiences(cfg) {
 		audYAML.WriteString("                        - ")
-		audYAML.WriteString(a)
+		audYAML.WriteString(yamlScalar(a))
 		audYAML.WriteByte('\n')
 	}
 

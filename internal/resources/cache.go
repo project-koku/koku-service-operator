@@ -43,7 +43,8 @@ func CacheDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
-					SecurityContext: cachePodSC(),
+					SecurityContext:  cachePodSC(),
+					ImagePullSecrets: imagePullSecrets(cfg),
 					Containers: []corev1.Container{
 						{
 							Name:            "valkey",

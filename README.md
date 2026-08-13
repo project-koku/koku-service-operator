@@ -1,6 +1,6 @@
 # koku-service-operator
 
-[![CI](https://github.com/martinpovolny/koku-service-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/martinpovolny/koku-service-operator/actions/workflows/ci.yml)
+[![CI](https://github.com/project-koku/koku-service-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/project-koku/koku-service-operator/actions/workflows/ci.yml)
 
 Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift.
 Users install via OLM, apply a single `CostManagementServiceConfig` CR, and the
@@ -12,6 +12,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | Document | Description |
 |----------|-------------|
 | [docs/development/crc-testing.md](docs/development/crc-testing.md) | Local development and CRC testing guide |
+| [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
 | [docs/tasks.md](docs/tasks.md) | Implementation status per JIRA ticket |
 | [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) | Design decisions and Kubernetes best-practice analysis |
 | [docs/jira/](docs/jira/) | JIRA ticket source (COST-7678–7700) |
@@ -37,7 +38,7 @@ running against a local CRC cluster.
 | CRD name | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
 | Short name | `cmsc` |
 | `apiVersion` in CR | `service.costmanagement.openshift.io/v1alpha1` |
-| Operator namespace | `koku-service-operator-system` |
+| Operator install model | OwnNamespace — operator NS == CR NS ([docs](docs/development/ownnamespace.md)); `make deploy` scaffold NS is `koku-service-operator-system` |
 | Field manager | `koku-service-operator` |
 | Leader election ID | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
 | Finalizer | `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` |

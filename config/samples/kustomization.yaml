@@ -1,8 +1,10 @@
 ## Append samples of your project ##
 resources:
 - service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
-- service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
+# Both samples use metadata.name: cost-management, so only one can be listed here.
+# - service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
+#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
 #   kubectl apply -k config/samples/byoi/infra
 #   kubectl apply -k config/samples/byoi/app
 # See byoi/README.md.

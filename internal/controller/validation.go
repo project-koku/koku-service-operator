@@ -20,6 +20,24 @@ import (
 
 const validationTimeout = 5 * time.Second
 
+// accessKeyKey would be less readable than the key name itself.
+//
+//nolint:goconst // Secret key names are intentionally literal — a constant like
+var (
+	// s3SecretKeys are the required keys in an objectStorage Secret.
+	s3SecretKeys = []string{"access-key", "secret-key"}
+
+	// dbSecretKeys lists the credential keys the operator expects in an
+	// externally-provided database Secret (spec.database.secretName).
+	dbSecretKeys = []string{
+		"postgres-user", "postgres-password",
+		"koku-user", "koku-password",
+		"ros-user", "ros-password",
+		"rbac-user", "rbac-password",
+		"kruize-user", "kruize-password",
+	}
+)
+
 // reconcileValidation probes all external dependencies and validates referenced
 // Secrets before the migration gate. DB and Cache failures block the pipeline;
 // Kafka and OIDC set conditions without blocking (init containers inside pods
@@ -43,12 +61,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		} else {
 			// Validate secret keys when the user provided their own secret.
 			if cfg.Spec.Database.SecretName != "" {
-				required := []string{
-					"postgres-user", "postgres-password",
-					"koku-user", "koku-password",
-					"ros-user", "ros-password",
-					"rbac-user", "rbac-password",
-				}
+				required := dbSecretKeys
 				if err := r.checkSecretKeys(ctx, cfg.Namespace, cfg.Spec.Database.SecretName, required); err != nil {
 					r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
 						"DatabaseSecretInvalid", err.Error())
@@ -114,6 +127,20 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		}
 	}
 
+	// --- S3 / ObjectStorage (non-blocking; only when user explicitly names a Secret) ---
+	// When secretName is auto-detected via OBC/NooBaa (discovery stage), this
+	// check is skipped. When the user provides their own secretName, validate it
+	// has the required keys so errors are surfaced early rather than at S3 access time.
+	if sn := cfg.Spec.ObjectStorage.SecretName; sn != "" {
+		if err := r.checkSecretKeys(ctx, cfg.Namespace, sn, s3SecretKeys); err != nil {
+			r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
+				"StorageSecretInvalid", err.Error())
+		} else {
+			r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionTrue,
+				"StorageSecretValid", fmt.Sprintf("secret %q has required keys", sn))
+		}
+	}
+
 	// --- OIDC / Keycloak (non-blocking; skipped when URL not explicitly set) ---
 	if u := strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL); u != "" {
 		jwksURL := resources.KeycloakJWKSURL(cfg)
@@ -164,7 +191,10 @@ func kafkaTCPProbe(bootstrapServers string, timeout time.Duration) error {
 	return fmt.Errorf("bootstrap-servers %q is empty", bootstrapServers)
 }
 
-// httpProbe performs a GET to rawURL and returns nil for any response below HTTP 500.
+// httpProbe performs a GET to rawURL and returns nil only for 2xx responses.
+// 4xx responses are also treated as errors: a 401/403 means the endpoint
+// exists but is misconfigured; a 404 means the JWKS URL or realm is wrong.
+// Both indicate the OIDC provider is not usable, not that it is healthy.
 func httpProbe(rawURL string, insecureSkipVerify bool, timeout time.Duration) error {
 	base, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -191,8 +221,8 @@ func httpProbe(rawURL string, insecureSkipVerify bool, timeout time.Duration) er
 	}
 	_ = resp.Body.Close()
 	transport.CloseIdleConnections()
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("server returned HTTP %d", resp.StatusCode)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected HTTP status %d (want 2xx)", resp.StatusCode)
 	}
 	return nil
 }

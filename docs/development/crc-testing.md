@@ -46,21 +46,31 @@ oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
 ./hack/deploy-crc.sh cost-onprem
 ```
 
-This script installs the CRD and grants the `default` ServiceAccount
-`cluster-admin` in the target namespace. Run it once per CRC restart.
+This script installs the CRD and OwnNamespace RBAC: `manager-role` via a
+**RoleBinding** in the target namespace, plus `manager-cluster-role` via a
+**ClusterRoleBinding** (StorageClass/Ingress discovery, ConsoleLink, Kruize,
+narrow NooBaa `noobaa-admin` Secret get). Run it once per CRC restart.
 
 Alternatively, do it manually:
 
 ```bash
 oc new-project cost-onprem
-make manifests
-oc apply -f config/crd/bases/
-oc adm policy add-cluster-role-to-user cluster-admin \
-  system:serviceaccount:cost-onprem:default
+make install   # regenerates manifests and applies CRDs via config/crd kustomize
+oc apply -f config/rbac/role.yaml
+oc apply -f config/rbac/cluster_access_role.yaml
+oc create rolebinding koku-operator-dev \
+  --clusterrole=manager-role \
+  --serviceaccount=cost-onprem:default \
+  -n cost-onprem
+oc create clusterrolebinding koku-operator-dev-cluster \
+  --clusterrole=manager-cluster-role \
+  --serviceaccount=cost-onprem:default
 oc adm policy add-scc-to-user anyuid -z default -n cost-onprem
 ```
 
 ## Run the operator
+
+OwnNamespace requires a watch namespace. Prefer `NAMESPACE=… make run`, or:
 
 ```bash
 NAMESPACE=cost-onprem go run ./cmd/main.go --dev \
@@ -69,7 +79,8 @@ NAMESPACE=cost-onprem go run ./cmd/main.go --dev \
 ```
 
 The operator reads `~/.kube/config` (set by `eval "$(crc oc-env)"`) and
-watches the `cost-onprem` namespace.
+restricts its informer cache to the `cost-onprem` namespace. See
+[ownnamespace.md](ownnamespace.md).
 
 ## Apply a sample CR
 

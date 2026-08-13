@@ -145,16 +145,7 @@ func WaitForValkeyInitContainer(cfg *costv1alpha1.CostManagementServiceConfig) c
 	if cfg.Spec.Cache.Port != 0 {
 		port = int32String(cfg.Spec.Cache.Port)
 	}
-	return corev1.Container{
-		Name:  "wait-for-valkey",
-		Image: UBIMinimalImage,
-		// Use bash /dev/tcp — available in ubi-minimal without nc/ncat.
-		Command: []string{
-			"bash", "-c",
-			`until bash -c "echo >/dev/tcp/` + host + `/` + port + `" 2>/dev/null; do echo 'waiting for valkey'; sleep 2; done`,
-		},
-		SecurityContext: ubiMinimalInitSC(),
-	}
+	return waitForTCP("wait-for-valkey", host, port)
 }
 
 // kokuAppContainerSC is used for koku application containers (API, Masu,

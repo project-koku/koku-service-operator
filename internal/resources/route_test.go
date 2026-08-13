@@ -10,7 +10,7 @@ import (
 
 func TestGatewayAPIHostExplicit(t *testing.T) {
 	cfg := testCfg()
-	cfg.Spec.GatewayRoute.Hosts = []costv1alpha1.RouteHostSpec{{Host: "api.example.com"}}
+	cfg.Spec.GatewayRoute.Host = "api.example.com"
 	host, ok := GatewayAPIHost(cfg)
 	if !ok || host != "api.example.com" {
 		t.Errorf("GatewayAPIHost = %q, %v; want api.example.com, true", host, ok)
@@ -85,7 +85,7 @@ func TestGatewayAPIRouteSpec(t *testing.T) {
 
 func TestGatewayAPIRouteTLSOverrides(t *testing.T) {
 	cfg := testCfg()
-	cfg.Spec.GatewayRoute.Hosts = []costv1alpha1.RouteHostSpec{{Host: "api.example.com"}}
+	cfg.Spec.GatewayRoute.Host = "api.example.com"
 	cfg.Spec.GatewayRoute.TLS = costv1alpha1.RouteTLSSpec{
 		Termination:                   "reencrypt",
 		InsecureEdgeTerminationPolicy: "Allow",

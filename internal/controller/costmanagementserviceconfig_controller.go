@@ -34,8 +34,11 @@ const (
 
 type CostManagementServiceConfigReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	// APIReader is an uncached client for cross-namespace reads (e.g. NooBaa
+	// admin Secret in openshift-storage) that are outside Cache.DefaultNamespaces.
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Recorder  record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=service.costmanagement.openshift.io,resources=costmanagementserviceconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -47,13 +50,13 @@ type CostManagementServiceConfigReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings;roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get
-// +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=console.openshift.io,resources=consolelinks,verbs=get;list;watch;create;update;patch;delete
+// Namespace-scoped RBAC objects (Role + RoleBinding) — granted via RoleBinding.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// Cluster-scoped resources (ingresses, storageclasses, consolelinks, clusterroles,
+// clusterrolebindings, noobaa-admin secret) live in cluster_access_role.yaml
+// (hand-maintained, bound via ClusterRoleBinding) — not here.
 
 func (r *CostManagementServiceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -131,17 +134,12 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 //  6. Workers (Celery, ROS, Kruize)
 //  7. Edge (Envoy gateway, UI, Route)
 func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (ctrl.Result, error) {
+	// Capture the phase before overwriting it so we can detect the
+	// first Ready transition at the end of this pass.
+	priorPhase := cfg.Status.Phase
 	cfg.Status.ObservedGeneration = cfg.Generation
 	cfg.Status.Phase = costv1alpha1.PhaseProgressing
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
-
-	// Policy bookkeeping (not a provisioning stage): surface ROSEnabled and
-	// tear down leftover ROS/Kruize objects when the feature is disabled.
-	if err := r.reconcileROSFeature(ctx, cfg); err != nil {
-		applyPhaseError(cfg, err)
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
-		return ctrl.Result{RequeueAfter: requeueSlow}, err
-	}
 
 	result, err := runPhases([]PhaseFn{
 		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
@@ -156,7 +154,13 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	})
 
 	if err != nil {
+		// applyPhaseError handles structured PhaseError (condition + phase from err).
 		applyPhaseError(cfg, err)
+		// For any error (structured or plain), ensure Degraded is visible in status.
+		// Without this, plain fmt.Errorf from phases left Degraded unset.
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue,
+			"ReconcileError", err.Error())
+		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
 		return ctrl.Result{RequeueAfter: requeueSlow}, err
 	}
@@ -164,12 +168,15 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 	}
 
-	// Emit Ready event only on the first transition to Ready (phase was not Ready before).
-	if cfg.Status.Phase != costv1alpha1.PhaseReady {
+	// Emit Ready event only on the first transition to Ready.
+	// Use priorPhase (captured before this pass reset it to Progressing)
+	// to detect a genuine non-Ready → Ready transition.
+	if priorPhase != costv1alpha1.PhaseReady {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	cfg.Status.Phase = costv1alpha1.PhaseReady
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
@@ -182,8 +189,12 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 
 func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	// Secrets — create-if-absent only (never overwrite credentials).
-	if err := r.ensureSecret(ctx, cfg, resources.DBCredentialsSecret(cfg)); err != nil {
-		return Result{}, fmt.Errorf("db-credentials secret: %w", err)
+	// Skip DB credentials when the user named their own external Secret:
+	// creating one with random passwords would silently overwrite their creds.
+	if cfg.Spec.Database.SecretName == "" {
+		if err := r.ensureSecret(ctx, cfg, resources.DBCredentialsSecret(cfg)); err != nil {
+			return Result{}, fmt.Errorf("db-credentials secret: %w", err)
+		}
 	}
 	if err := r.ensureSecret(ctx, cfg, resources.DjangoSecret(cfg)); err != nil {
 		return Result{}, fmt.Errorf("django secret: %w", err)
@@ -206,8 +217,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 		}
 	}
 
-	// ServiceAccount
-	if err := r.apply(ctx, cfg, resources.KokuServiceAccount(cfg)); err != nil {
+	// ServiceAccount (skipped when costManagement.serviceAccount.create=false).
+	if err := r.ensureServiceAccount(ctx, cfg, cfg.Spec.CostManagement.ServiceAccount, resources.KokuServiceAccount(cfg)); err != nil {
 		return Result{}, fmt.Errorf("koku serviceaccount: %w", err)
 	}
 
@@ -287,19 +298,17 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 			imageTag: cfg.Spec.CostManagement.API.Image.Tag,
 			build:    func() *batchv1.Job { return resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag) },
 		},
-	}
-	if costv1alpha1.ROSEnabled(cfg) {
-		steps = append(steps, migStep{
+		{
 			name:     resources.NameROSMigration(cfg),
 			imageTag: cfg.Spec.ROS.Image.Tag,
 			build:    func() *batchv1.Job { return resources.ROSMigrationJob(cfg, cfg.Spec.ROS.Image.Tag) },
-		})
+		},
+		{
+			name:     resources.NameRBACMigration(cfg),
+			imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
+			build:    func() *batchv1.Job { return resources.RBACMigrationJob(cfg, cfg.Spec.RBAC.Image.Tag) },
+		},
 	}
-	steps = append(steps, migStep{
-		name:     resources.NameRBACMigration(cfg),
-		imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
-		build:    func() *batchv1.Job { return resources.RBACMigrationJob(cfg, cfg.Spec.RBAC.Image.Tag) },
-	})
 	if resources.AdminBootstrapJob(cfg, cfg.Spec.RBAC.Image.Tag) != nil {
 		steps = append(steps, migStep{
 			name:     resources.NameRBACAdminBootstrap(cfg),
@@ -318,11 +327,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	// All steps completed.
 	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "all schema migrations succeeded")
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "MigrationSucceeded", "")
-	migMsg := "All schema migrations succeeded (Koku → RBAC)"
-	if costv1alpha1.ROSEnabled(cfg) {
-		migMsg = "All schema migrations succeeded (Koku → ROS → RBAC)"
-	}
-	r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationComplete", migMsg)
+	r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationComplete", "All schema migrations succeeded (Koku → ROS → RBAC)")
 	return Result{}, nil
 }
 
@@ -391,25 +396,23 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 // -----------------------------------------------------------------------------
 
 func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
-	// Kruize is used exclusively by ROS — skip when ROS is disabled.
-	if costv1alpha1.ROSEnabled(cfg) {
-		kruizeObjs := []client.Object{
-			resources.KruizeServiceAccount(cfg),
-			resources.KruizeConfigMap(cfg),
-			resources.KruizeDeployment(cfg),
-			resources.KruizeService(cfg),
+	// Kruize (needed by ROS Processor and Poller — deploy before ROS).
+	kruizeObjs := []client.Object{
+		resources.KruizeServiceAccount(cfg),
+		resources.KruizeConfigMap(cfg),
+		resources.KruizeDeployment(cfg),
+		resources.KruizeService(cfg),
+	}
+	for _, obj := range kruizeObjs {
+		if err := r.apply(ctx, cfg, obj); err != nil {
+			return Result{}, fmt.Errorf("kruize %s: %w", obj.GetName(), err)
 		}
-		for _, obj := range kruizeObjs {
-			if err := r.apply(ctx, cfg, obj); err != nil {
-				return Result{}, fmt.Errorf("kruize %s: %w", obj.GetName(), err)
-			}
-		}
-		// Kruize ClusterRole/ClusterRoleBinding are cluster-scoped — no ownerRef possible.
-		// Cleaned up by the CR finalizer in reconcileDelete().
-		for _, obj := range []client.Object{resources.KruizeClusterRole(cfg), resources.KruizeClusterRoleBinding(cfg)} {
-			if err := r.applyClusterScoped(ctx, obj); err != nil {
-				return Result{}, fmt.Errorf("kruize rbac %s: %w", obj.GetName(), err)
-			}
+	}
+	// Kruize ClusterRole/ClusterRoleBinding are cluster-scoped — no ownerRef possible.
+	// Cleaned up by the CR finalizer in reconcileDelete().
+	for _, obj := range []client.Object{resources.KruizeClusterRole(cfg), resources.KruizeClusterRoleBinding(cfg)} {
+		if err := r.applyClusterScoped(ctx, obj); err != nil {
+			return Result{}, fmt.Errorf("kruize rbac %s: %w", obj.GetName(), err)
 		}
 	}
 
@@ -425,19 +428,19 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 		}
 	}
 
-	// Koku core (+ ROS shared config when ROS is enabled).
+	// ROS ServiceAccount (skipped when ros.serviceAccount.create=false).
+	if err := r.ensureServiceAccount(ctx, cfg, cfg.Spec.ROS.ServiceAccount, resources.ROSServiceAccount(cfg)); err != nil {
+		return Result{}, fmt.Errorf("ros serviceaccount: %w", err)
+	}
+
+	// Koku core + ROS shared config.
 	objs := []client.Object{
+		resources.CdappConfigMap(cfg),
 		resources.KokuAPIDeployment(cfg),
 		resources.KokuAPIService(cfg),
 		resources.MasuDeployment(cfg),
 		resources.MasuService(cfg),
 		resources.ListenerDeployment(cfg),
-	}
-	if costv1alpha1.ROSEnabled(cfg) {
-		objs = append([]client.Object{
-			resources.CdappConfigMap(cfg),
-			resources.ROSServiceAccount(cfg),
-		}, objs...)
 	}
 	for _, obj := range objs {
 		if err := r.apply(ctx, cfg, obj); err != nil {
@@ -472,19 +475,33 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 		objs = append(objs, d)
 	}
 
-	if costv1alpha1.ROSEnabled(cfg) {
-		objs = append(objs,
-			resources.ROSAPIDeployment(cfg),
-			resources.ROSAPIService(cfg),
-			resources.ROSProcessorDeployment(cfg),
-			resources.ROSPollerDeployment(cfg),
-			resources.ROSHousekeeperDeployment(cfg),
-		)
-		if costv1alpha1.BoolVal(cfg.Spec.Kruize.Partitions.DeleteEnabled, true) {
-			objs = append(objs, resources.KruizeDeletePartitionsCronJob(cfg))
+	// ROS components
+	rosObjs := []client.Object{
+		resources.ROSAPIDeployment(cfg),
+		resources.ROSAPIService(cfg),
+		resources.ROSProcessorDeployment(cfg),
+		resources.ROSPollerDeployment(cfg),
+		resources.ROSHousekeeperDeployment(cfg),
+	}
+	objs = append(objs, rosObjs...)
+
+	// Kruize delete-partitions CronJob — apply when enabled, delete when disabled.
+	if costv1alpha1.BoolVal(cfg.Spec.Kruize.Partitions.DeleteEnabled, true) {
+		objs = append(objs, resources.KruizeDeletePartitionsCronJob(cfg))
+	} else {
+		cj := resources.KruizeDeletePartitionsCronJob(cfg)
+		if err := r.Delete(ctx, cj); err != nil && !errors.IsNotFound(err) {
+			return Result{}, fmt.Errorf("delete kruize delete-partitions cronjob: %w", err)
 		}
-		if costv1alpha1.BoolVal(cfg.Spec.ROS.Housekeeper.PartitionCleaner.Enabled, true) {
-			objs = append(objs, resources.ROSPartitionCleanerCronJob(cfg))
+	}
+
+	// ROS partition-cleaner CronJob — apply when enabled, delete when disabled.
+	if costv1alpha1.BoolVal(cfg.Spec.ROS.Housekeeper.PartitionCleaner.Enabled, true) {
+		objs = append(objs, resources.ROSPartitionCleanerCronJob(cfg))
+	} else {
+		cj := resources.ROSPartitionCleanerCronJob(cfg)
+		if err := r.Delete(ctx, cj); err != nil && !errors.IsNotFound(err) {
+			return Result{}, fmt.Errorf("delete ros partition-cleaner cronjob: %w", err)
 		}
 	}
 
@@ -555,16 +572,14 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 	}
 
 	// NetworkPolicies — restrict traffic to expected flows per component.
-	netpols := []client.Object{
+	for _, np := range []client.Object{
 		resources.GatewayNetworkPolicy(cfg),
 		resources.IngressNetworkPolicy(cfg),
+		resources.KruizeNetworkPolicy(cfg),
 		resources.RBACAPINetworkPolicy(cfg),
 		resources.KokuAPINetworkPolicy(cfg),
-	}
-	if costv1alpha1.ROSEnabled(cfg) {
-		netpols = append(netpols, resources.KruizeNetworkPolicy(cfg))
-	}
-	for _, np := range netpols {
+		resources.ROSAPINetworkPolicy(cfg),
+	} {
 		if err := r.apply(ctx, cfg, np); err != nil {
 			return Result{}, fmt.Errorf("networkpolicy %s: %w", np.GetName(), err)
 		}
@@ -643,24 +658,23 @@ func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.
 	if !costv1alpha1.BoolVal(cfg.Spec.Monitoring.Enabled, true) {
 		return Result{}, nil
 	}
-	monitors := []client.Object{
+	for _, obj := range []client.Object{
 		resources.AppServiceMonitor(cfg),
+		resources.KruizeServiceMonitor(cfg),
 		resources.PrometheusRules(cfg),
-	}
-	if costv1alpha1.ROSEnabled(cfg) {
-		monitors = append(monitors, resources.KruizeServiceMonitor(cfg))
-	}
-	for _, obj := range monitors {
+	} {
 		if err := r.apply(ctx, cfg, obj); err != nil {
 			gvk := obj.GetObjectKind().GroupVersionKind()
 			if apimeta.IsNoMatchError(err) {
+				// Prometheus Operator CRDs not installed — expected on clusters
+				// without the monitoring stack. Skip silently.
 				log.FromContext(ctx).Info("monitoring resource skipped (CRD absent)",
 					"kind", gvk.Kind, "name", obj.GetName())
-			} else {
-				log.FromContext(ctx).Error(err, "monitoring resource apply failed",
-					"kind", gvk.Kind, "name", obj.GetName())
+				continue
 			}
-			continue
+			// Real error (permissions, API server issues, etc.) — surface it so
+			// the reconcile loop sets Degraded and the user is notified.
+			return Result{}, fmt.Errorf("monitoring %s %s: %w", gvk.Kind, obj.GetName(), err)
 		}
 	}
 	return Result{}, nil
@@ -683,6 +697,30 @@ func (r *CostManagementServiceConfigReconciler) apply(ctx context.Context, cfg *
 	return r.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner(fieldOwner))
 }
 
+// ensureServiceAccount applies sa when spec.Create is true (the default).
+// When create=false, it only verifies the named ServiceAccount already exists —
+// it never applies, sets ownerRefs, or otherwise mutates the object (so deleting
+// the CR cannot garbage-collect a user-managed SA).
+func (r *CostManagementServiceConfigReconciler) ensureServiceAccount(
+	ctx context.Context,
+	cfg *costv1alpha1.CostManagementServiceConfig,
+	spec costv1alpha1.ServiceAccountSpec,
+	sa *corev1.ServiceAccount,
+) error {
+	if !costv1alpha1.BoolVal(spec.Create, true) {
+		existing := &corev1.ServiceAccount{}
+		key := types.NamespacedName{Namespace: cfg.Namespace, Name: sa.Name}
+		if err := r.Get(ctx, key, existing); err != nil {
+			if errors.IsNotFound(err) {
+				return fmt.Errorf("serviceaccount %s/%s not found (create=false); create it manually or set create=true", key.Namespace, key.Name)
+			}
+			return fmt.Errorf("get serviceaccount %s/%s: %w", key.Namespace, key.Name, err)
+		}
+		return nil
+	}
+	return r.apply(ctx, cfg, sa)
+}
+
 // applyStatefulSet applies a StatefulSet, handling the VolumeClaimTemplate
 // immutability constraint by creating on first call and only patching spec
 // (not VCT) on subsequent calls.
@@ -696,9 +734,10 @@ func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Con
 	if err != nil {
 		return err
 	}
-	// Only update mutable fields (replicas, container image, resources).
+	// Only update mutable fields (replicas, container image, resources, pull secrets).
 	patch := existing.DeepCopy()
 	patch.Spec.Replicas = desired.Spec.Replicas
+	patch.Spec.Template.Spec.ImagePullSecrets = desired.Spec.Template.Spec.ImagePullSecrets
 	if len(patch.Spec.Template.Spec.Containers) > 0 && len(desired.Spec.Template.Spec.Containers) > 0 {
 		patch.Spec.Template.Spec.Containers[0].Image = desired.Spec.Template.Spec.Containers[0].Image
 		patch.Spec.Template.Spec.Containers[0].Resources = desired.Spec.Template.Spec.Containers[0].Resources

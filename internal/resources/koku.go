@@ -231,6 +231,7 @@ func deploymentWithContainerName(
 					ServiceAccountName:           NameKokuServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
+					ImagePullSecrets:             imagePullSecrets(cfg),
 					InitContainers: []corev1.Container{
 						CACombineInitContainer(cfg),
 						WaitForValkeyInitContainer(cfg),
@@ -283,6 +284,7 @@ func deployment(
 					ServiceAccountName:           NameKokuServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
+					ImagePullSecrets:             imagePullSecrets(cfg),
 					InitContainers: []corev1.Container{
 						CACombineInitContainer(cfg),
 						WaitForValkeyInitContainer(cfg),

@@ -117,7 +117,7 @@ Several paths report success while the underlying dependency is wrong or while a
 | Custom operator metrics + ticket alert names | [7692 G1/G3](COST-7692.md) | **P2** |
 | Missing Event reasons (`PhaseChanged`, `DependencyFailed`, …) | [7692 G4](COST-7692.md), [7680 G3](COST-7680.md) | **P2** |
 | Minimal + HA sample CRs | [7679 G1/G2](COST-7679.md) | **P1** for beta docs/demos |
-| Legacy stale CRD file still in tree | [7679 R1](COST-7679.md), [7678 R2](COST-7678.md) | **P1** (CRC `oc apply -f config/crd/bases/` footgun; `make install` is safe) |
+| Legacy stale CRD file still in tree | [7679 R1](COST-7679.md), [7678 R2](COST-7678.md) | **Resolved** (file removed; CRC path uses `make install`) |
 | BYOI template keeps `kruize:` block while `ros.enabled: false` | [7679 R3](COST-7679.md) | **P2** (docs clarity) |
 
 ---

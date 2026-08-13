@@ -10,6 +10,89 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+// assertValidYAMLWithStringAudiences unmarshals the full EnvoyYAML output,
+// walks the YAML to find the audiences list, and asserts every entry is a
+// plain string — not a map (which would indicate YAML injection turned a
+// list entry like "evil:" into {evil: nil}).
+func assertValidYAMLWithStringAudiences(t *testing.T, yamlStr string) {
+	t.Helper()
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(yamlStr), &doc); err != nil {
+		t.Fatalf("EnvoyYAML output is not valid YAML: %v", err)
+	}
+
+	// Walk: static_resources → listeners[0] → filter_chains[0] → filters[0]
+	//       → typed_config → http_filters → (jwt_authn) → typed_config
+	//       → providers → keycloak → audiences
+	audiences := yamlWalk(doc,
+		"static_resources", "listeners", 0, "filter_chains", 0,
+		"filters", 0, "typed_config", "http_filters",
+	)
+	if audiences == nil {
+		t.Fatal("could not walk YAML to http_filters")
+	}
+
+	filters, ok := audiences.([]any)
+	if !ok {
+		t.Fatalf("http_filters is %T, want []any", audiences)
+	}
+
+	for _, f := range filters {
+		fm, ok := f.(map[string]any)
+		if !ok {
+			continue
+		}
+		tc, ok := fm["typed_config"].(map[string]any)
+		if !ok {
+			continue
+		}
+		providers, ok := tc["providers"].(map[string]any)
+		if !ok {
+			continue
+		}
+		kc, ok := providers["keycloak"].(map[string]any)
+		if !ok {
+			continue
+		}
+		audList, ok := kc["audiences"].([]any)
+		if !ok {
+			t.Fatalf("audiences is %T, want []any", kc["audiences"])
+		}
+		for i, a := range audList {
+			if _, ok := a.(string); !ok {
+				t.Errorf("audiences[%d] is %T (%v), want string — YAML injection turned a list entry into a map", i, a, a)
+			}
+		}
+		return
+	}
+	t.Fatal("could not find keycloak provider with audiences in YAML")
+}
+
+// yamlWalk navigates a nested map/slice structure by keys (string) and
+// indices (int). Returns nil if any step fails.
+func yamlWalk(v any, path ...any) any {
+	for _, step := range path {
+		switch s := step.(type) {
+		case string:
+			m, ok := v.(map[string]any)
+			if !ok {
+				return nil
+			}
+			v = m[s]
+		case int:
+			sl, ok := v.([]any)
+			if !ok || s >= len(sl) {
+				return nil
+			}
+			v = sl[s]
+		default:
+			return nil
+		}
+	}
+	return v
+}
+
 func testCfg() *costv1alpha1.CostManagementServiceConfig {
 	return &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
@@ -183,11 +266,8 @@ func TestEnvoyYAMLParsesForROSEnabledAndDisabled(t *testing.T) {
 		cfg := testCfg()
 		e := enabled
 		cfg.Spec.ROS.Enabled = &e
-		raw := EnvoyYAML(cfg)
-		var doc any
-		if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
-			t.Errorf("ros.enabled=%v: invalid YAML: %v", enabled, err)
-		}
+		out := EnvoyYAML(cfg)
+		assertValidYAMLWithStringAudiences(t, out)
 	}
 }
 
@@ -213,5 +293,191 @@ func TestEnvoyResourceNames(t *testing.T) {
 	}
 	if len(d.Spec.Template.Spec.InitContainers) != 1 || d.Spec.Template.Spec.InitContainers[0].Name != "prepare-ca-bundle" {
 		t.Error("expected CA combine init container")
+	}
+}
+
+// TestEnvoyDeploymentHasConfigHash verifies that EnvoyDeployment includes a
+// content hash of the ConfigMap in the pod template annotations. Without this,
+// Envoy pods are never restarted when the ConfigMap changes (e.g., OIDC URL
+// update), so the gateway keeps running with stale JWT configuration.
+func TestEnvoyDeploymentHasConfigHash(t *testing.T) {
+	cfg := testCfg()
+	cm := EnvoyConfigMap(cfg)
+	dep := EnvoyDeployment(cfg)
+
+	const hashAnnotation = "koku.costmanagement.io/envoy-config-hash"
+	hash, ok := dep.Spec.Template.Annotations[hashAnnotation]
+	if !ok {
+		t.Fatalf("EnvoyDeployment pod template missing annotation %q — "+
+			"ConfigMap changes will not trigger pod restarts", hashAnnotation)
+	}
+	if hash == "" {
+		t.Fatalf("annotation %q is empty", hashAnnotation)
+	}
+
+	// Changing the ConfigMap content must change the hash.
+	cfg2 := testCfg()
+	cfg2.Spec.Auth.Keycloak.URL = "https://other-keycloak.example.com"
+	cm2 := EnvoyConfigMap(cfg2)
+	dep2 := EnvoyDeployment(cfg2)
+
+	if cm.Data["envoy.yaml"] == cm2.Data["envoy.yaml"] {
+		t.Skip("test configs produced identical ConfigMap content — adjust testCfg()")
+	}
+
+	hash2 := dep2.Spec.Template.Annotations[hashAnnotation]
+	if hash == hash2 {
+		t.Errorf("hash did not change when ConfigMap content changed: both = %q", hash)
+	}
+}
+
+// TestEnvoyDeploymentMountsKeycloakCACert verifies that when
+// auth.keycloak.tls.caCertSecretName is set, the Envoy Deployment mounts
+// that Secret as an additional CA source so Envoy can verify the Keycloak
+// Route certificate (router CA, not the service CA).
+func TestEnvoyDeploymentMountsKeycloakCACert(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "my-router-ca"
+
+	dep := EnvoyDeployment(cfg)
+
+	// The secret must appear as a volume.
+	var found bool
+	for _, v := range dep.Spec.Template.Spec.Volumes {
+		if v.Secret != nil && v.Secret.SecretName == "my-router-ca" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("EnvoyDeployment missing volume for keycloak caCertSecretName=%q — "+
+			"Envoy will fail to verify Keycloak Route certificates", "my-router-ca")
+	}
+}
+
+// TestEnvoyYAMLRejectsInjectedAudience verifies that audience values containing
+// control characters cannot inject YAML structure into Envoy's JWT filter config.
+// Without escaping, a line-breaking control character breaks out of the audience
+// list and the injected content becomes new YAML keys — which could override the
+// remote_jwks endpoint and route token validation to an attacker-controlled server.
+//
+// Best practice is structural YAML generation (not string templates); this test
+// guards the current escape-at-interpolation approach as defense-in-depth.
+func TestEnvoyYAMLRejectsInjectedAudience(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		banned  string
+	}{
+		{
+			name:    "newline",
+			payload: "evil\nremote_jwks:\n  http_uri:\n    uri: http://attacker.example.com/jwks",
+			banned:  "\nremote_jwks:",
+		},
+		{
+			name:    "carriage-return",
+			payload: "evil\rremote_jwks:\r  http_uri:\r    uri: http://attacker.example.com/jwks",
+			banned:  "\rremote_jwks:",
+		},
+		{
+			name:    "nul-byte",
+			payload: "evil\x00remote_jwks:\x00  http_uri:\x00    uri: http://attacker.example.com/jwks",
+			banned:  "\x00remote_jwks:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg()
+			cfg.Spec.Auth.Keycloak.Audiences = []string{"legit-audience", tc.payload}
+			out := EnvoyYAML(cfg)
+			if strings.Contains(out, tc.banned) {
+				t.Errorf("audience injection succeeded via %s: bare 'remote_jwks:' key in Envoy YAML", tc.name)
+			}
+			assertValidYAMLWithStringAudiences(t, out)
+		})
+	}
+}
+
+// TestEnvoyYAMLRejectsInjectedIssuer verifies the issuer URL is YAML-escaped.
+// A newline in issuerURL injects structure into the JWT provider config block.
+func TestEnvoyYAMLRejectsInjectedIssuer(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.IssuerURL = "https://legit.example.com\nremote_jwks:\n  http_uri:\n    uri: http://attacker.example.com/jwks"
+
+	out := EnvoyYAML(cfg)
+
+	if strings.Contains(out, "\nremote_jwks:") {
+		t.Error("issuer injection succeeded: bare 'remote_jwks:' key injected into Envoy YAML")
+	}
+	assertValidYAMLWithStringAudiences(t, out)
+}
+
+// TestEnvoyYAMLRejectsInjectedJWKSURI verifies the JWKS URI is YAML-escaped.
+// The URI appears as a plain scalar in the remote_jwks http_uri block; a newline
+// in auth.keycloak.url could inject arbitrary YAML keys at that indentation level.
+func TestEnvoyYAMLRejectsInjectedJWKSURI(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.URL = "https://keycloak.example.com\ncluster: attacker-controlled\naddress:"
+
+	out := EnvoyYAML(cfg)
+
+	if strings.Contains(out, "\ncluster: attacker-controlled") {
+		t.Error("JWKS URI injection succeeded: bare YAML key injected via keycloak.url")
+	}
+	assertValidYAMLWithStringAudiences(t, out)
+}
+
+// TestEnvoyYAMLRejectsInjectedKCHost verifies the Keycloak cluster host is YAML-escaped.
+// The extracted hostname appears in socket_address.address and in the TLS block's
+// sni/match fields; a newline in auth.keycloak.url that fails url.Parse triggers the
+// TrimPrefix fallback, which preserves the raw bytes — including any embedded newline.
+func TestEnvoyYAMLRejectsInjectedKCHost(t *testing.T) {
+	cfg := testCfg()
+	// A literal \n causes url.Parse to return an error; keycloakHostPort() falls
+	// back to strings.TrimPrefix, which does not URL-decode and returns the raw
+	// string (including the newline) as kcHost.
+	cfg.Spec.Auth.Keycloak.URL = "https://keycloak.example.com\ntype: LOGICAL_DNS\n"
+
+	out := EnvoyYAML(cfg)
+
+	if strings.Contains(out, "\ntype: LOGICAL_DNS") {
+		t.Error("KC_HOST injection succeeded: bare YAML key injected via keycloak.url hostname")
+	}
+	assertValidYAMLWithStringAudiences(t, out)
+}
+
+// TestEnvoyYAMLEscapesColonSpace verifies that a colon+space or trailing colon
+// in any CR-derived scalar is quoted. Without quoting, ": " or a bare ":" at
+// end-of-value creates a YAML mapping-value indicator — silently turning a list
+// entry into a one-key map, or causing a hard parse error in a scalar position.
+// A trailing colon is equally dangerous because the template places a newline
+// immediately after every interpolated value (yaml-cpp's EndScalar() trigger).
+func TestEnvoyYAMLEscapesColonSpace(t *testing.T) {
+	cases := []struct {
+		name     string
+		audience string
+		banned   string
+	}{
+		{
+			name:     "colon-space",
+			audience: "evil: value",
+			banned:   "\n                        - evil: value\n",
+		},
+		{
+			name:     "trailing-colon",
+			audience: "evil:",
+			banned:   "\n                        - evil:\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg()
+			cfg.Spec.Auth.Keycloak.Audiences = []string{tc.audience}
+			out := EnvoyYAML(cfg)
+			if strings.Contains(out, tc.banned) {
+				t.Errorf("audience %q appeared as unquoted plain scalar in YAML", tc.audience)
+			}
+			assertValidYAMLWithStringAudiences(t, out)
+		})
 	}
 }

@@ -119,12 +119,23 @@ implemented (still pending).
 These items are implementation gaps — not intentional design decisions. They
 will be addressed in upcoming tickets.
 
-### 4a. `RealmUser.Password` in CR spec
+### 4a. `RealmUser.Password` is dead code in the operator
 
-`RealmUser.Password` stores Keycloak user passwords directly in the CR spec.
-CR specs are stored in etcd, appear in `kubectl get -o yaml`, and are captured
-in audit logs. **Fix:** Remove `Password` from `RealmUser`; read credentials
-from a Secret reference instead.
+`RealmUser` is used by `ResolveBootstrapAdmin()` to seed the RBAC admin
+identity (`Username`, `OrgID`, `AccountNumber`) into the RBAC Job. The
+`Password` field is present in the type but **the operator never reads or uses
+it** — Keycloak user provisioning is done by the external `deploy-rhbk.sh`
+install script, not the operator.
+
+The `Password` field should be **removed from the CRD** entirely:
+- It appears in `kubectl get cmsc -o yaml` and etcd (a security exposure for
+  no benefit since the operator ignores it)
+- It creates a false expectation that the operator provisions Keycloak users
+- The Helm chart equivalent (`jwtAuth.realmUsers[].password`) is consumed by
+  `deploy-rhbk.sh` — this is out of scope for the operator
+
+The remaining `RealmUsers` fields (`Username`, `OrgID`, `AccountNumber`,
+`OrgAdmin`) are used and should stay.
 
 ### 4b. `Env map[string]string` raw override
 
@@ -142,12 +153,10 @@ init containers, volumes, or security context are silently ignored on
 subsequent reconciliations. **Fix:** Apply only mutable spec fields via SSA;
 detect VCT changes separately and surface as a condition.
 
-### 4d. `MergeEnv` appends without deduplication
+### 4d. `MergeEnv` deduplication ✅ Fixed
 
-`MergeEnv` in `env.go` appends override keys without checking for duplicates,
-producing duplicate env var entries in pod specs. Kubernetes honours the last
-occurrence but wastes memory. **Fix:** Replace the earlier entry when the key
-already exists.
+`MergeEnv` was sorting and deduplicating overrides. This is now done — keys
+are sorted for stable SSA apply and duplicates replaced rather than appended.
 
 ---
 
@@ -165,12 +174,12 @@ already exists.
 | Django key charset | `a-z0-9!@#$%^&*(-_=+)` | Correct charset | ✅ Done (PR #16) |
 | `*bool` for defaulted fields | — | Used throughout | ✅ Done |
 | Conditions over ComponentStatus | `metav1.Condition` | `metav1.Condition` used | ✅ Done |
-| Passwords in CR spec | — | `RealmUser.Password` remains | ❌ Gap (§4a) |
+| `RealmUser.Password` | — | Present in spec but unused by operator; operator never provisions Keycloak users | ❌ Should be removed (§4a) |
 | `Env map[string]string` | — | Still in spec | ❌ Gap (§4b) |
 | OwnerReference Controller+BlockOwnerDeletion | required | Set correctly | ✅ Done |
-| Finalizer for cluster-scoped resources | required (COST-7681) | `cost.redhat.com/cleanup` implemented | ✅ Done |
+| Finalizer for cluster-scoped resources | required (COST-7681) | `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` | ✅ Done |
 | StatefulSet via SSA | SSA preferred | `r.Update` partial patch | ❌ Gap (§4c) |
 | Periodic requeue / drift correction | 5 min (COST-7681) | `requeueDrift = 5 * time.Minute` | ✅ Done |
-| `MergeEnv` deduplication | — | Still appends without dedup | ❌ Gap (§4d) |
+| `MergeEnv` deduplication | — | Fixed — sorted keys, dedup on write | ✅ Done (§4d) |
 
 [k8s-conventions]: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties

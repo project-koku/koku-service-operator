@@ -1,12 +1,12 @@
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: costmanagementserviceconfigs.costmanagement-service-cfg.openshift.io
+  creationTimestamp: null
+  name: costmanagementserviceconfigs.service.costmanagement.openshift.io
 spec:
-  group: costmanagement-service-cfg.openshift.io
+  group: service.costmanagement.openshift.io
   names:
     kind: CostManagementServiceConfig
     listKind: CostManagementServiceConfigList
@@ -142,6 +142,14 @@ spec:
                         items:
                           type: string
                         type: array
+                      issuerURL:
+                        description: |-
+                          IssuerURL is the JWT iss value Envoy validates (must match tokens).
+                          RHBK with a configured hostname issues tokens with the public Route URL
+                          as iss even when clients obtain them via the in-cluster Service — set
+                          this to that frontend base URL (or the full .../realms/<realm> issuer).
+                          When empty, issuer is derived from url + realm.
+                        type: string
                       namespace:
                         description: Keycloak namespace. Defaults to "keycloak".
                         type: string
@@ -150,12 +158,25 @@ spec:
                         type: string
                       tls:
                         properties:
+                          caCertSecretName:
+                            description: |-
+                              CACertSecretName is an existing Secret with key ca.crt used to verify
+                              Keycloak TLS (typically the OpenShift router CA when issuerURL is a
+                              public Route). When empty, oauth-proxy falls back to the cluster
+                              service CA ConfigMap — which does not trust Route certificates.
+                            type: string
                           insecureSkipVerify:
+                            description: |-
+                              InsecureSkipVerify disables TLS verification for Keycloak OIDC/JWKS.
+                              Prefer CACertSecretName for production.
                             type: boolean
                         type: object
                       url:
-                        description: Full URL of the Keycloak instance. Auto-detected
-                          when empty.
+                        description: |-
+                          Full URL of the Keycloak instance used for JWKS fetch (and issuer when
+                          issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
+                          can reach JWKS without depending on the OpenShift router.
+                          Example: http://keycloak-service.keycloak.svc.cluster.local:8080
                         type: string
                     type: object
                   realmUsers:
@@ -2156,6 +2177,13 @@ spec:
                             type: object
                         type: object
                     type: object
+                  enabled:
+                    default: true
+                    description: |-
+                      When false, the operator skips ROS and Kruize (ROS-only dependency):
+                      migrations, Deployments/Services, CronJobs, NetworkPolicies, Envoy routes,
+                      and cluster-scoped Kruize RBAC. Defaults to true.
+                    type: boolean
                   housekeeper:
                     properties:
                       partitionCleaner:
@@ -2529,6 +2557,23 @@ spec:
                             type: object
                         type: object
                     type: object
+                  oauthClientSecretRef:
+                    description: |-
+                      OAuthClientSecretRef names a Secret in the CR namespace with keys
+                      client-id and client-secret for oauth2-proxy.
+                      When empty, defaults to {metadata.name}-ui-oauth-client.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                   oauthProxy:
                     properties:
                       cookieExpire:
@@ -2730,3 +2775,9 @@ spec:
     storage: true
     subresources:
       status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: null
+  storedVersions: null

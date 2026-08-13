@@ -19,10 +19,8 @@ var routeGVK = schema.GroupVersionKind{
 // When no explicit host is set, it uses {name}-gateway-{ns}.{clusterDomain}.
 // ok is false when neither an explicit host nor a cluster domain is available.
 func GatewayAPIHost(cfg *costv1alpha1.CostManagementServiceConfig) (host string, ok bool) {
-	if len(cfg.Spec.GatewayRoute.Hosts) > 0 {
-		if h := cfg.Spec.GatewayRoute.Hosts[0].Host; h != "" {
-			return h, true
-		}
+	if cfg.Spec.GatewayRoute.Host != "" {
+		return cfg.Spec.GatewayRoute.Host, true
 	}
 	var domain string
 	if cfg.Status.DiscoveredConfig != nil {
