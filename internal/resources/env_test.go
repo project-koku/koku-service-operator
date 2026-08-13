@@ -4,7 +4,50 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+
+	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
+
+func envVal(env []corev1.EnvVar, name string) (string, bool) {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+func TestKokuCommonEnvRetainNumMonthsDefaultsWhenZero(t *testing.T) {
+	// Simulates a CR persisted before DataRetentionMonths existed: the
+	// field reads back as the Go zero value, not the CRD default of 4.
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Spec.CostManagement.DataRetentionMonths = 0
+
+	env := KokuCommonEnv(cfg)
+
+	got, ok := envVal(env, "RETAIN_NUM_MONTHS")
+	if !ok {
+		t.Fatal("RETAIN_NUM_MONTHS not set")
+	}
+	if got != "4" {
+		t.Fatalf("RETAIN_NUM_MONTHS: got %q, want %q (must not be \"0\", koku treats that as literal zero-month retention)", got, "4")
+	}
+}
+
+func TestKokuCommonEnvRetainNumMonthsRespectsExplicitValue(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Spec.CostManagement.DataRetentionMonths = 12
+
+	env := KokuCommonEnv(cfg)
+
+	got, ok := envVal(env, "RETAIN_NUM_MONTHS")
+	if !ok {
+		t.Fatal("RETAIN_NUM_MONTHS not set")
+	}
+	if got != "12" {
+		t.Fatalf("RETAIN_NUM_MONTHS: got %q, want %q", got, "12")
+	}
+}
 
 func TestMergeEnvStableOrder(t *testing.T) {
 	overrides := map[string]string{

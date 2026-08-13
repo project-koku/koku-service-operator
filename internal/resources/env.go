@@ -26,6 +26,10 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 	if cfg.Spec.Database.Port == 0 {
 		dbPort = "5432"
 	}
+	retainMonths := fmt.Sprintf("%d", cfg.Spec.CostManagement.DataRetentionMonths)
+	if cfg.Spec.CostManagement.DataRetentionMonths == 0 {
+		retainMonths = "4"
+	}
 
 	env := []corev1.EnvVar{
 		EnvVal("ONPREM", "True"),
@@ -53,7 +57,7 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		EnvFromSecret("DJANGO_SECRET_KEY", djangoSecret, "secret-key"),
 		EnvVal("SCHEDULE_REPORT_CHECKS", boolStr(costv1alpha1.BoolVal(cfg.Spec.CostManagement.ScheduleReportChecks, true))),
 		EnvVal("REPORT_DOWNLOAD_SCHEDULE", cfg.Spec.CostManagement.ReportDownloadSchedule),
-		EnvVal("RETAIN_NUM_MONTHS", fmt.Sprintf("%d", cfg.Spec.CostManagement.DataRetentionMonths)),
+		EnvVal("RETAIN_NUM_MONTHS", retainMonths),
 		EnvVal("RBAC_SERVICE_HOST", NameRBACAPI(cfg)),
 		EnvVal("RBAC_SERVICE_PORT", "8080"),
 		EnvVal("RBAC_SERVICE_PATH", "/api/rbac/v1/access/"),
