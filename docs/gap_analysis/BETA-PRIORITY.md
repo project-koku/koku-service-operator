@@ -175,7 +175,7 @@ Tickets marked ✅ in `tasks.md` that gap audits found incomplete: **7683, 7684,
 26. Wait-path exponential backoff ([7680 G2](COST-7680.md)); richer Events ([7692 G4](COST-7692.md)).
 27. Secret rotation annotation (COST-7694); upgrade rollback / rolling strategy (COST-7693).
 28. E2E + OpenShift CI (COST-7697–7699); tighten `Env` maps ([7678 R1](COST-7678.md)).
-29. Wire `dataRetentionMonths` → `RETAIN_NUM_MONTHS` (field present; [7678 G3](COST-7678.md) closed for API).
+29. `dataRetentionMonths` → `RETAIN_NUM_MONTHS` wired in `KokuCommonEnv` with Go-level fallback to `4` ([7678 G3](COST-7678.md) closed).
 
 ### → [COST-8054](../jira/COST-8054.md) — ROS and Kruize (not Cost beta)
 

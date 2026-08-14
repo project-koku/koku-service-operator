@@ -39,6 +39,7 @@ func rosCleanupObjects(cfg *costv1alpha1.CostManagementServiceConfig) []client.O
 		resources.ROSPollerDeployment(cfg),
 		resources.ROSHousekeeperDeployment(cfg),
 		resources.ROSPartitionCleanerCronJob(cfg),
+		resources.ROSAPINetworkPolicy(cfg),
 		resources.CdappConfigMap(cfg),
 
 		// Completed ROS migration Job (if any).
