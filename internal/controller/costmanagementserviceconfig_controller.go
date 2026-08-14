@@ -315,6 +315,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 			imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
 			build:    func() *batchv1.Job { return resources.AdminBootstrapJob(cfg, cfg.Spec.RBAC.Image.Tag) },
 		})
+	} else if cfg.Spec.RBAC.BootstrapAdmin.Enabled {
+		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "BootstrapAdminSkipped",
+			"bootstrapAdmin.enabled is true but secretRef.name is empty — admin bootstrap will not run; set spec.rbac.bootstrapAdmin.secretRef to a Secret with keys org-id, account-number, username")
 	}
 
 	for i, step := range steps {

@@ -1,0 +1,27 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/name: koku-service-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: selfsigned-issuer
+  namespace: system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: koku-service-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: serving-cert
+  namespace: system
+spec:
+  dnsNames:
+  - koku-service-operator-webhook-service.koku-service-operator-system.svc
+  - koku-service-operator-webhook-service.koku-service-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: webhook-server-cert

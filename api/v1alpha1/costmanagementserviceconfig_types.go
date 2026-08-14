@@ -123,8 +123,11 @@ type DatabaseConfig struct {
 	// Host for an external PostgreSQL instance (only used when Deploy is false).
 	Host string `json:"host,omitempty"`
 	// +kubebuilder:default:=5432
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 	// +kubebuilder:default:=disable
+	// +kubebuilder:validation:Enum=disable;require;verify-ca;verify-full
 	SSLMode string `json:"sslMode,omitempty"`
 
 	// Name of an existing Secret containing DB credentials.
@@ -155,6 +158,8 @@ type CacheConfig struct {
 	// Host for an external cache (only used when Deploy is false).
 	Host string `json:"host,omitempty"`
 	// +kubebuilder:default:=6379
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 
 	Auth        CacheAuthSpec               `json:"auth,omitempty"`
@@ -218,6 +223,8 @@ type ObjectStorageConfig struct {
 	// +kubebuilder:default:="s3.openshift-storage.svc.cluster.local"
 	Endpoint string `json:"endpoint,omitempty"`
 	// +kubebuilder:default:=443
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 	// +kubebuilder:default:=true
 	UseSSL *bool `json:"useSSL,omitempty"`
@@ -240,9 +247,8 @@ type S3Options struct {
 // -----------------------------------------------------------------------------
 
 type AuthConfig struct {
-	Envoy      EnvoySpec    `json:"envoy,omitempty"`
-	Keycloak   KeycloakSpec `json:"keycloak,omitempty"`
-	RealmUsers []RealmUser  `json:"realmUsers,omitempty"`
+	Envoy    EnvoySpec    `json:"envoy,omitempty"`
+	Keycloak KeycloakSpec `json:"keycloak,omitempty"`
 }
 
 type EnvoySpec struct {
@@ -289,16 +295,6 @@ type KeycloakTLSSpec struct {
 	CACertSecretName string `json:"caCertSecretName,omitempty"`
 }
 
-// RealmUser identifies a user whose RBAC admin identity (Tenant + Principal)
-// is bootstrapped into the RBAC database by AdminBootstrapJob.
-// Keycloak user provisioning is handled externally (deploy-rhbk.sh), not here.
-type RealmUser struct {
-	Username      string `json:"username"`
-	OrgID         string `json:"orgId,omitempty"`
-	AccountNumber string `json:"accountNumber,omitempty"`
-	OrgAdmin      bool   `json:"orgAdmin,omitempty"`
-}
-
 // -----------------------------------------------------------------------------
 // RBACConfig (insights-rbac)
 // -----------------------------------------------------------------------------
@@ -319,6 +315,9 @@ type RBACComponentSpec struct {
 
 type BootstrapAdminSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
+	// SecretRef references a Secret containing the bootstrap admin identity.
+	// Required keys: org-id, account-number, username.
+	SecretRef corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 type KeycloakSyncSpec struct {
