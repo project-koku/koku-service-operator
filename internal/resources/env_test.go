@@ -47,6 +47,9 @@ func TestKokuCommonEnvRetainNumMonthsRespectsExplicitValue(t *testing.T) {
 	}
 	if got != "12" {
 		t.Fatalf("RETAIN_NUM_MONTHS: got %q, want %q", got, "12")
+	}
+}
+
 func TestKokuCommonEnvS3CredentialNames(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
