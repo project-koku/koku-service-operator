@@ -1,7 +1,7 @@
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
-  name: cost-onprem
+  name: cost-management
   namespace: cost-onprem
 spec:
   global:
@@ -27,11 +27,6 @@ spec:
   kafka:
     bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
 
-  ingress:
-    image:
-      repository: quay.io/iop/ingress
-      tag: "master"
-
   objectStorage:
     endpoint: "s3.openshift-storage.svc.cluster.local"
     port: 443
@@ -40,13 +35,13 @@ spec:
   costManagement:
     api:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        repository: quay.io/martin_povolny/koku
+        tag: "latest"
       replicas: 1
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        repository: quay.io/martin_povolny/koku
+        tag: "latest"
       replicas: 1
     listener:
       replicas: 2
@@ -96,14 +91,12 @@ spec:
     keycloak:
       # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
       # hostname, tokens use that URL as iss — set issuerURL to match.
-      url: "https://keycloak-service.keycloak.svc.cluster.local:8443"
+      url: "https://keycloak.keycloak.svc.cluster.local"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       realm: kubernetes
       audiences:
         - "cost-management-operator"
         - "cost-management-ui"
-      tls:
-        insecureSkipVerify: true
 
   ui:
     replicaCount: 1
@@ -114,12 +107,14 @@ spec:
     #   name: cost-management-ui-oauth-client
     oauthProxy:
       image:
-        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
+        repository: registry.access.redhat.com/rhceph/oauth2-proxy-rhel9
         tag: "v7.6.0"
     app:
       image:
-        repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        # arm64 build of koku-ui-mfe-onprem for CRC testing.
+        # For amd64 use: quay.io/insights-onprem/koku-ui-onprem:2f23c646581028bd385856b6713e6bf367baf953
+        repository: quay.io/martin_povolny/koku-ui-mfe-onprem
+        tag: "latest"
 
   monitoring:
     enabled: true
