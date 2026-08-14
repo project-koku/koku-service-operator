@@ -11,6 +11,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 
 | Document | Description |
 |----------|-------------|
+| [SECURITY.md](SECURITY.md) | Vulnerability reporting and security model |
 | [docs/development/crc-testing.md](docs/development/crc-testing.md) | Local development and CRC testing guide |
 | [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
 | [docs/tasks.md](docs/tasks.md) | Implementation status per JIRA ticket |
