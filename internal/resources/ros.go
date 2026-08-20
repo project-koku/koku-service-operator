@@ -327,7 +327,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{Name: NameCACombineConfigMap(cfg)},
 					Items: []corev1.KeyToPath{
-						{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: int32Ptr(0755)},
+						{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: new(int32(0755))},
 					},
 				},
 			},

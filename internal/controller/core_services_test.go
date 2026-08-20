@@ -64,7 +64,7 @@ func TestReconcileCoreServices_ROSOff_APINotReady(t *testing.T) {
 func TestReconcileCoreServices_ROSOn_APINotReady(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 
 	r := &CostManagementServiceConfigReconciler{
 		Client:   fakeClientWithApplySupport(scheme),
@@ -211,7 +211,7 @@ func TestReconcileCoreServices_ListenerNotReady_BlocksProgress(t *testing.T) {
 func TestReconcileCoreServices_KruizeNotReady_BlocksProgress(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	c := fakeClientPreservingStatus(scheme)
 	r := &CostManagementServiceConfigReconciler{
 		Client:   c,

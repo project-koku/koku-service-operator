@@ -24,7 +24,7 @@ func keycloakSyncCfg() *costv1alpha1.CostManagementServiceConfig {
 					ClientSecretRef:  costv1alpha1.SecretKeyRef{Name: "kc-secret", Key: "CLIENT_SECRET"},
 					OrgGroupPrefix:   "org-",
 					OrgAdminSubgroup: "org-admin",
-					PruneOrphans:     boolPtr(true),
+					PruneOrphans:     new(true),
 				},
 			},
 			Auth: costv1alpha1.AuthConfig{
@@ -209,7 +209,7 @@ func TestKeycloakSyncCronJobPruneOrphansDefault(t *testing.T) {
 
 func TestKeycloakSyncCronJobPruneOrphansFalse(t *testing.T) {
 	cfg := keycloakSyncCfg()
-	cfg.Spec.RBAC.KeycloakSync.PruneOrphans = boolPtr(false)
+	cfg.Spec.RBAC.KeycloakSync.PruneOrphans = new(false)
 
 	cj := KeycloakSyncCronJob(cfg)
 	envMap := map[string]string{}

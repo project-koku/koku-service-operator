@@ -39,7 +39,7 @@ func TestEnsureServiceAccount_CreateTrueApplies(t *testing.T) {
 
 func TestEnsureServiceAccount_CreateFalseSkipsApply(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.CostManagement.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.CostManagement.ServiceAccount.Create = new(false)
 	cfg.Spec.CostManagement.ServiceAccount.Name = "external-koku-sa"
 
 	existing := &corev1.ServiceAccount{
@@ -78,7 +78,7 @@ func TestEnsureServiceAccount_CreateFalseSkipsApply(t *testing.T) {
 
 func TestEnsureServiceAccount_CreateFalseMissingErrors(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.ROS.ServiceAccount.Create = new(false)
 	cfg.Spec.ROS.ServiceAccount.Name = "missing-ros-sa"
 
 	r := &CostManagementServiceConfigReconciler{
@@ -100,7 +100,7 @@ func TestEnsureServiceAccount_CreateFalseMissingErrors(t *testing.T) {
 
 func TestEnsureServiceAccount_CreateFalseGetError(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.CostManagement.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.CostManagement.ServiceAccount.Create = new(false)
 
 	c := fake.NewClientBuilder().
 		WithScheme(sharedConfigScheme(t)).
@@ -124,7 +124,7 @@ func TestEnsureServiceAccount_CreateFalseGetError(t *testing.T) {
 
 func TestEnsureServiceAccount_ROSCreateFalseSkipsApply(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.ROS.ServiceAccount.Create = new(false)
 	cfg.Spec.ROS.ServiceAccount.Name = "external-ros-sa"
 
 	existing := &corev1.ServiceAccount{
@@ -154,7 +154,7 @@ func TestEnsureServiceAccount_ROSCreateFalseSkipsApply(t *testing.T) {
 
 func TestReconcileSharedConfig_CreateFalseSkipsKokuSA(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.CostManagement.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.CostManagement.ServiceAccount.Create = new(false)
 	cfg.Spec.CostManagement.ServiceAccount.Name = "external-koku-sa"
 
 	existing := &corev1.ServiceAccount{
@@ -180,7 +180,7 @@ func TestReconcileSharedConfig_CreateFalseSkipsKokuSA(t *testing.T) {
 
 func TestReconcileSharedConfig_CreateFalseMissingSAErrors(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.CostManagement.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.CostManagement.ServiceAccount.Create = new(false)
 	cfg.Spec.CostManagement.ServiceAccount.Name = "missing-koku-sa"
 
 	r := &CostManagementServiceConfigReconciler{
@@ -202,7 +202,7 @@ func TestReconcileSharedConfig_CreateFalseMissingSAErrors(t *testing.T) {
 
 func TestROSCleanupObjects_OmitsSAWhenCreateFalse(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.ServiceAccount.Create = boolPtr(false)
+	cfg.Spec.ROS.ServiceAccount.Create = new(false)
 
 	for _, obj := range rosCleanupObjects(cfg) {
 		if obj.GetName() == resources.NameROSServiceAccount(cfg) {

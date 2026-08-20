@@ -447,7 +447,7 @@ func migrationJob(
 				ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, component)},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:           NameKokuServiceAccount(cfg),
-					AutomountServiceAccountToken: boolPtr(false),
+					AutomountServiceAccountToken: new(false),
 					RestartPolicy:                corev1.RestartPolicyOnFailure,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),
@@ -477,5 +477,3 @@ func migrationJob(
 		},
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }

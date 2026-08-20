@@ -25,7 +25,7 @@ import (
 func TestReconcileInfrastructure_ApplyStatefulSetCreate(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.Cache.Deploy = boolPtr(false)
+	cfg.Spec.Cache.Deploy = new(false)
 	// Database.Deploy defaults true → applyStatefulSet create path.
 
 	r := &CostManagementServiceConfigReconciler{
@@ -58,7 +58,7 @@ func TestReconcileInfrastructure_ApplyStatefulSetCreate(t *testing.T) {
 func TestReconcileInfrastructure_WaitsForStatefulSetRollout(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.Cache.Deploy = boolPtr(false)
+	cfg.Spec.Cache.Deploy = new(false)
 
 	existing := resources.DatabaseStatefulSet(cfg)
 	existing.Generation = 2
@@ -616,11 +616,11 @@ func TestVolumeModeEqual(t *testing.T) {
 		expected bool
 	}{
 		{name: "both nil", a: nil, b: nil, expected: true},
-		{name: "nil vs Filesystem", a: nil, b: ptr(corev1.PersistentVolumeFilesystem), expected: true},
-		{name: "Filesystem vs nil", a: ptr(corev1.PersistentVolumeFilesystem), b: nil, expected: true},
-		{name: "both Filesystem", a: ptr(corev1.PersistentVolumeFilesystem), b: ptr(corev1.PersistentVolumeFilesystem), expected: true},
-		{name: "Block vs Filesystem", a: ptr(corev1.PersistentVolumeBlock), b: ptr(corev1.PersistentVolumeFilesystem), expected: false},
-		{name: "Filesystem vs Block", a: ptr(corev1.PersistentVolumeFilesystem), b: ptr(corev1.PersistentVolumeBlock), expected: false},
+		{name: "nil vs Filesystem", a: nil, b: new(corev1.PersistentVolumeFilesystem), expected: true},
+		{name: "Filesystem vs nil", a: new(corev1.PersistentVolumeFilesystem), b: nil, expected: true},
+		{name: "both Filesystem", a: new(corev1.PersistentVolumeFilesystem), b: new(corev1.PersistentVolumeFilesystem), expected: true},
+		{name: "Block vs Filesystem", a: new(corev1.PersistentVolumeBlock), b: new(corev1.PersistentVolumeFilesystem), expected: false},
+		{name: "Filesystem vs Block", a: new(corev1.PersistentVolumeFilesystem), b: new(corev1.PersistentVolumeBlock), expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -688,8 +688,8 @@ func TestDataSourceEqual(t *testing.T) {
 	}{
 		{name: "both nil", a: nil, b: nil, expected: true},
 		{name: "one nil", a: nil, b: &corev1.TypedLocalObjectReference{}, expected: false},
-		{name: "equal", a: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
-		{name: "different name", a: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-2"}, expected: false},
+		{name: "equal", a: &corev1.TypedLocalObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
+		{name: "different name", a: &corev1.TypedLocalObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-2"}, expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -711,10 +711,10 @@ func TestDataSourceRefEqual(t *testing.T) {
 	}{
 		{name: "both nil", a: nil, b: nil, expected: true},
 		{name: "one nil", a: nil, b: &corev1.TypedObjectReference{}, expected: false},
-		{name: "equal", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
-		{name: "different kind", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "PVC", Name: "snap-1"}, expected: false},
-		{name: "different namespace", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: ptr("ns-a")}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: ptr("ns-b")}, expected: false},
-		{name: "equal including namespace", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: ptr("ns-a")}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: ptr("ns-a")}, expected: true},
+		{name: "equal", a: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
+		{name: "different kind", a: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "PVC", Name: "snap-1"}, expected: false},
+		{name: "different namespace", a: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: new("ns-a")}, b: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: new("ns-b")}, expected: false},
+		{name: "equal including namespace", a: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: new("ns-a")}, b: &corev1.TypedObjectReference{APIGroup: new(""), Kind: "VolumeSnapshot", Name: "snap-1", Namespace: new("ns-a")}, expected: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -734,9 +734,9 @@ func TestVolumeAttributesClassNameEqual(t *testing.T) {
 		expected bool
 	}{
 		{name: "both nil", a: nil, b: nil, expected: true},
-		{name: "one nil", a: nil, b: ptr("class-1"), expected: false},
-		{name: "equal", a: ptr("class-1"), b: ptr("class-1"), expected: true},
-		{name: "different", a: ptr("class-1"), b: ptr("class-2"), expected: false},
+		{name: "one nil", a: nil, b: new("class-1"), expected: false},
+		{name: "equal", a: new("class-1"), b: new("class-1"), expected: true},
+		{name: "different", a: new("class-1"), b: new("class-2"), expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -815,11 +815,11 @@ func TestPtrEqual(t *testing.T) {
 		expected bool
 	}{
 		{name: "both nil", expected: true},
-		{name: "one nil", b: ptr("gp3"), expected: false},
-		{name: "equal", a: ptr("gp3"), b: ptr("gp3"), expected: true},
-		{name: "different", a: ptr("gp3"), b: ptr("gp2"), expected: false},
-		{name: "nil vs empty string", a: nil, b: ptr(""), expected: false},
-		{name: "both empty string", a: ptr(""), b: ptr(""), expected: true},
+		{name: "one nil", b: new("gp3"), expected: false},
+		{name: "equal", a: new("gp3"), b: new("gp3"), expected: true},
+		{name: "different", a: new("gp3"), b: new("gp2"), expected: false},
+		{name: "nil vs empty string", a: nil, b: new(""), expected: false},
+		{name: "both empty string", a: new(""), b: new(""), expected: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -833,7 +833,7 @@ func TestPtrEqual(t *testing.T) {
 func TestReconcileInfrastructure_VCTMismatchOnReadyDB(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.Cache.Deploy = boolPtr(false)
+	cfg.Spec.Cache.Deploy = new(false)
 
 	// Pre-create a ready StatefulSet with 10Gi storage
 	existing := resources.DatabaseStatefulSet(cfg)
@@ -884,7 +884,7 @@ func TestReconcileInfrastructure_VCTMismatchOnReadyDB(t *testing.T) {
 func TestReconcile_VCTMismatchPersistsStatus(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.Cache.Deploy = boolPtr(false)
+	cfg.Spec.Cache.Deploy = new(false)
 	cfg.Spec.Global.ClusterDomain = "apps.example.com"
 	cfg.Spec.Global.StorageClass = "gp3"
 	cfg.Spec.ObjectStorage.SecretName = "s3-creds"
@@ -1004,8 +1004,4 @@ func TestApplyStatefulSet_SSACopiesLiveVCTBeforeApply(t *testing.T) {
 	if mode == nil || *mode != corev1.PersistentVolumeFilesystem {
 		t.Errorf("live VolumeMode should be preserved across SSA: got %+v", mode)
 	}
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }
