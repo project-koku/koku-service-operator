@@ -480,8 +480,6 @@ func migrationJob(
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // migrationServiceAccountName selects the family SA for a migration/bootstrap Job.
 // RBAC jobs share {cr}-rbac; Koku and ROS migrations keep {cr}-koku (ROS SA
 // wiring is COST-8054).
