@@ -1342,9 +1342,15 @@ spec:
                     properties:
                       bucketName:
                         default: koku-bucket
+                        description: |-
+                          Bucket name for Cost Management object storage (Koku REQUESTED_BUCKET).
+                          The bucket must already exist; the operator will not create it.
                         type: string
                       rosBucketName:
                         default: ros-data
+                        description: |-
+                          ROS object-storage bucket. Required when ros.enabled is true.
+                          The bucket must already exist; the operator will not create it.
                         type: string
                     type: object
                 type: object
@@ -1628,6 +1634,7 @@ spec:
                       When empty, the operator uses the same bucket as Koku REQUESTED_BUCKET
                       (status.discoveredConfig.s3.bucket, else spec.costManagement.storage.bucketName),
                       then "koku-bucket".
+                      The bucket must already exist; the operator will not create it.
                     type: string
                   validTypes:
                     default: hccm

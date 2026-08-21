@@ -156,8 +156,8 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-08-18T13:52:15Z"
-    operators.operatorframework.io/builder: operator-sdk-v1.41.1
+    createdAt: "2026-08-21T16:47:35Z"
+    operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1
   namespace: placeholder
