@@ -249,7 +249,7 @@ func KokuServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.S
 			Namespace: cfg.Namespace,
 			Labels:    Labels(cfg, "cost-management"),
 		},
-		AutomountServiceAccountToken: boolPtr(false),
+		AutomountServiceAccountToken: new(false),
 	}
 }
 

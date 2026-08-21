@@ -449,7 +449,7 @@ func migrationJob(
 				ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, component)},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:           migrationServiceAccountName(cfg, component),
-					AutomountServiceAccountToken: boolPtr(false),
+					AutomountServiceAccountToken: new(false),
 					RestartPolicy:                corev1.RestartPolicyOnFailure,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),
@@ -479,8 +479,6 @@ func migrationJob(
 		},
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 // migrationServiceAccountName selects the family SA for a migration/bootstrap Job.
 // RBAC jobs share {cr}-rbac; Koku and ROS migrations keep {cr}-koku (ROS SA

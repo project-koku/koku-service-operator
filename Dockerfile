@@ -1,7 +1,9 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786522985 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1787080706 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+
+ENV GOTOOLCHAIN=auto
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -22,12 +24,13 @@ COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wait-for ./cmd/wait-for/
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# Runtime is UBI Micro: Red Hat-signed RHEL content, no package manager, no shell.
+# Smaller TCB than ubi-minimal; same errata/scan stream as OpenShift.
+# Defaults to root user.
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1786321990
 WORKDIR /
-COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/wait-for .
+COPY --from=builder /workspace/manager /manager
+COPY --from=builder /workspace/wait-for /wait-for
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

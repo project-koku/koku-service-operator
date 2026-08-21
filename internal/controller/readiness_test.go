@@ -12,8 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func int32Ptr(i int32) *int32 { return &i }
-
 func TestIsDeploymentReady(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -25,7 +23,7 @@ func TestIsDeploymentReady(t *testing.T) {
 			name: "ready",
 			deploy: &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},
-				Spec:       appsv1.DeploymentSpec{Replicas: int32Ptr(2)},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
 				Status:     appsv1.DeploymentStatus{AvailableReplicas: 2},
 			},
 			want: true,
@@ -34,7 +32,7 @@ func TestIsDeploymentReady(t *testing.T) {
 			name: "not ready",
 			deploy: &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},
-				Spec:       appsv1.DeploymentSpec{Replicas: int32Ptr(2)},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
 				Status:     appsv1.DeploymentStatus{AvailableReplicas: 1},
 			},
 			want: false,
@@ -43,7 +41,7 @@ func TestIsDeploymentReady(t *testing.T) {
 			name: "zero replicas is ready",
 			deploy: &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},
-				Spec:       appsv1.DeploymentSpec{Replicas: int32Ptr(0)},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(0))},
 			},
 			want: true,
 		},
@@ -109,7 +107,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "ready",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns", Generation: 1},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(1)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(1))},
 				Status: appsv1.StatefulSetStatus{
 					ObservedGeneration: 1,
 					ReadyReplicas:      1,
@@ -124,7 +122,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "not ready",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns"},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(1)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(1))},
 				Status:     appsv1.StatefulSetStatus{ReadyReplicas: 0},
 			},
 			want: false,
@@ -133,7 +131,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "stale observed generation",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns", Generation: 2},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(1)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(1))},
 				Status: appsv1.StatefulSetStatus{
 					ObservedGeneration: 1,
 					ReadyReplicas:      1,
@@ -148,7 +146,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "stale pods during rollout",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns", Generation: 2},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(1)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(1))},
 				Status: appsv1.StatefulSetStatus{
 					ObservedGeneration: 2,
 					ReadyReplicas:      1,
@@ -163,7 +161,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "updated replicas lag desired",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns", Generation: 2},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(2)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(2))},
 				Status: appsv1.StatefulSetStatus{
 					ObservedGeneration: 2,
 					ReadyReplicas:      2,
@@ -178,7 +176,7 @@ func TestIsStatefulSetReady(t *testing.T) {
 			name: "zero replicas is ready",
 			ss: &appsv1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns"},
-				Spec:       appsv1.StatefulSetSpec{Replicas: int32Ptr(0)},
+				Spec:       appsv1.StatefulSetSpec{Replicas: new(int32(0))},
 			},
 			want: true,
 		},
