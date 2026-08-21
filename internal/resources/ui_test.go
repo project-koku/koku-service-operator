@@ -36,6 +36,17 @@ func uiTestCfg() *costv1alpha1.CostManagementServiceConfig {
 	return cfg
 }
 
+func TestUIDeploymentServiceAccount(t *testing.T) {
+	dep := UIDeployment(uiTestCfg())
+	spec := dep.Spec.Template.Spec
+	if spec.ServiceAccountName != NameUIServiceAccount(uiTestCfg()) {
+		t.Errorf("ServiceAccountName = %q, want %q", spec.ServiceAccountName, NameUIServiceAccount(uiTestCfg()))
+	}
+	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
+		t.Errorf("AutomountServiceAccountToken = %v, want false", spec.AutomountServiceAccountToken)
+	}
+}
+
 func TestUIDeploymentOAuthProxySecurityContext(t *testing.T) {
 	dep := UIDeployment(uiTestCfg())
 	proxy := containerByName(t, dep.Spec.Template.Spec.Containers, "oauth-proxy")
@@ -270,6 +281,54 @@ func TestUIRoute_NilWithoutClusterDomain(t *testing.T) {
 	cfg := testCfg()
 	if UIRoute(cfg) != nil {
 		t.Error("expected nil Route when cluster domain is missing")
+	}
+}
+
+func TestUIRoute_GlobalClusterDomainFallback(t *testing.T) {
+	cfg := uiTestCfg()
+	cfg.Status.DiscoveredConfig = nil
+	cfg.Spec.Global.ClusterDomain = "apps.from-spec.example.com"
+
+	route := UIRoute(cfg)
+	if route == nil {
+		t.Fatal("expected Route when spec.global.clusterDomain is set")
+	}
+	wantHost := fmt.Sprintf("%s-ui-%s.%s", cfg.Name, cfg.Namespace, "apps.from-spec.example.com")
+	host, found, err := unstructured.NestedString(route.Object, "spec", "host")
+	if err != nil || !found {
+		t.Fatalf("spec.host missing: found=%v err=%v", found, err)
+	}
+	if host != wantHost {
+		t.Errorf("spec.host = %q, want %q", host, wantHost)
+	}
+	term, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
+	if term != "passthrough" {
+		t.Errorf("tls.termination = %q, want passthrough", term)
+	}
+
+	cl := ConsoleLink(cfg)
+	href, found, err := unstructured.NestedString(cl.Object, "spec", "href")
+	if err != nil || !found {
+		t.Fatalf("ConsoleLink spec.href missing: found=%v err=%v", found, err)
+	}
+	wantHref := fmt.Sprintf("https://%s/", wantHost)
+	if href != wantHref {
+		t.Errorf("ConsoleLink href = %q, want %q", href, wantHref)
+	}
+
+	wantRedirect := "--redirect-url=https://" + wantHost + "/oauth2/callback"
+	proxy := containerByName(t, UIDeployment(cfg).Spec.Template.Spec.Containers, "oauth-proxy")
+	if !slices.Contains(proxy.Args, wantRedirect) {
+		t.Errorf("oauth2-proxy args missing %q\ngot %q", wantRedirect, proxy.Args)
+	}
+
+	// Discovered domain wins over spec.global when both are set.
+	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{ClusterDomain: "apps.discovered.example.com"}
+	route = UIRoute(cfg)
+	host, _, _ = unstructured.NestedString(route.Object, "spec", "host")
+	wantDiscovered := fmt.Sprintf("%s-ui-%s.%s", cfg.Name, cfg.Namespace, "apps.discovered.example.com")
+	if host != wantDiscovered {
+		t.Errorf("discovered must win: spec.host = %q, want %q", host, wantDiscovered)
 	}
 }
 

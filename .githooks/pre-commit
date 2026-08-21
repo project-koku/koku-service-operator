@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Block commits that would fail CI lint.
+# Git does not read this directory by default. Enable once per clone:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+if ! grep -qE '\.go$|^go\.(mod|sum)$|^\.golangci\.yml$' <<<"$staged"; then
+	exit 0
+fi
+
+echo "pre-commit: make lint (golangci-lint v2.12.2)"
+make lint

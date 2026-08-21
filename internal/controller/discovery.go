@@ -16,6 +16,8 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+const openShiftConfigAPIGroup = "config.openshift.io"
+
 // reconcileDiscovery is Stage 0 of the reconcile pipeline.
 // It auto-detects the cluster domain and default StorageClass from the cluster
 // and writes the results into status.discoveredConfig.
@@ -101,12 +103,12 @@ func (r *CostManagementServiceConfigReconciler) resolveStorageClass(ctx context.
 func discoverClusterDomain(ctx context.Context, c client.Client) (string, error) {
 	ingress := &unstructured.Unstructured{}
 	ingress.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "config.openshift.io",
+		Group:   openShiftConfigAPIGroup,
 		Version: "v1",
 		Kind:    "Ingress",
 	})
 	if err := c.Get(ctx, types.NamespacedName{Name: "cluster"}, ingress); err != nil {
-		return "", fmt.Errorf("get config.openshift.io/v1 Ingress/cluster: %w", err)
+		return "", fmt.Errorf("get %s/v1 Ingress/cluster: %w", openShiftConfigAPIGroup, err)
 	}
 	domain, found, err := unstructured.NestedString(ingress.Object, "spec", "domain")
 	if err != nil {

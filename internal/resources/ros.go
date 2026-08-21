@@ -353,6 +353,9 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 		volumes = append(volumes, *v)
 		mounts = append(mounts, *m)
 	}
+	if extra := UserCAExtraVolume(cfg); extra != nil {
+		volumes = append(volumes, *extra)
+	}
 
 	env := rosDBEnv(cfg)
 	env = rosKafkaEnv(cfg, env)

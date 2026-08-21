@@ -8,6 +8,24 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+func TestRBACAPIDeploymentServiceAccount(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "test"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image: costv1alpha1.ImageSpec{Repository: "rbac", Tag: "test"},
+			},
+		},
+	}
+	dep := RBACAPIDeployment(cfg)
+	if dep.Spec.Template.Spec.ServiceAccountName != NameRBACServiceAccount(cfg) {
+		t.Errorf("ServiceAccountName = %q, want %q", dep.Spec.Template.Spec.ServiceAccountName, NameRBACServiceAccount(cfg))
+	}
+	if dep.Spec.Template.Spec.AutomountServiceAccountToken == nil || *dep.Spec.Template.Spec.AutomountServiceAccountToken {
+		t.Errorf("AutomountServiceAccountToken = %v, want false", dep.Spec.Template.Spec.AutomountServiceAccountToken)
+	}
+}
+
 func TestRBACEnvAPIPathPrefix(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
 	cfg.Name = "cost-onprem"
@@ -120,6 +138,12 @@ func TestRBACWorkerDeployment(t *testing.T) {
 	dep := RBACWorkerDeployment(cfg)
 	if dep.Name != "test-rbac-worker" {
 		t.Errorf("Name = %q, want test-rbac-worker", dep.Name)
+	}
+	if dep.Spec.Template.Spec.ServiceAccountName != NameRBACServiceAccount(cfg) {
+		t.Errorf("ServiceAccountName = %q, want %q", dep.Spec.Template.Spec.ServiceAccountName, NameRBACServiceAccount(cfg))
+	}
+	if dep.Spec.Template.Spec.AutomountServiceAccountToken == nil || *dep.Spec.Template.Spec.AutomountServiceAccountToken {
+		t.Errorf("AutomountServiceAccountToken = %v, want false", dep.Spec.Template.Spec.AutomountServiceAccountToken)
 	}
 	if len(dep.Spec.Template.Spec.Containers) != 1 {
 		t.Fatalf("expected 1 container, got %d", len(dep.Spec.Template.Spec.Containers))

@@ -55,6 +55,25 @@ func ingressFromPods(cfg *costv1alpha1.CostManagementServiceConfig, port int32, 
 	return rules
 }
 
+// monitoringFrom allows OpenShift platform and user-workload Prometheus to
+// scrape the given container port.
+func monitoringFrom(port int32) networkingv1.NetworkPolicyIngressRule {
+	return networkingv1.NetworkPolicyIngressRule{
+		From: []networkingv1.NetworkPolicyPeer{
+			{NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"network.openshift.io/policy-group": "monitoring"},
+			}},
+			{NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-monitoring"},
+			}},
+			{NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-user-workload-monitoring"},
+			}},
+		},
+		Ports: []networkingv1.NetworkPolicyPort{tcpPort(port)},
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Gateway (Envoy JWT proxy)
 // -----------------------------------------------------------------------------
@@ -80,17 +99,7 @@ func GatewayNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 		// UI nginx proxying /api/ to the gateway
 		podFrom(cfg, "ui", envoyHTTPPort),
 		// Prometheus scraping admin/metrics port
-		{
-			From: []networkingv1.NetworkPolicyPeer{
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"network.openshift.io/policy-group": "monitoring"},
-				}},
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-monitoring"},
-				}},
-			},
-			Ports: []networkingv1.NetworkPolicyPort{tcpPort(envoyAdminPort)},
-		},
+		monitoringFrom(envoyAdminPort),
 	})
 }
 
@@ -98,11 +107,12 @@ func GatewayNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 // Ingress upload handler
 // -----------------------------------------------------------------------------
 
-// IngressNetworkPolicy allows traffic to the upload handler only from the gateway.
-// All uploads must pass through Envoy JWT validation before reaching the handler.
+// IngressNetworkPolicy allows traffic to the upload handler from the gateway
+// (JWT-validated uploads) and Prometheus scrape of the metrics port.
 func IngressNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
 	return netpol(cfg, cfg.Name+"-ingress", "ingress", []networkingv1.NetworkPolicyIngressRule{
 		podFrom(cfg, "gateway", ingressHTTPPort),
+		monitoringFrom(ingressMetricsPort),
 	})
 }
 
@@ -213,6 +223,35 @@ func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *netwo
 }
 
 // -----------------------------------------------------------------------------
+// UI (oauth2-proxy)
+// -----------------------------------------------------------------------------
+
+// UINetworkPolicy allows OpenShift ingress to reach the UI oauth2-proxy on 8443.
+func UINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	return netpol(cfg, cfg.Name+"-ui", "ui", []networkingv1.NetworkPolicyIngressRule{{
+		From: []networkingv1.NetworkPolicyPeer{
+			{NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"network.openshift.io/policy-group": "ingress"},
+			}},
+			{NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-ingress"},
+			}},
+		},
+		Ports: []networkingv1.NetworkPolicyPort{tcpPort(uiProxyPort)},
+	}})
+}
+
+// -----------------------------------------------------------------------------
+// Listener (Kafka consumer — no Service)
+// -----------------------------------------------------------------------------
+
+// ListenerNetworkPolicy denies all inbound traffic to the Kafka listener.
+// The listener has no Service; it only consumes from Kafka.
+func ListenerNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	return netpol(cfg, cfg.Name+"-listener", "listener", nil)
+}
+
+// -----------------------------------------------------------------------------
 // Koku API
 // -----------------------------------------------------------------------------
 
@@ -221,21 +260,12 @@ func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *netwo
 // Route (COST-8060). In normal runtime no other workload calls Masu over HTTP;
 // report processing is driven by Kafka and Celery. This policy blocks casual
 // same-namespace access to admin endpoints on port 9000; app-level auth is
-// tracked under COST-7841. Prometheus may scrape metrics on the same port.
+// tracked under COST-7841. Prometheus (platform + UWM) may scrape metrics on
+// the same port.
 func MasuNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
-	const masuPort = int32(9000)
+	const masuMetricsPort = int32(9000)
 	return netpol(cfg, cfg.Name+"-masu", "cost-processor", []networkingv1.NetworkPolicyIngressRule{
-		{
-			From: []networkingv1.NetworkPolicyPeer{
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"network.openshift.io/policy-group": "monitoring"},
-				}},
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-monitoring"},
-				}},
-			},
-			Ports: []networkingv1.NetworkPolicyPort{tcpPort(masuPort)},
-		},
+		monitoringFrom(masuMetricsPort),
 	})
 }
 
@@ -251,17 +281,6 @@ func KokuAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 		podFrom(cfg, "gateway", kokuAPIPort),
 		podFrom(cfg, "cost-processor", kokuAPIPort),
 		podFrom(cfg, "ros-housekeeper", kokuAPIPort),
-		// Prometheus scraping metrics port
-		{
-			From: []networkingv1.NetworkPolicyPeer{
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"network.openshift.io/policy-group": "monitoring"},
-				}},
-				{NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-monitoring"},
-				}},
-			},
-			Ports: []networkingv1.NetworkPolicyPort{tcpPort(kokuMetricsPort)},
-		},
+		monitoringFrom(kokuMetricsPort),
 	})
 }

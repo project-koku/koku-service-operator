@@ -165,13 +165,6 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 
 	falseVal := false
 	init := CACombineInitContainer(cfg)
-	if cfg.Spec.Auth.Keycloak.TLS.CACertSecretName != "" {
-		init.VolumeMounts = append(init.VolumeMounts, corev1.VolumeMount{
-			Name:      "keycloak-ca",
-			MountPath: "/ca-extra",
-			ReadOnly:  true,
-		})
-	}
 	return &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -194,6 +187,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 					},
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:           NameGatewayServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),
@@ -248,10 +242,9 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 }
 
 // envoyVolumes builds the volume list for the Envoy Deployment.
-// When auth.keycloak.tls.caCertSecretName is set, the named Secret is added
-// as an extra ca-source so CACombineInitContainer merges its CA into the
-// bundle that Envoy uses for JWKS endpoint TLS verification. Without this,
-// Envoy cannot verify Keycloak Route certificates signed by the router CA.
+// User CA secrets (Keycloak, Kafka, cache, object storage) are projected at
+// /ca-extra so CACombineInitContainer merges them into the bundle Envoy uses
+// for JWKS TLS verification.
 func envoyVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume {
 	vols := []corev1.Volume{
 		{
@@ -285,16 +278,8 @@ func envoyVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume
 		{Name: "combined-ca-bundle", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
-	if secret := cfg.Spec.Auth.Keycloak.TLS.CACertSecretName; secret != "" {
-		vols = append(vols, corev1.Volume{
-			Name: "keycloak-ca",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: secret,
-					Items:      []corev1.KeyToPath{{Key: "ca.crt", Path: "keycloak-ca.crt"}},
-				},
-			},
-		})
+	if extra := UserCAExtraVolume(cfg); extra != nil {
+		vols = append(vols, *extra)
 	}
 	return vols
 }

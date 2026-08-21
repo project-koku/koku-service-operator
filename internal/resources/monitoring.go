@@ -13,7 +13,7 @@ var (
 )
 
 // serviceMonitor builds a ServiceMonitor that selects Services by component label.
-func serviceMonitor(cfg *costv1alpha1.CostManagementServiceConfig, name, portName string, components []string) *unstructured.Unstructured {
+func serviceMonitor(cfg *costv1alpha1.CostManagementServiceConfig, name, portName, path string, components []string) *unstructured.Unstructured {
 	matchExpressions := make([]any, len(components))
 	for i, c := range components {
 		matchExpressions[i] = c
@@ -28,7 +28,7 @@ func serviceMonitor(cfg *costv1alpha1.CostManagementServiceConfig, name, portNam
 	_ = unstructured.SetNestedSlice(sm.Object, []any{
 		map[string]any{
 			"port":     portName,
-			"path":     "/metrics",
+			"path":     path,
 			"interval": "30s",
 		},
 	}, "spec", "endpoints")
@@ -51,23 +51,25 @@ func serviceMonitor(cfg *costv1alpha1.CostManagementServiceConfig, name, portNam
 	return sm
 }
 
-// AppServiceMonitor watches all application services that expose metrics on port 9000.
+// AppServiceMonitor scrapes beta managed workloads that expose Prometheus
+// /metrics on a Service port named "metrics": Koku API, Masu, and Ingress.
+// Listener / ROS / Kruize / Gateway are intentionally excluded (no named metrics
+// port, wrong path, or out of beta).
 func AppServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	return serviceMonitor(cfg, cfg.Name+"-app-metrics", "metrics", []string{
-		"cost-management-api", "cost-processor", "listener",
-		"ros-api", "ingress",
+	return serviceMonitor(cfg, cfg.Name+"-app-metrics", "metrics", "/metrics", []string{
+		"cost-management-api", "cost-processor", "ingress",
 	})
 }
 
 // KruizeServiceMonitor watches Kruize which exposes metrics on port 8080.
+// Not applied in beta; retained for ROS cleanup when ros.enabled flips false.
 func KruizeServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	return serviceMonitor(cfg, cfg.Name+"-kruize-metrics", "metrics", []string{"ros-optimization"})
+	return serviceMonitor(cfg, cfg.Name+"-kruize-metrics", "metrics", "/metrics", []string{"ros-optimization"})
 }
 
 // OperatorServiceMonitor watches the controller-manager metrics endpoint.
-// The manager service is in the operator's own namespace (not the CR namespace)
-// so we create this monitor in the operator namespace and rely on the caller
-// to apply it cluster-scoped or in the manager namespace.
+// In-cluster metrics bind to :8443 over HTTP (SecureServing unset); the Service
+// port is still named "https". Scrape with scheme http on that port name.
 func OperatorServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
 	sm := &unstructured.Unstructured{}
 	sm.SetGroupVersionKind(serviceMonitorGVK)
@@ -80,107 +82,124 @@ func OperatorServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unst
 			"port":     "https",
 			"path":     "/metrics",
 			"interval": "30s",
-			"scheme":   "https",
-			"tlsConfig": map[string]any{
-				"insecureSkipVerify": true,
-			},
+			"scheme":   "http",
 		},
 	}, "spec", "endpoints")
 	_ = unstructured.SetNestedStringMap(sm.Object, map[string]string{
-		"control-plane": "controller-manager",
+		"control-plane":          "controller-manager",
+		"app.kubernetes.io/name": "koku-service-operator",
 	}, "spec", "selector", "matchLabels")
+	_ = unstructured.SetNestedSlice(sm.Object, []any{cfg.Namespace}, "spec", "namespaceSelector", "matchNames")
 
 	return sm
 }
 
-// PrometheusRules returns a PrometheusRule with the five alert rules for the
-// cost management operator. The caller applies it in the CR's namespace.
+// GatewayServiceMonitor scrapes Envoy admin Prometheus stats (G2 leftover).
+func GatewayServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
+	return serviceMonitor(cfg, cfg.Name+"-gateway-metrics", "admin", "/stats/prometheus", []string{"gateway"})
+}
+
+// PrometheusRules returns UWM-evaluable alert rules (COST-8108 option B gauges +
+// App/operator scrape series). Condition alerts use costmanagement_condition.
+// Deferred until emit/scrape paths exist: SecretRotated / DriftCorrected
+// (COST-7694 / G4); CeleryBacklog (needs Celery worker Service + metrics scrape).
 func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
 	instance := cfg.Name
 	ns := cfg.Namespace
+	kokuAPIService := NameKokuAPI(cfg)
+	cond := func(typ, status string) string {
+		return `costmanagement_condition{namespace="` + ns + `",name="` + instance + `",type="` + typ + `",status="` + status + `"} == 1`
+	}
+	// cr_name avoids overwriting Prometheus's reserved "instance" (scrape target).
+	labels := func(severity string) map[string]any {
+		return map[string]any{
+			"severity": severity,
+			"cr_name":  instance,
+		}
+	}
 
 	rules := []any{
-		// 1 — migration stuck / failed
 		map[string]any{
-			"alert": "CostManagementMigrationFailed",
-			"expr":  `kube_job_status_failed{namespace="` + ns + `",job_name=~"` + instance + `-(koku|ros|rbac)-migrate"} > 0`,
-			"for":   "1m",
-			"labels": map[string]any{
-				"severity": "critical",
-				"instance": instance,
-			},
+			"alert":  "CostManagementMigrationFailed",
+			"expr":   `costmanagement_migration_job_failed{namespace="` + ns + `",name="` + instance + `"} == 1`,
+			"for":    "1m",
+			"labels": labels("critical"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management migration job failed",
-				"description": "Migration job {{ $labels.job_name }} has failed. Schema upgrades are blocked.",
+				"description": "Migration job {{ $labels.job }} has failed. Schema upgrades are blocked.",
 			},
 		},
-		// 2 — operator degraded (condition)
 		map[string]any{
-			"alert": "CostManagementDegraded",
-			"expr": `kube_customresource_status_condition{` +
-				`customresource_kind="CostManagementServiceConfig",` +
-				`customresource_name="` + instance + `",` +
-				`namespace="` + ns + `",` +
-				`condition="Degraded",status="true"} == 1`,
-			"for": "5m",
-			"labels": map[string]any{
-				"severity": "critical",
-				"instance": instance,
+			"alert":  "CostManagementMigrationStalled",
+			"expr":   cond("SchemaUpToDate", "False"),
+			"for":    "10m",
+			"labels": labels("warning"),
+			"annotations": map[string]any{
+				"summary":     "Cost Management schema migration stalled",
+				"description": "Database schema is not up to date for {{ $labels.name }} for more than 10 minutes.",
 			},
+		},
+		map[string]any{
+			"alert":  "CostManagementDegraded",
+			"expr":   cond("Degraded", "True"),
+			"for":    "5m",
+			"labels": labels("critical"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management operator is degraded",
-				"description": "The CostManagementServiceConfig {{ $labels.customresource_name }} has been in Degraded state for 5 minutes.",
+				"description": "The CostManagementServiceConfig {{ $labels.name }} has been in Degraded state for 5 minutes.",
 			},
 		},
-		// 3 — schema not up to date
 		map[string]any{
-			"alert": "CostManagementSchemaOutOfDate",
-			"expr": `kube_customresource_status_condition{` +
-				`customresource_kind="CostManagementServiceConfig",` +
-				`customresource_name="` + instance + `",` +
-				`namespace="` + ns + `",` +
-				`condition="SchemaUpToDate",status="false"} == 1`,
-			"for": "15m",
-			"labels": map[string]any{
-				"severity": "warning",
-				"instance": instance,
-			},
+			"alert":  "CostManagementDependencyDown",
+			"expr":   `(` + cond("DatabaseReady", "False") + `) or (` + cond("CacheReady", "False") + `)`,
+			"for":    "5m",
+			"labels": labels("critical"),
 			"annotations": map[string]any{
-				"summary":     "Cost Management schema migrations pending",
-				"description": "Database schema is not up to date for {{ $labels.customresource_name }}. Migrations may be stuck.",
+				"summary":     "Cost Management dependency validation failed",
+				"description": "DatabaseReady or CacheReady is False on {{ $labels.name }} for more than 5 minutes.",
 			},
 		},
-		// 4 — koku API unavailable (scrape fail or target gone)
 		map[string]any{
-			"alert": "CostManagementAPIDown",
-			"expr": `(up{job="` + instance + `-koku-api",namespace="` + ns + `"} == 0)` +
-				` or (absent(up{job="` + instance + `-koku-api",namespace="` + ns + `"}) == 1)`,
-			"for": "5m",
-			"labels": map[string]any{
-				"severity": "critical",
-				"instance": instance,
-			},
+			"alert":  "CostManagementPodRestarting",
+			"expr":   `costmanagement_managed_pod_restarts{namespace="` + ns + `",name="` + instance + `"} > 3`,
+			"for":    "15m",
+			"labels": labels("warning"),
 			"annotations": map[string]any{
-				"summary":     "Cost Management API is unreachable",
-				"description": "The koku-api metrics endpoint has been down or absent for 5 minutes.",
+				"summary":     "Cost Management managed pod restarting",
+				"description": "Pod {{ $labels.pod }} container {{ $labels.container }} has restart count > 3 for 15 minutes.",
 			},
 		},
-		// 5 — operator not progressing (stuck reconcile)
 		map[string]any{
-			"alert": "CostManagementNotProgressing",
-			"expr": `kube_customresource_status_condition{` +
-				`customresource_kind="CostManagementServiceConfig",` +
-				`customresource_name="` + instance + `",` +
-				`namespace="` + ns + `",` +
-				`condition="Available",status="false"} == 1`,
-			"for": "30m",
-			"labels": map[string]any{
-				"severity": "warning",
-				"instance": instance,
-			},
+			"alert":  "CostManagementNotAvailable",
+			"expr":   cond("Available", "False"),
+			"for":    "30m",
+			"labels": labels("warning"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management stack is not available",
-				"description": "CostManagementServiceConfig {{ $labels.customresource_name }} has not become Available in 30 minutes.",
+				"description": "CostManagementServiceConfig {{ $labels.name }} has Available=False for 30 minutes.",
+			},
+		},
+		map[string]any{
+			"alert": "CostManagementAPIDown",
+			"expr": `(up{namespace="` + ns + `",service="` + kokuAPIService + `"} == 0)` +
+				` or (absent(up{namespace="` + ns + `",service="` + kokuAPIService + `"}) == 1)`,
+			"for":    "5m",
+			"labels": labels("critical"),
+			"annotations": map[string]any{
+				"summary":     "Cost Management API metrics endpoint unreachable",
+				"description": "Prometheus cannot scrape /metrics on Service {{ $labels.service }} in namespace {{ $labels.namespace }} (down or absent) for more than 5 minutes.",
+			},
+		},
+		map[string]any{
+			// Any reconcile error in the last 15m (for:0m avoids boundary flapping
+			// with increase(...[15m]) and for:15m).
+			"alert":  "CostManagementReconcileFailure",
+			"expr":   `increase(costmanagement_reconcile_errors_total{namespace="` + ns + `",name="` + instance + `"}[15m]) > 0`,
+			"for":    "0m",
+			"labels": labels("warning"),
+			"annotations": map[string]any{
+				"summary":     "Cost Management reconcile errors",
+				"description": "Operator reconcile errors for {{ $labels.name }} over the last 15 minutes.",
 			},
 		},
 	}

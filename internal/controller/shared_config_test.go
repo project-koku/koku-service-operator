@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -137,17 +138,7 @@ func TestEnsureSecretCreatedInBundledMode(t *testing.T) {
 func fakeClientWithApplySupport(scheme *runtime.Scheme, objs ...client.Object) client.Client {
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithInterceptorFuncs(interceptor.Funcs{
 		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
-			key := client.ObjectKeyFromObject(obj)
-			existing := obj.DeepCopyObject().(client.Object)
-			err := c.Get(ctx, key, existing)
-			if apierrors.IsNotFound(err) {
-				return c.Create(ctx, obj)
-			}
-			if err != nil {
-				return err
-			}
-			obj.SetResourceVersion(existing.GetResourceVersion())
-			return c.Update(ctx, obj)
+			return applyAsCreateOrUpdate(ctx, c, obj)
 		},
 	}).Build()
 }
@@ -156,6 +147,8 @@ func fakeClientWithApplySupport(scheme *runtime.Scheme, objs ...client.Object) c
 // Deployment/StatefulSet status subresources. Builder objects have empty Status;
 // without the subresource, Update ignores Status writes and a second apply()
 // cannot see AvailableReplicas seeded after the first pass.
+// Unstructured object status (OpenShift Routes) is copied across apply so
+// seeded Route admission survives SSA-style Patch.
 func fakeClientPreservingStatus(scheme *runtime.Scheme, objs ...client.Object) client.Client {
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -163,20 +156,62 @@ func fakeClientPreservingStatus(scheme *runtime.Scheme, objs ...client.Object) c
 		WithStatusSubresource(&appsv1.Deployment{}, &appsv1.StatefulSet{}).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
-				key := client.ObjectKeyFromObject(obj)
-				existing := obj.DeepCopyObject().(client.Object)
-				err := c.Get(ctx, key, existing)
-				if apierrors.IsNotFound(err) {
-					return c.Create(ctx, obj)
-				}
-				if err != nil {
-					return err
-				}
-				obj.SetResourceVersion(existing.GetResourceVersion())
-				// With status subresource enabled, Update leaves Status intact.
-				return c.Update(ctx, obj)
+				return applyAsCreateOrUpdate(ctx, c, obj)
 			},
 		}).Build()
+}
+
+func applyAsCreateOrUpdate(ctx context.Context, c client.WithWatch, obj client.Object) error {
+	key := client.ObjectKeyFromObject(obj)
+	existing := obj.DeepCopyObject().(client.Object)
+	err := c.Get(ctx, key, existing)
+	if apierrors.IsNotFound(err) {
+		return c.Create(ctx, obj)
+	}
+	if err != nil {
+		return err
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	preserveUnstructuredStatus(obj, existing)
+	return c.Update(ctx, obj)
+}
+
+func preserveUnstructuredStatus(dst, src client.Object) {
+	srcU, ok := src.(*unstructured.Unstructured)
+	if !ok {
+		return
+	}
+	dstU, ok := dst.(*unstructured.Unstructured)
+	if !ok {
+		return
+	}
+	status, found, err := unstructured.NestedFieldCopy(srcU.Object, "status")
+	if err != nil || !found {
+		return
+	}
+	_ = unstructured.SetNestedField(dstU.Object, status, "status")
+}
+
+func markRouteAdmitted(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(routeGVK())
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, route); err != nil {
+		t.Fatalf("get route %s: %v", name, err)
+	}
+	if err := unstructured.SetNestedSlice(route.Object, []any{
+		map[string]any{
+			"host": "admitted.example.com",
+			"conditions": []any{
+				map[string]any{"type": routeAdmittedType, "status": "True"},
+			},
+		},
+	}, "status", "ingress"); err != nil {
+		t.Fatalf("set route status: %v", err)
+	}
+	if err := c.Update(context.Background(), route); err != nil {
+		t.Fatalf("update route %s status: %v", name, err)
+	}
 }
 
 // markDeploymentReady sets AvailableReplicas to Spec.Replicas so isDeploymentReady

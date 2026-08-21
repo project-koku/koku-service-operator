@@ -38,7 +38,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 func openShiftIngress(domain string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "config.openshift.io",
+		Group:   openShiftConfigAPIGroup,
 		Version: "v1",
 		Kind:    "Ingress",
 	})

@@ -249,6 +249,22 @@ func NameEnvoy(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-gateway"
 }
 
+func NameGatewayServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-gateway"
+}
+
+func NameIngressServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-ingress"
+}
+
+func NameRBACServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-rbac"
+}
+
+func NameUIServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-ui"
+}
+
 func NameEnvoyConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-gateway-envoy-config"
 }

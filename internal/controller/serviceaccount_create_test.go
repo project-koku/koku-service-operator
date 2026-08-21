@@ -16,6 +16,38 @@ import (
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
+func TestReconcileSharedConfig_AppliesFamilyServiceAccounts(t *testing.T) {
+	cfg := minimalCR(testCRName, testNamespace)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClientWithApplySupport(sharedConfigScheme(t)),
+		Recorder: &noopRecorder{},
+	}
+
+	if _, err := r.reconcileSharedConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileSharedConfig: %v", err)
+	}
+
+	for _, name := range []string{
+		resources.NameKokuServiceAccount(cfg),
+		resources.NameGatewayServiceAccount(cfg),
+		resources.NameIngressServiceAccount(cfg),
+		resources.NameRBACServiceAccount(cfg),
+		resources.NameUIServiceAccount(cfg),
+	} {
+		got := &corev1.ServiceAccount{}
+		if err := r.Get(context.Background(), types.NamespacedName{Namespace: testNamespace, Name: name}, got); err != nil {
+			t.Errorf("expected ServiceAccount %s: %v", name, err)
+			continue
+		}
+		if len(got.OwnerReferences) != 1 {
+			t.Errorf("%s: expected ownerRef, got %d", name, len(got.OwnerReferences))
+		}
+		if got.AutomountServiceAccountToken == nil || *got.AutomountServiceAccountToken {
+			t.Errorf("%s: AutomountServiceAccountToken = %v, want false", name, got.AutomountServiceAccountToken)
+		}
+	}
+}
+
 func TestEnsureServiceAccount_CreateTrueApplies(t *testing.T) {
 	cfg := minimalCR(testCRName, testNamespace)
 	r := &CostManagementServiceConfigReconciler{

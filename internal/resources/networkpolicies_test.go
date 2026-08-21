@@ -29,21 +29,24 @@ func TestGatewayNetworkPolicy(t *testing.T) {
 	}
 }
 
-func TestIngressNetworkPolicy_GatewayOnly(t *testing.T) {
+func TestIngressNetworkPolicy_GatewayAndMonitoring(t *testing.T) {
 	cfg := testCfg()
 	np := IngressNetworkPolicy(cfg)
 	if np.Name != cfg.Name+"-ingress" {
 		t.Errorf("Name = %q", np.Name)
 	}
 	assertIngressOnly(t, np)
-	if len(np.Spec.Ingress) != 1 {
-		t.Fatalf("expected single gateway rule, got %d", len(np.Spec.Ingress))
+	if len(np.Spec.Ingress) != 2 {
+		t.Fatalf("expected gateway + monitoring rules, got %d", len(np.Spec.Ingress))
 	}
 	if !peerHasComponent(np.Spec.Ingress[0], "gateway") {
 		t.Error("ingress rule must allow from gateway")
 	}
 	if !ruleAllowsPort(np.Spec.Ingress, ingressHTTPPort) {
 		t.Errorf("missing ingress HTTP port %d", ingressHTTPPort)
+	}
+	if !ruleAllowsPort(np.Spec.Ingress, ingressMetricsPort) {
+		t.Errorf("missing ingress metrics port %d", ingressMetricsPort)
 	}
 }
 
@@ -100,12 +103,13 @@ func TestMasuNetworkPolicy(t *testing.T) {
 		t.Fatalf("expected single monitoring rule, got %d", len(np.Spec.Ingress))
 	}
 	rule := np.Spec.Ingress[0]
-	if len(rule.From) != 2 {
-		t.Fatalf("expected 2 monitoring namespace peers, got %d", len(rule.From))
+	if len(rule.From) != 3 {
+		t.Fatalf("expected 3 monitoring namespace peers, got %d", len(rule.From))
 	}
 	wantNSLabels := []map[string]string{
 		{"network.openshift.io/policy-group": "monitoring"},
 		{"kubernetes.io/metadata.name": "openshift-monitoring"},
+		{"kubernetes.io/metadata.name": "openshift-user-workload-monitoring"},
 	}
 	matched := make([]bool, len(wantNSLabels))
 	for _, from := range rule.From {
@@ -259,6 +263,46 @@ func TestDatabaseNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestUINetworkPolicy(t *testing.T) {
+	cfg := testCfg()
+	np := UINetworkPolicy(cfg)
+	if np.Name != cfg.Name+"-ui" {
+		t.Errorf("Name = %q, want %s-ui", np.Name, cfg.Name)
+	}
+	assertIngressOnly(t, np)
+	if got := np.Spec.PodSelector.MatchLabels[labelComponent]; got != "ui" {
+		t.Errorf("podSelector component = %q, want ui", got)
+	}
+	if len(np.Spec.Ingress) != 1 {
+		t.Fatalf("expected 1 ingress rule, got %d", len(np.Spec.Ingress))
+	}
+	rule := np.Spec.Ingress[0]
+	if !ruleHasNamespaceLabel(rule, "network.openshift.io/policy-group", "ingress") {
+		t.Error("missing OpenShift ingress policy-group peer")
+	}
+	if !ruleHasNamespaceLabel(rule, "kubernetes.io/metadata.name", "openshift-ingress") {
+		t.Error("missing openshift-ingress namespace peer")
+	}
+	if !ruleAllowsPort(np.Spec.Ingress, uiProxyPort) {
+		t.Errorf("missing UI proxy port %d", uiProxyPort)
+	}
+}
+
+func TestListenerNetworkPolicy(t *testing.T) {
+	cfg := testCfg()
+	np := ListenerNetworkPolicy(cfg)
+	if np.Name != cfg.Name+"-listener" {
+		t.Errorf("Name = %q, want %s-listener", np.Name, cfg.Name)
+	}
+	assertIngressOnly(t, np)
+	if got := np.Spec.PodSelector.MatchLabels[labelComponent]; got != "listener" {
+		t.Errorf("podSelector component = %q, want listener", got)
+	}
+	if len(np.Spec.Ingress) != 0 {
+		t.Errorf("Listener Ingress = %+v, want empty (deny all inbound)", np.Spec.Ingress)
+	}
+}
+
 func TestROSAPINetworkPolicy_GatewayOnly(t *testing.T) {
 	// Extends the smoke test in names_test.go with peer/port assertions.
 	cfg := testCfg()
@@ -280,6 +324,15 @@ func assertIngressOnly(t *testing.T, np *networkingv1.NetworkPolicy) {
 	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeIngress {
 		t.Errorf("PolicyTypes = %v, want [Ingress]", np.Spec.PolicyTypes)
 	}
+}
+
+func ruleHasNamespaceLabel(rule networkingv1.NetworkPolicyIngressRule, key, value string) bool {
+	for _, from := range rule.From {
+		if from.NamespaceSelector != nil && from.NamespaceSelector.MatchLabels[key] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func peerHasComponent(rule networkingv1.NetworkPolicyIngressRule, component string) bool {

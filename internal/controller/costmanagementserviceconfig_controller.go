@@ -14,7 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -23,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	opmetrics "github.com/project-koku/koku-service-operator/internal/metrics"
 	"github.com/project-koku/koku-service-operator/internal/resources"
 
 	stderrors "errors"
@@ -82,6 +85,8 @@ type CostManagementServiceConfigReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs;cronjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services;configmaps;secrets;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// Pods: read-only for syncManagedPodRestarts (CostManagementPodRestarting gauge).
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
@@ -138,6 +143,13 @@ func (r *CostManagementServiceConfigReconciler) Reconcile(ctx context.Context, r
 	r.clearPaused(cfg)
 
 	result, reconcileErr := r.reconcile(ctx, cfg)
+	if reconcileErr != nil {
+		opmetrics.ReconcileErrors.WithLabelValues(cfg.Namespace, cfg.Name).Inc()
+	}
+	if err := r.syncManagedPodRestarts(ctx, cfg); err != nil {
+		logger.Error(err, "failed to sync managed pod restart metrics")
+	}
+	r.syncConditionMetrics(cfg)
 
 	if patchErr := r.patchStatus(ctx, original, cfg); patchErr != nil {
 		logger.Error(patchErr, "failed to patch status")
@@ -205,6 +217,11 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 		}
 	}
 
+	// Drop UWM series for this CMSC so deleted instances cannot keep alerts firing.
+	opmetrics.ClearManagedPodRestarts(cfg.Namespace, cfg.Name)
+	opmetrics.ClearConditionMetrics(cfg.Namespace, cfg.Name)
+	opmetrics.ClearMigrationJobFailedAll(cfg.Namespace, cfg.Name)
+
 	controllerutil.RemoveFinalizer(cfg, finalizerName)
 	if err := r.Update(ctx, cfg); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
@@ -249,10 +266,17 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue,
 			"ReconcileError", err.Error())
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
+		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseDegraded)
 		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
 		return ctrl.Result{RequeueAfter: requeueSlow}, err
 	}
 	if !result.IsZero() {
+		// Blocking validation / failed migrate set PhaseDegraded with RequeueAfter or
+		// Stop and never return an error — emit PhaseChanged here or Ready→Degraded
+		// is silent (COST-7692).
+		if cfg.Status.Phase == costv1alpha1.PhaseDegraded && cfg.Status.Phase != priorPhase {
+			r.emitPhaseChanged(cfg, priorPhase, cfg.Status.Phase)
+		}
 		return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 	}
 
@@ -266,6 +290,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	cfg.Status.Phase = costv1alpha1.PhaseReady
+	r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
@@ -308,6 +333,20 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 	// ServiceAccount (skipped when costManagement.serviceAccount.create=false).
 	if err := r.ensureServiceAccount(ctx, cfg, cfg.Spec.CostManagement.ServiceAccount, resources.KokuServiceAccount(cfg)); err != nil {
 		return Result{}, fmt.Errorf("koku serviceaccount: %w", err)
+	}
+	// Family SAs with no CR create=false knob — Create defaults true.
+	for _, item := range []struct {
+		kind string
+		sa   *corev1.ServiceAccount
+	}{
+		{"gateway", resources.GatewayServiceAccount(cfg)},
+		{"ingress", resources.IngressServiceAccount(cfg)},
+		{"rbac", resources.RBACServiceAccount(cfg)},
+		{"ui", resources.UIServiceAccount(cfg)},
+	} {
+		if err := r.ensureServiceAccount(ctx, cfg, costv1alpha1.ServiceAccountSpec{}, item.sa); err != nil {
+			return Result{}, fmt.Errorf("%s serviceaccount: %w", item.kind, err)
+		}
 	}
 
 	return Result{}, nil
@@ -430,9 +469,13 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	}
 
 	// All steps completed.
+	schemaWasReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
 	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "all schema migrations succeeded")
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "MigrationSucceeded", "")
-	r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationComplete", "All schema migrations succeeded (Koku → ROS → RBAC)")
+	if !schemaWasReady && r.Recorder != nil {
+		r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationsComplete",
+			"All schema migrations succeeded (Koku → ROS → RBAC)")
+	}
 	return Result{}, nil
 }
 
@@ -480,6 +523,7 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 	}
 
 	if isJobComplete(existing) {
+		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
 		return Result{}, nil // proceed to next step
 	}
 	if isJobFailed(existing) {
@@ -487,10 +531,12 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse, "MigrationFailed", msg)
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "MigrationFailed", msg)
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
+		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, true)
 		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "MigrationFailed",
 			"Migration job %s exhausted retries — manual intervention required", jobName)
 		return Result{Stop: true}, nil
 	}
+	opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
 
 	progress("running")
 	return Result{RequeueAfter: requeueFast}, nil
@@ -751,6 +797,16 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 		logger.Info("skipping API Route: cluster domain not resolved; gateway still deployed for in-cluster access")
 	}
 
+	// Isolation and UI bootstrap do not wait on the API Route. OpenShift
+	// defaults to allow-all until a NetworkPolicy exists, and cookie/nginx
+	// ConfigMaps are safe without a host.
+	if err := r.applyNetworkPolicies(ctx, cfg); err != nil {
+		return Result{}, err
+	}
+	if err := r.applyUICookieAndNginx(ctx, cfg); err != nil {
+		return Result{}, err
+	}
+
 	ready, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameEnvoy(cfg))
 	if err != nil {
 		return Result{}, err
@@ -767,6 +823,16 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
+	live, err := r.getRoute(ctx, cfg.Namespace, route.GetName())
+	if err != nil {
+		return Result{}, fmt.Errorf("get gateway route %s: %w", route.GetName(), err)
+	}
+	if !routeAdmitted(live) {
+		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
+			"RouteNotAdmitted", "waiting for API Route admission")
+		return Result{RequeueAfter: requeueSlow}, nil
+	}
+
 	r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionTrue,
 		"GatewayReady", "Envoy JWT gateway and API Route are ready")
 
@@ -774,12 +840,20 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 		return Result{}, err
 	}
 
-	// NetworkPolicies — restrict traffic to expected flows per component.
+	if apimeta.IsStatusConditionFalse(cfg.Status.Conditions, costv1alpha1.ConditionUIReady) {
+		return Result{RequeueAfter: requeueSlow}, nil
+	}
+	return Result{}, nil
+}
+
+func (r *CostManagementServiceConfigReconciler) applyNetworkPolicies(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
 	netpols := []client.Object{
 		resources.GatewayNetworkPolicy(cfg),
 		resources.IngressNetworkPolicy(cfg),
 		resources.RBACAPINetworkPolicy(cfg),
 		resources.KokuAPINetworkPolicy(cfg),
+		resources.UINetworkPolicy(cfg),
+		resources.ListenerNetworkPolicy(cfg),
 		resources.MasuNetworkPolicy(cfg),
 	}
 	if costv1alpha1.ROSEnabled(cfg) {
@@ -796,25 +870,27 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 	}
 	for _, np := range netpols {
 		if err := r.apply(ctx, cfg, np); err != nil {
-			return Result{}, fmt.Errorf("networkpolicy %s: %w", np.GetName(), err)
+			return fmt.Errorf("networkpolicy %s: %w", np.GetName(), err)
 		}
 	}
-
-	if apimeta.IsStatusConditionFalse(cfg.Status.Conditions, costv1alpha1.ConditionUIReady) {
-		return Result{RequeueAfter: requeueSlow}, nil
-	}
-	return Result{}, nil
+	return nil
 }
 
-// reconcileUI ensures cookie/nginx config, validates the user-provided OAuth
-// client Secret, and applies UI Deploy/Service/Route/ConsoleLink when ready.
-func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
-	// Cookie secret + nginx ConfigMap are safe without OAuth credentials.
+func (r *CostManagementServiceConfigReconciler) applyUICookieAndNginx(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
 	if err := r.ensureSecret(ctx, cfg, resources.UICookieSecret(cfg)); err != nil {
 		return fmt.Errorf("ui cookie secret: %w", err)
 	}
 	if err := r.apply(ctx, cfg, resources.UINginxConfigMap(cfg)); err != nil {
 		return fmt.Errorf("ui %s: %w", resources.NameUINginxConfigMap(cfg), err)
+	}
+	return nil
+}
+
+// reconcileUI ensures cookie/nginx config, validates the user-provided OAuth
+// client Secret, and applies UI Deploy/Service/Route/ConsoleLink when ready.
+func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
+	if err := r.applyUICookieAndNginx(ctx, cfg); err != nil {
+		return err
 	}
 
 	// OAuth client Secret is user-provided (same-namespace SecretRef). Gate UI
@@ -837,9 +913,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 		return nil
 	}
 
-	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionTrue,
-		"OAuthClientSecretReady", "UI OAuth client Secret is present")
-
 	for _, obj := range []client.Object{
 		resources.UIDeployment(cfg),
 		resources.UIService(cfg),
@@ -853,7 +926,19 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 		if err := r.apply(ctx, cfg, uiRoute); err != nil {
 			return fmt.Errorf("ui route: %w", err)
 		}
+		live, err := r.getRoute(ctx, cfg.Namespace, uiRoute.GetName())
+		if err != nil {
+			return fmt.Errorf("get ui route %s: %w", uiRoute.GetName(), err)
+		}
+		if !routeAdmitted(live) {
+			r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
+				"RouteNotAdmitted", "waiting for UI Route admission")
+			return nil
+		}
 	}
+
+	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionTrue,
+		"OAuthClientSecretReady", "UI OAuth client Secret is present")
 
 	if err := r.applyClusterScoped(ctx, resources.ConsoleLink(cfg)); err != nil {
 		return fmt.Errorf("consolelink: %w", err)
@@ -862,33 +947,47 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 }
 
 // -----------------------------------------------------------------------------
-// Stage 8 — Monitoring (ServiceMonitors + PrometheusRules)
+// Stage 8 — Monitoring (PrometheusRules + App ServiceMonitor)
 // -----------------------------------------------------------------------------
 
-// reconcileMonitoring applies ServiceMonitor and PrometheusRule objects when
-// spec.monitoring.enabled is true (the default). Both types are Prometheus
-// Operator CRDs; the stage is silently skipped when those CRDs are absent so
-// the operator works on clusters without the monitoring stack.
+// reconcileMonitoring applies App/Gateway/Operator ServiceMonitors and
+// PrometheusRules when spec.monitoring.enabled is true (the default). When
+// disabled, best-effort deletes those managed objects so Alerting/scrape
+// targets do not linger. Kruize ServiceMonitor is not applied here yet
+// (ROS scrape → COST-8054) but is still deleted on disable so a future or
+// manually present object does not linger. CRDs absent → skip one resource
+// and continue.
 func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	logger := log.FromContext(ctx)
+	objs := []client.Object{
+		resources.AppServiceMonitor(cfg),
+		resources.GatewayServiceMonitor(cfg),
+		resources.OperatorServiceMonitor(cfg),
+		resources.PrometheusRules(cfg),
+	}
+
 	if !costv1alpha1.BoolVal(cfg.Spec.Monitoring.Enabled, true) {
+		// Kruize SM is not in the apply set yet (COST-8054); still delete by
+		// name so disable cleans it up once ROS scrape lands (or if present).
+		toDelete := append(objs, resources.KruizeServiceMonitor(cfg))
+		for _, obj := range toDelete {
+			obj.SetNamespace(cfg.Namespace)
+			if err := r.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) && !apimeta.IsNoMatchError(err) {
+				gvk := obj.GetObjectKind().GroupVersionKind()
+				return Result{}, fmt.Errorf("delete monitoring %s %s: %w", gvk.Kind, obj.GetName(), err)
+			}
+		}
 		return Result{}, nil
 	}
-	for _, obj := range []client.Object{
-		resources.AppServiceMonitor(cfg),
-		resources.KruizeServiceMonitor(cfg),
-		resources.PrometheusRules(cfg),
-	} {
+
+	for _, obj := range objs {
 		if err := r.apply(ctx, cfg, obj); err != nil {
 			gvk := obj.GetObjectKind().GroupVersionKind()
 			if apimeta.IsNoMatchError(err) {
-				// Prometheus Operator CRDs not installed — expected on clusters
-				// without the monitoring stack. Skip silently.
-				log.FromContext(ctx).Info("monitoring resource skipped (CRD absent)",
+				logger.Info("monitoring resource skipped (CRD absent)",
 					"kind", gvk.Kind, "name", obj.GetName())
 				continue
 			}
-			// Real error (permissions, API server issues, etc.) — surface it so
-			// the reconcile loop sets Degraded and the user is notified.
 			return Result{}, fmt.Errorf("monitoring %s %s: %w", gvk.Kind, obj.GetName(), err)
 		}
 	}
@@ -910,6 +1009,19 @@ func (r *CostManagementServiceConfigReconciler) apply(ctx context.Context, cfg *
 	obj.SetNamespace(cfg.Namespace)
 	setOwnerRef(cfg, obj)
 	return r.Patch(ctx, obj, client.Apply, client.ForceOwnership, client.FieldOwner(fieldOwner))
+}
+
+func routeGVK() schema.GroupVersionKind {
+	return schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: routeKind}
+}
+
+func (r *CostManagementServiceConfigReconciler) getRoute(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(routeGVK())
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, u); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // ensureServiceAccount applies sa when spec.Create is true (the default).
@@ -1406,6 +1518,64 @@ func (r *CostManagementServiceConfigReconciler) setCondition(cfg *costv1alpha1.C
 		Message:            message,
 		ObservedGeneration: cfg.Generation,
 	})
+	opmetrics.SetCondition(cfg.Namespace, cfg.Name, condType, status)
+}
+
+// syncConditionMetrics mirrors all CMSC conditions into Prometheus gauges
+// (COST-8108). Safe to call after phases so applyPhaseError paths are included.
+func (r *CostManagementServiceConfigReconciler) syncConditionMetrics(cfg *costv1alpha1.CostManagementServiceConfig) {
+	for _, c := range cfg.Status.Conditions {
+		opmetrics.SetCondition(cfg.Namespace, cfg.Name, c.Type, c.Status)
+	}
+}
+
+// syncManagedPodRestarts publishes restart counts for instance-labeled pods so
+// CostManagementPodRestarting can evaluate under UWM without kube-state metrics.
+// After a successful list, existing series for this CMSC are cleared so deleted
+// or replaced pods cannot leave stale gauges that keep the alert firing.
+func (r *CostManagementServiceConfigReconciler) syncManagedPodRestarts(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(cfg.Namespace), client.MatchingLabels{
+		"app.kubernetes.io/instance":   cfg.Name,
+		"app.kubernetes.io/managed-by": "koku-service-operator",
+	}); err != nil {
+		return err
+	}
+	opmetrics.ClearManagedPodRestarts(cfg.Namespace, cfg.Name)
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		for _, cs := range p.Status.ContainerStatuses {
+			opmetrics.ManagedPodRestarts.WithLabelValues(cfg.Namespace, cfg.Name, p.Name, cs.Name).Set(float64(cs.RestartCount))
+		}
+	}
+	return nil
+}
+
+// emitPhaseChanged emits PhaseChanged when the reconcile settles on a phase
+// different from the phase observed at the start of the pass.
+func (r *CostManagementServiceConfigReconciler) emitPhaseChanged(cfg *costv1alpha1.CostManagementServiceConfig, from, to costv1alpha1.Phase) {
+	if r.Recorder == nil || from == to || to == "" {
+		return
+	}
+	fromLabel := string(from)
+	if fromLabel == "" {
+		fromLabel = "None"
+	}
+	r.Recorder.Eventf(cfg, corev1.EventTypeNormal, "PhaseChanged",
+		"Phase changed from %s to %s", fromLabel, to)
+}
+
+// emitDependencyFailed emits DependencyFailed when a blocking dependency
+// condition transitions to False (operator validation signal, not BYOI scrape).
+func (r *CostManagementServiceConfigReconciler) emitDependencyFailed(cfg *costv1alpha1.CostManagementServiceConfig, condType, message string) {
+	if r.Recorder == nil {
+		return
+	}
+	if apimeta.IsStatusConditionFalse(cfg.Status.Conditions, condType) {
+		return // already False — avoid spam on requeue
+	}
+	r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "DependencyFailed",
+		"%s: %s", condType, message)
 }
 
 // -----------------------------------------------------------------------------

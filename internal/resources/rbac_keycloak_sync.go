@@ -98,6 +98,7 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, "rbac-keycloak-sync")},
 						Spec: corev1.PodSpec{
+							ServiceAccountName:           NameRBACServiceAccount(cfg),
 							RestartPolicy:                CronJobRestartOnFailure,
 							AutomountServiceAccountToken: &falseVal,
 							SecurityContext:              nonRootPodSC(),

@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	opmetrics "github.com/project-koku/koku-service-operator/internal/metrics"
 )
 
 // Result controls reconcile loop flow.
@@ -66,6 +67,7 @@ func applyPhaseError(cfg *costv1alpha1.CostManagementServiceConfig, err error) {
 			Message:            pe.Err.Error(),
 			ObservedGeneration: cfg.Generation,
 		})
+		opmetrics.SetCondition(cfg.Namespace, cfg.Name, pe.ConditionType, metav1.ConditionFalse)
 	}
 }
 

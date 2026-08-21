@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"strings"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -446,7 +448,7 @@ func migrationJob(
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, component)},
 				Spec: corev1.PodSpec{
-					ServiceAccountName:           NameKokuServiceAccount(cfg),
+					ServiceAccountName:           migrationServiceAccountName(cfg, component),
 					AutomountServiceAccountToken: new(false),
 					RestartPolicy:                corev1.RestartPolicyOnFailure,
 					SecurityContext:              nonRootPodSC(),
@@ -476,4 +478,16 @@ func migrationJob(
 			},
 		},
 	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// migrationServiceAccountName selects the family SA for a migration/bootstrap Job.
+// RBAC jobs share {cr}-rbac; Koku and ROS migrations keep {cr}-koku (ROS SA
+// wiring is COST-8054).
+func migrationServiceAccountName(cfg *costv1alpha1.CostManagementServiceConfig, component string) string {
+	if strings.HasPrefix(component, "rbac-") {
+		return NameRBACServiceAccount(cfg)
+	}
+	return NameKokuServiceAccount(cfg)
 }

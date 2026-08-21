@@ -146,6 +146,7 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:           NameRBACServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),
@@ -236,6 +237,7 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:           NameRBACServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),

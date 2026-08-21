@@ -72,6 +72,10 @@ func KokuVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume 
 		})
 	}
 
+	if extra := UserCAExtraVolume(cfg); extra != nil {
+		vols = append(vols, *extra)
+	}
+
 	return vols
 }
 
@@ -121,10 +125,10 @@ func ubiMinimalInitSC() *corev1.SecurityContext {
 	}
 }
 
-// CACombineInitContainer returns the init container that merges system and
-// cluster CA certificates into a combined bundle.
-func CACombineInitContainer(_ *costv1alpha1.CostManagementServiceConfig) corev1.Container {
-	return corev1.Container{
+// CACombineInitContainer returns the init container that merges system,
+// service, and optional user CA certificates into a combined bundle.
+func CACombineInitContainer(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Container {
+	c := corev1.Container{
 		Name:    "prepare-ca-bundle",
 		Image:   UBIMinimalImage,
 		Command: []string{"bash", "/scripts/combine-ca.sh"},
@@ -135,6 +139,10 @@ func CACombineInitContainer(_ *costv1alpha1.CostManagementServiceConfig) corev1.
 		},
 		SecurityContext: ubiMinimalInitSC(),
 	}
+	if len(userCAFiles(cfg)) > 0 {
+		c.VolumeMounts = append(c.VolumeMounts, userCAExtraMount())
+	}
+	return c
 }
 
 // WaitForValkeyInitContainer returns an init container that blocks until
@@ -172,6 +180,59 @@ func kokuAppContainerSC() *corev1.SecurityContext {
 // (Django log handlers) and an explicit numeric UID for the koku image USER.
 func migrationContainerSC() *corev1.SecurityContext {
 	return kokuAppContainerSC()
+}
+
+const caExtraVolumeName = "ca-extra"
+
+type userCAFile struct {
+	secretName string
+	path       string
+}
+
+func userCAFiles(cfg *costv1alpha1.CostManagementServiceConfig) []userCAFile {
+	var files []userCAFile
+	if s := cfg.Spec.Auth.Keycloak.TLS.CACertSecretName; s != "" {
+		files = append(files, userCAFile{s, "keycloak-ca.crt"})
+	}
+	if cfg.Spec.Kafka.TLS.Enabled && cfg.Spec.Kafka.TLS.CACertSecret != "" {
+		files = append(files, userCAFile{cfg.Spec.Kafka.TLS.CACertSecret, "kafka-ca.crt"})
+	}
+	if cfg.Spec.Cache.TLS.Enabled && cfg.Spec.Cache.TLS.CACertSecretName != "" {
+		files = append(files, userCAFile{cfg.Spec.Cache.TLS.CACertSecretName, "cache-ca.crt"})
+	}
+	if s := cfg.Spec.ObjectStorage.CACertSecretName; s != "" {
+		files = append(files, userCAFile{s, "object-storage-ca.crt"})
+	}
+	return files
+}
+
+// UserCAExtraVolume projects every configured user CA Secret as *.crt files
+// under a single volume mounted at /ca-extra by CACombineInitContainer.
+// Returns nil when no user CA secrets are configured.
+func UserCAExtraVolume(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Volume {
+	files := userCAFiles(cfg)
+	if len(files) == 0 {
+		return nil
+	}
+	sources := make([]corev1.VolumeProjection, 0, len(files))
+	for _, f := range files {
+		sources = append(sources, corev1.VolumeProjection{
+			Secret: &corev1.SecretProjection{
+				LocalObjectReference: corev1.LocalObjectReference{Name: f.secretName},
+				Items:                []corev1.KeyToPath{{Key: "ca.crt", Path: f.path}},
+			},
+		})
+	}
+	return &corev1.Volume{
+		Name: caExtraVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{Sources: sources},
+		},
+	}
+}
+
+func userCAExtraMount() corev1.VolumeMount {
+	return corev1.VolumeMount{Name: caExtraVolumeName, MountPath: "/ca-extra", ReadOnly: true}
 }
 
 func restrictedContainerSC() *corev1.SecurityContext {

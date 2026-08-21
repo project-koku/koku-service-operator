@@ -44,6 +44,9 @@ func TestRBACMigrationJobEnvEnablesSeeding(t *testing.T) {
 	if got := job.Annotations["koku.costmanagement.io/image-tag"]; got != "test-cmseed1" {
 		t.Errorf("image-tag annotation = %q, want test-cmseed1", got)
 	}
+	if sa := job.Spec.Template.Spec.ServiceAccountName; sa != NameRBACServiceAccount(cfg) {
+		t.Errorf("RBAC migration ServiceAccountName = %q, want %q", sa, NameRBACServiceAccount(cfg))
+	}
 	env := map[string]string{}
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		env[e.Name] = e.Value
@@ -79,6 +82,9 @@ func TestAdminBootstrapJobGated(t *testing.T) {
 	}
 	if job.Name != "cost-onprem-rbac-admin-bootstrap" {
 		t.Errorf("name = %q", job.Name)
+	}
+	if sa := job.Spec.Template.Spec.ServiceAccountName; sa != NameRBACServiceAccount(cfg) {
+		t.Errorf("bootstrap ServiceAccountName = %q, want %q", sa, NameRBACServiceAccount(cfg))
 	}
 	full := strings.Join(job.Spec.Template.Spec.Containers[0].Command, "\n")
 	if !strings.Contains(full, "Cost Admin Default") {

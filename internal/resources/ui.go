@@ -170,7 +170,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 	}
 
 	issuerURL := KeycloakIssuerURL(cfg)
-	domain := discoveredClusterDomain(cfg)
+	domain := clusterDomain(cfg)
 	redirectURL := fmt.Sprintf("https://%s-ui-%s.%s/oauth2/callback", cfg.Name, cfg.Namespace, domain)
 	backendLogoutURL := issuerURL + "/protocol/openid-connect/logout?id_token_hint={id_token}"
 	upstream := fmt.Sprintf("http://localhost:%d", uiAppPort)
@@ -257,8 +257,10 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
-					SecurityContext:  nonRootPodSC(),
-					ImagePullSecrets: imagePullSecrets(cfg),
+					SecurityContext:              nonRootPodSC(),
+					ServiceAccountName:           NameUIServiceAccount(cfg),
+					AutomountServiceAccountToken: boolPtr(false),
+					ImagePullSecrets:             imagePullSecrets(cfg),
 					Containers: []corev1.Container{
 						{
 							Name:            "oauth-proxy",
@@ -340,9 +342,9 @@ func UIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service {
 // UIRoute builds the OpenShift Route that exposes the UI externally.
 // TLS is passthrough since the oauth-proxy terminates it.
 func UIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	domain := discoveredClusterDomain(cfg)
+	domain := clusterDomain(cfg)
 	if domain == "" {
-		return nil // defer until cluster domain is discovered
+		return nil // defer until cluster domain is discovered or set on spec.global
 	}
 	host := fmt.Sprintf("%s-ui-%s.%s", cfg.Name, cfg.Namespace, domain)
 
@@ -373,7 +375,7 @@ func UIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstru
 // to the OpenShift Application Menu.
 // NOTE: cluster-scoped — no ownerRef; cleaned up via the CR finalizer (COST-7681).
 func ConsoleLink(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	domain := discoveredClusterDomain(cfg)
+	domain := clusterDomain(cfg)
 	href := ""
 	if domain != "" {
 		href = fmt.Sprintf("https://%s-ui-%s.%s/", cfg.Name, cfg.Namespace, domain)
@@ -395,14 +397,6 @@ func ConsoleLink(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Un
 	}, "spec", "applicationMenu")
 
 	return cl
-}
-
-// discoveredClusterDomain is a nil-safe accessor for status.discoveredConfig.clusterDomain.
-func discoveredClusterDomain(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if cfg.Status.DiscoveredConfig == nil {
-		return ""
-	}
-	return cfg.Status.DiscoveredConfig.ClusterDomain
 }
 
 // keycloakCAVolume returns the CA volume for oauth2-proxy --provider-ca-file.

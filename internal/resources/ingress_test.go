@@ -65,6 +65,12 @@ func TestIngressDeployment(t *testing.T) {
 	if d.Name != NameIngress(cfg) {
 		t.Errorf("Name = %q", d.Name)
 	}
+	if d.Spec.Template.Spec.ServiceAccountName != NameIngressServiceAccount(cfg) {
+		t.Errorf("ServiceAccountName = %q, want %q", d.Spec.Template.Spec.ServiceAccountName, NameIngressServiceAccount(cfg))
+	}
+	if d.Spec.Template.Spec.AutomountServiceAccountToken == nil || *d.Spec.Template.Spec.AutomountServiceAccountToken {
+		t.Errorf("AutomountServiceAccountToken = %v, want false", d.Spec.Template.Spec.AutomountServiceAccountToken)
+	}
 	c := d.Spec.Template.Spec.Containers[0]
 	if c.Name != "ingress" {
 		t.Errorf("container = %q", c.Name)

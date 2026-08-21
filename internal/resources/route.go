@@ -2,11 +2,17 @@ package resources
 
 import (
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+)
+
+const (
+	gatewayRouteTimeoutAnnotation = "haproxy.router.openshift.io/timeout"
+	gatewayRouteTimeoutDefault    = "180s"
 )
 
 var routeGVK = schema.GroupVersionKind{
@@ -22,17 +28,20 @@ func GatewayAPIHost(cfg *costv1alpha1.CostManagementServiceConfig) (host string,
 	if cfg.Spec.GatewayRoute.Host != "" {
 		return cfg.Spec.GatewayRoute.Host, true
 	}
-	var domain string
-	if cfg.Status.DiscoveredConfig != nil {
-		domain = cfg.Status.DiscoveredConfig.ClusterDomain
-	}
-	if domain == "" {
-		domain = cfg.Spec.Global.ClusterDomain
-	}
+	domain := clusterDomain(cfg)
 	if domain == "" {
 		return "", false
 	}
 	return fmt.Sprintf("%s-gateway-%s.%s", cfg.Name, cfg.Namespace, domain), true
+}
+
+// clusterDomain returns status.discoveredConfig.clusterDomain, falling back to
+// spec.global.clusterDomain. Empty when neither is set.
+func clusterDomain(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if cfg.Status.DiscoveredConfig != nil && cfg.Status.DiscoveredConfig.ClusterDomain != "" {
+		return cfg.Status.DiscoveredConfig.ClusterDomain
+	}
+	return cfg.Spec.Global.ClusterDomain
 }
 
 // GatewayAPIRoute builds the OpenShift Route that fronts Envoy at path /api.
@@ -58,9 +67,14 @@ func GatewayAPIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 	route.SetName(NameAPIRoute(cfg))
 	route.SetNamespace(cfg.Namespace)
 	route.SetLabels(Labels(cfg, envoyComponent))
-	if len(cfg.Spec.GatewayRoute.Annotations) > 0 {
-		route.SetAnnotations(cfg.Spec.GatewayRoute.Annotations)
+
+	// Default timeout matches Helm and the longest Envoy route (/api/ingress/).
+	// CR annotations overlay this map; omitting the timeout key keeps 180s.
+	annotations := map[string]string{
+		gatewayRouteTimeoutAnnotation: gatewayRouteTimeoutDefault,
 	}
+	maps.Copy(annotations, cfg.Spec.GatewayRoute.Annotations)
+	route.SetAnnotations(annotations)
 
 	_ = unstructured.SetNestedField(route.Object, host, "spec", "host")
 	_ = unstructured.SetNestedField(route.Object, "/api", "spec", "path")

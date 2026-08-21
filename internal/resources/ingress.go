@@ -143,6 +143,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: allLabels},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:           NameIngressServiceAccount(cfg),
 					AutomountServiceAccountToken: &falseVal,
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),

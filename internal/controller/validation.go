@@ -61,8 +61,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		}
 		addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 		if err := tcpProbe(addr, validationTimeout); err != nil {
+			msg := fmt.Sprintf("TCP probe %s: %v", addr, err)
+			r.emitDependencyFailed(cfg, costv1alpha1.ConditionDatabaseReady, msg)
 			r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
-				"DatabaseUnreachable", fmt.Sprintf("TCP probe %s: %v", addr, err))
+				"DatabaseUnreachable", msg)
 			allReady = false
 		} else {
 			// Validate secret keys when the user provided their own secret.
@@ -92,8 +94,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		}
 		addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 		if err := tcpProbe(addr, validationTimeout); err != nil {
+			msg := fmt.Sprintf("TCP probe %s: %v", addr, err)
+			r.emitDependencyFailed(cfg, costv1alpha1.ConditionCacheReady, msg)
 			r.setCondition(cfg, costv1alpha1.ConditionCacheReady, metav1.ConditionFalse,
-				"CacheUnreachable", fmt.Sprintf("TCP probe %s: %v", addr, err))
+				"CacheUnreachable", msg)
 			allReady = false
 		} else {
 			if cfg.Spec.Cache.Auth.SecretName != "" {

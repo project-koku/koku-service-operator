@@ -608,6 +608,10 @@ type UIAppSpec struct {
 // -----------------------------------------------------------------------------
 
 type GatewayRouteConfig struct {
+	// Annotations are copied onto the OpenShift Route. The operator injects
+	// haproxy.router.openshift.io/timeout=180s unless this map sets that key.
+	// Omitting the key no longer means OpenShift's 30s default; set "30s"
+	// explicitly to restore it.
 	Annotations map[string]string `json:"annotations,omitempty"`
 	// Custom hostname for the OpenShift Route. Leave empty to derive from clusterDomain.
 	Host string       `json:"host,omitempty"`

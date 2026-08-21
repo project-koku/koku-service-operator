@@ -137,6 +137,28 @@ func TestROSProcessorDeployment_Shape(t *testing.T) {
 	}
 }
 
+func TestROSProcessorDeployment_UserCAExtraVolumeMountsExist(t *testing.T) {
+	cfg := rosCfg()
+	cfg.Spec.ObjectStorage.CACertSecretName = "s3-ca-secret"
+	d := ROSProcessorDeployment(cfg)
+
+	volNames := map[string]struct{}{}
+	for _, v := range d.Spec.Template.Spec.Volumes {
+		volNames[v.Name] = struct{}{}
+	}
+	if _, ok := volNames[caExtraVolumeName]; !ok {
+		t.Fatalf("ROSProcessorDeployment missing %q volume when a user CA secret is set", caExtraVolumeName)
+	}
+
+	for _, init := range d.Spec.Template.Spec.InitContainers {
+		for _, m := range init.VolumeMounts {
+			if _, ok := volNames[m.Name]; !ok {
+				t.Errorf("init %q volumeMount %q has no matching spec.volumes entry", init.Name, m.Name)
+			}
+		}
+	}
+}
+
 func TestROSPollerDeployment_Shape(t *testing.T) {
 	cfg := rosCfg()
 	d := ROSPollerDeployment(cfg)

@@ -16,8 +16,11 @@ This operator uses an **OwnNamespace** install model with two ClusterRoles:
 2. Verify `role.yaml` has **no cluster-scoped resources**:
 
 ```bash
-grep -E 'consolelinks|clusterroles|clusterrolebindings|ingresses|storageclasses|noobaa' config/rbac/role.yaml
+grep -E 'consolelinks|clusterroles|clusterrolebindings|ingresses|storageclasses|noobaa-admin' config/rbac/role.yaml
 ```
 
 This must return nothing. If it does, the marker belongs in
 `cluster_access_role.yaml` instead, not in a `+kubebuilder:rbac` annotation.
+
+CI also locks this via `TestManagerRole_NoClusterScopedResources` in
+`internal/controller/rbac_manifest_test.go`.

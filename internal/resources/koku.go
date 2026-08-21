@@ -40,16 +40,36 @@ func KokuAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	)
 	env = MergeEnv(env, spec.Env)
 
-	return deploymentWithContainerName(cfg, NameKokuAPI(cfg), "cost-management-api", containerName,
+	d := deploymentWithContainerName(cfg, NameKokuAPI(cfg), "cost-management-api", containerName,
 		image, replicas, spec.Resources,
 		kokuAPIProbe("/livez"), kokuAPIProbe("/readyz"), env,
 		[]string{"/bin/bash", "-c", "cd $APP_HOME && exec gunicorn -c gunicorn_conf.py --max-requests=1000 koku.wsgi"},
 	)
+	// gunicorn serves the API on 8000 and Prometheus /metrics on 9000.
+	d.Spec.Template.Spec.Containers[0].Ports = []corev1.ContainerPort{
+		{Name: "http", ContainerPort: 8000, Protocol: corev1.ProtocolTCP},
+		{Name: "metrics", ContainerPort: 9000, Protocol: corev1.ProtocolTCP},
+	}
+	return d
 }
 
-// KokuAPIService exposes the Koku API.
+// KokuAPIService exposes the Koku API (http) and Prometheus metrics.
 func KokuAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service {
-	return appService(cfg, NameKokuAPI(cfg), "cost-management-api", 8000)
+	return &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      NameKokuAPI(cfg),
+			Namespace: cfg.Namespace,
+			Labels:    Labels(cfg, "cost-management-api"),
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: SelectorLabels(cfg, "cost-management-api"),
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 8000, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+				{Name: "metrics", Port: 9000, TargetPort: intstr.FromString("metrics"), Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -81,16 +101,37 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 	)
 	env = MergeEnv(env, spec.Env)
 
-	return deploymentWithContainerName(cfg, NameMasu(cfg), "cost-processor", containerName,
+	d := deploymentWithContainerName(cfg, NameMasu(cfg), "cost-processor", containerName,
 		image, replicas, spec.Resources,
 		masuProbe("/livez"), masuProbe("/readyz"), env,
 		[]string{"/bin/bash", "-c", "cd $APP_HOME && exec gunicorn -c gunicorn_conf.py --max-requests=1000 koku.wsgi"},
 	)
+	// Same dual-port shape as Koku API: gunicorn HTTP + Prometheus /metrics.
+	d.Spec.Template.Spec.Containers[0].Ports = []corev1.ContainerPort{
+		{Name: "http", ContainerPort: 8000, Protocol: corev1.ProtocolTCP},
+		{Name: "metrics", ContainerPort: 9000, Protocol: corev1.ProtocolTCP},
+	}
+	return d
 }
 
-// MasuService exposes Masu internally.
+// MasuService exposes Masu internally with HTTP (8000) and metrics (9000) ports.
+// The metrics port is named "metrics" so the App ServiceMonitor can scrape /metrics.
 func MasuService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service {
-	return appService(cfg, NameMasu(cfg), "cost-processor", 9000)
+	return &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      NameMasu(cfg),
+			Namespace: cfg.Namespace,
+			Labels:    Labels(cfg, "cost-processor"),
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: SelectorLabels(cfg, "cost-processor"),
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 8000, TargetPort: intstr.FromString("http"), Protocol: corev1.ProtocolTCP},
+				{Name: "metrics", Port: 9000, TargetPort: intstr.FromString("metrics"), Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -318,21 +359,6 @@ func deployment(
 					Volumes: KokuVolumes(cfg),
 				},
 			},
-		},
-	}
-}
-
-func appService(cfg *costv1alpha1.CostManagementServiceConfig, name, component string, port int32) *corev1.Service {
-	return &corev1.Service{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: cfg.Namespace,
-			Labels:    Labels(cfg, component),
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: SelectorLabels(cfg, component),
-			Ports:    []corev1.ServicePort{{Name: "http", Port: port, Protocol: corev1.ProtocolTCP}},
 		},
 	}
 }

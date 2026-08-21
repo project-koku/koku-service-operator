@@ -94,6 +94,9 @@ func TestKeycloakSyncCronJobMeta(t *testing.T) {
 	if podSpec.AutomountServiceAccountToken == nil || *podSpec.AutomountServiceAccountToken {
 		t.Errorf("AutomountServiceAccountToken = %v, want false", podSpec.AutomountServiceAccountToken)
 	}
+	if podSpec.ServiceAccountName != NameRBACServiceAccount(cfg) {
+		t.Errorf("ServiceAccountName = %q, want %q", podSpec.ServiceAccountName, NameRBACServiceAccount(cfg))
+	}
 }
 
 func TestKeycloakSyncCronJobContainer(t *testing.T) {

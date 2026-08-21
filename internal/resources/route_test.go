@@ -40,7 +40,7 @@ func TestGatewayAPIHostMissingDomain(t *testing.T) {
 func TestGatewayAPIRouteSpec(t *testing.T) {
 	cfg := testCfg()
 	cfg.Spec.Global.ClusterDomain = "apps.cluster.local"
-	cfg.Spec.GatewayRoute.Annotations = map[string]string{"haproxy.router.openshift.io/timeout": "60s"}
+	cfg.Spec.GatewayRoute.Annotations = map[string]string{gatewayRouteTimeoutAnnotation: "60s"}
 
 	route := GatewayAPIRoute(cfg)
 	if route == nil {
@@ -79,8 +79,41 @@ func TestGatewayAPIRouteSpec(t *testing.T) {
 	if insecure != "Redirect" {
 		t.Errorf("tls.insecureEdgeTerminationPolicy = %q, want Redirect", insecure)
 	}
-	if route.GetAnnotations()["haproxy.router.openshift.io/timeout"] != "60s" {
+	if route.GetAnnotations()[gatewayRouteTimeoutAnnotation] != "60s" {
 		t.Errorf("annotations = %v", route.GetAnnotations())
+	}
+}
+
+func TestGatewayAPIRouteDefaultTimeoutAnnotation(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Global.ClusterDomain = "apps.cluster.local"
+
+	route := GatewayAPIRoute(cfg)
+	if route == nil {
+		t.Fatal("expected Route")
+	}
+	timeout := route.GetAnnotations()["haproxy.router.openshift.io/timeout"]
+	if timeout != "180s" {
+		t.Errorf("default timeout annotation = %q, want 180s", timeout)
+	}
+}
+
+func TestGatewayAPIRouteMergesAnnotationsWithoutDroppingDefaultTimeout(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Global.ClusterDomain = "apps.cluster.local"
+	cfg.Spec.GatewayRoute.Annotations = map[string]string{"foo": "bar"}
+
+	route := GatewayAPIRoute(cfg)
+	if route == nil {
+		t.Fatal("expected Route")
+	}
+	got := route.GetAnnotations()
+	if got["foo"] != "bar" {
+		t.Errorf("custom annotation foo = %q, want bar; annotations = %v", got["foo"], got)
+	}
+	if got["haproxy.router.openshift.io/timeout"] != "180s" {
+		t.Errorf("timeout annotation = %q, want 180s when CR omits the key; annotations = %v",
+			got["haproxy.router.openshift.io/timeout"], got)
 	}
 }
 
