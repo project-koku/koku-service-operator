@@ -29,6 +29,7 @@ func KokuAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	env = append(env,
 		EnvVal("API_PATH_PREFIX", "/api/cost-management"),
 		EnvVal("MASU", "false"),
+		EnvVal("KOKU_LOG_LEVEL", "INFO"),
 		// Chart defaults: without an explicit GUNICORN_WORKERS, gunicorn uses
 		// POD_CPU_LIMIT*2+1. With no container CPU limit, OpenShift exposes the
 		// node allocatable as POD_CPU_LIMIT (often 4+), spawning too many workers
@@ -95,6 +96,7 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 		EnvVal("MASU", "true"),
 		EnvVal("API_PATH_PREFIX", "/api/cost-management"),
 		EnvVal("KAFKA_CONNECT", "true"),
+		EnvVal("KOKU_LOG_LEVEL", "DEBUG"),
 		EnvVal("GUNICORN_WORKERS", "2"),
 		EnvVal("PROMETHEUS_MULTIPROC_DIR", "/tmp"),
 		EnvFromFieldRef("POD_CPU_LIMIT", containerName, "limits.cpu"),
@@ -151,6 +153,7 @@ func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.D
 	env = append(env,
 		EnvVal("LISTENER_TOPIC", "platform.upload.announce"),
 		EnvVal("KAFKA_CONNECT", "true"),
+		EnvVal("KOKU_LOG_LEVEL", "INFO"),
 	)
 	env = MergeEnv(env, spec.Env)
 
@@ -170,7 +173,10 @@ func CeleryBeatDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 	replicas := int32(1)
 
 	env := KokuCommonEnv(cfg)
-	env = append(env, EnvVal("CELERY_LOG_LEVEL", "info"))
+	env = append(env,
+		EnvVal("KOKU_LOG_LEVEL", "INFO"),
+		EnvVal("CELERY_LOG_LEVEL", "info"),
+	)
 
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
@@ -207,6 +213,7 @@ func CeleryWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig, queue
 	component := "cost-worker-" + DNS1123Label(queue)
 	env := KokuCommonEnv(cfg)
 	env = append(env,
+		EnvVal("KOKU_LOG_LEVEL", "INFO"),
 		EnvVal("CELERY_LOG_LEVEL", "info"),
 		EnvVal("WORKER_QUEUES", queue),
 		EnvVal("CELERY_WORKER_CONCURRENCY", int32String(concurrency)),

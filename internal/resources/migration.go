@@ -66,7 +66,6 @@ func MigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string
 		EnvVal("MASU", "false"),
 		EnvVal("PROMETHEUS_MULTIPROC_DIR", "/tmp"),
 		EnvVal("KOKU_LOG_LEVEL", "INFO"),
-		EnvVal("DJANGO_LOG_LEVEL", "INFO"),
 	)
 
 	host := DatabaseHost(cfg)

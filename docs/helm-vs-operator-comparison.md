@@ -145,48 +145,37 @@ The operator's `AppServiceMonitor` does not include `rbac-api`,
 
 ## 4. Env Var Differences
 
-### 4.1 Koku env var gaps
+### 4.1 Koku env var gaps — **FIXED**
 
-The Helm chart sets these env vars with defaults. The operator does NOT set
-them (users can provide them via `spec.costManagement.api.env`):
+The Helm chart sets these env vars with defaults. The operator **now sets** them in `KokuCommonEnv()`:
 
-| Env Var | Chart Default | Operator | Impact |
+| Env Var | Chart Default | Operator | Status |
 |---------|---------------|----------|--------|
 | `ENHANCED_ORG_ADMIN` | `"False"` | **set** (`"False"`) | **fixed** |
-| `DEVELOPMENT` | `"False"` | not set | koku defaults to "True" in dev? |
-| `KOKU_ENABLE_SENTRY` | `"False"` | not set | Sentry SDK may try to phone home |
-| `INITIAL_INGEST_NUM_MONTHS` | `"2"` | not set | may over-ingest |
-| `INITIAL_INGEST_OVERRIDE` | `"False"` | not set | probably fine |
-| `CACHED_VIEWS_DISABLED` | `"False"` | not set | probably fine (app default) |
-| `NOTIFICATION_CHECK_TIME` | `"24"` | not set | probably fine |
-| `RBAC_CACHE_TIMEOUT` | `"300"` | not set | probably fine |
-| `CACHE_TIMEOUT` | `"3600"` | not set | probably fine |
-| `TAG_ENABLED_LIMIT` | `"200"` | not set | probably fine |
-| `USE_READREPLICA` | `"False"` | not set | probably fine |
+| `DEVELOPMENT` | `"False"` | **set** (`"False"`) | **fixed** |
+| `KOKU_ENABLE_SENTRY` | `"False"` | **set** (`"False"`) | **fixed** |
+| `INITIAL_INGEST_NUM_MONTHS` | `"2"` | **set** (`"2"`) | **fixed** |
+| `INITIAL_INGEST_OVERRIDE` | `"False"` | **set** (`"False"`) | **fixed** |
+| `CACHED_VIEWS_DISABLED` | `"False"` | **set** (`"False"`) | **fixed** |
+| `NOTIFICATION_CHECK_TIME` | `"24"` | **set** (`"24"`) | **fixed** |
+| `RBAC_CACHE_TIMEOUT` | `"300"` | **set** (`"300"`) | **fixed** |
+| `CACHE_TIMEOUT` | `"3600"` | **set** (`"3600"`) | **fixed** |
+| `TAG_ENABLED_LIMIT` | `"200"` | **set** (`"200"`) | **fixed** |
+| `USE_READREPLICA` | `"False"` | **set** (`"False"`) | **fixed** |
 
-Previously missing `RETAIN_NUM_MONTHS` is now set via a dedicated CR field
-(default `4`; chart was updated from `3` to `4` on 2026-08-10 — now matching).
+### 4.2 Logging env vars — **FIXED**
 
-`ENHANCED_ORG_ADMIN` is now set to `"False"` in `KokuCommonEnv()` (fixed
-2026-08-20). When True, Koku treats all org_admin users as having full
-access without checking RBAC. The chart's keycloakSync template validates
-this at render time.
+Shared logging defaults live in `KokuCommonEnv()`; `KOKU_LOG_LEVEL` is set per workload, not in the shared env:
+- Shared defaults: `GUNICORN_LOG_LEVEL=INFO`, `DJANGO_LOG_LEVEL=INFO`, `DJANGO_LOG_FORMATTER=simple`, `DJANGO_LOG_HANDLERS=console`
+- Per-workload `KOKU_LOG_LEVEL`: API/Listener/Celery=INFO, Masu=DEBUG (matches chart)
 
-### 4.2 Logging env vars partially set
+### 4.3 `POLLING_TIMER` env var — **FIXED**
 
-`KOKU_LOG_LEVEL`, `DJANGO_LOG_LEVEL`, and `DJANGO_LOG_FORMATTER` are set
-in RBAC and migration containers but not in `KokuCommonEnv` — Koku API,
-Masu, and workers miss them. `GUNICORN_LOG_LEVEL` is not set anywhere.
-
-### 4.3 Missing `POLLING_TIMER` env var
-
-The chart sets `POLLING_TIMER` (default: 86400 = 24h). The operator does
-not set this.
+The operator now sets `POLLING_TIMER=300` (5min), matching the chart's deployed `values.yaml` value (`costManagement.celery.pollingTimer: 300`). The template fallback default `86400` is not used.
 
 ### 4.4 RBAC env vars: `ROLE_CREATE_ALLOW_LIST`
 
-The chart exposes `rbac.roleCreateAllowList`. The operator doesn't expose
-or set this.
+The chart exposes `rbac.roleCreateAllowList`. The operator doesn't expose or set this.
 
 ---
 
@@ -295,5 +284,5 @@ User overrides via `spec.gatewayRoute.annotations` still take precedence.
 5. **Add ROS metrics-scraping NetworkPolicies**: ros-api-metrics, processor-metrics, poller-metrics (Gateway, Koku API, and Masu now covered)
 6. **Add RBAC + ROS components to ServiceMonitors**: rbac-api, ros-processor, ros-recommendation-poller, gateway still missing
 7. ~~**Set default Route timeout annotation** to 180s in GatewayAPIRoute~~ **DONE**
-8. **Add remaining env var defaults**: `INITIAL_INGEST_NUM_MONTHS`, logging vars in `KokuCommonEnv()`
+8. ~~**Add remaining env var defaults**: `INITIAL_INGEST_NUM_MONTHS`, logging vars in `KokuCommonEnv()`~~ **DONE**
 9. **Expose `roleCreateAllowList`** in the RBAC CR section
