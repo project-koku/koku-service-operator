@@ -269,6 +269,30 @@ func MasuNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkin
 	})
 }
 
+// CeleryWorkersNetworkPolicy allows Prometheus to scrape WorkerProbeServer
+// /metrics on pods labeled metrics-role=celery-worker (replicas > 0 only).
+func CeleryWorkersNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.Name + "-celery-workers",
+			Namespace: cfg.Namespace,
+			Labels:    Labels(cfg, "celery-worker"),
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					labelApp:         cfg.Name,
+					labelInstance:    cfg.Name,
+					labelMetricsRole: MetricsRoleCeleryWorker,
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress:     []networkingv1.NetworkPolicyIngressRule{monitoringFrom(celeryWorkerMetricsPort)},
+		},
+	}
+}
+
 // KokuAPINetworkPolicy allows the gateway and internal services to reach the
 // Koku API on its Service port (8000), and Prometheus to scrape the metrics
 // port (9000).

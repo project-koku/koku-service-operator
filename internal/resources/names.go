@@ -98,6 +98,11 @@ func NameCeleryWorker(cfg *costv1alpha1.CostManagementServiceConfig, queue strin
 	return cfg.Name + "-celery-worker-" + DNS1123Label(queue)
 }
 
+// NameCeleryWorkersService is the aggregated Service for Celery worker /metrics scrape.
+func NameCeleryWorkersService(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-celery-workers"
+}
+
 // DNS1123Label converts a Celery queue (or similar) name into a DNS-1123 label
 // suitable for Kubernetes resource and container names.
 func DNS1123Label(s string) string {

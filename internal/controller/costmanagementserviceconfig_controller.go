@@ -673,8 +673,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 	workers := resources.CeleryWorkerDeployments(cfg)
 	objs := make([]client.Object, 0, 1+len(workers))
 
-	// Celery beat + workers
+	// Celery beat + workers (+ aggregated metrics Service for WorkerProbeServer)
 	objs = append(objs, resources.CeleryBeatDeployment(cfg))
+	objs = append(objs, resources.CeleryWorkersService(cfg))
 	for _, d := range workers {
 		objs = append(objs, d)
 	}
@@ -855,6 +856,7 @@ func (r *CostManagementServiceConfigReconciler) applyNetworkPolicies(ctx context
 		resources.UINetworkPolicy(cfg),
 		resources.ListenerNetworkPolicy(cfg),
 		resources.MasuNetworkPolicy(cfg),
+		resources.CeleryWorkersNetworkPolicy(cfg),
 	}
 	if costv1alpha1.ROSEnabled(cfg) {
 		netpols = append(netpols,
@@ -950,7 +952,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 // Stage 8 — Monitoring (PrometheusRules + App ServiceMonitor)
 // -----------------------------------------------------------------------------
 
-// reconcileMonitoring applies App/Gateway/Operator ServiceMonitors and
+// reconcileMonitoring applies App/Gateway/Operator/Celery ServiceMonitors and
 // PrometheusRules when spec.monitoring.enabled is true (the default). When
 // disabled, best-effort deletes those managed objects so Alerting/scrape
 // targets do not linger. Kruize ServiceMonitor is not applied here yet
@@ -963,6 +965,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.
 		resources.AppServiceMonitor(cfg),
 		resources.GatewayServiceMonitor(cfg),
 		resources.OperatorServiceMonitor(cfg),
+		resources.CeleryServiceMonitor(cfg),
 		resources.PrometheusRules(cfg),
 	}
 

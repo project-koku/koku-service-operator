@@ -65,6 +65,9 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 		"CostManagementNotAvailable",
 		"CostManagementAPIDown",
 		"CostManagementReconcileFailure",
+		"CostManagementCeleryBacklogDownload",
+		"CostManagementCeleryBacklogPriority",
+		"CostManagementCeleryBacklogSummary",
 	}
 	for _, a := range want {
 		if !names[a] {
@@ -77,7 +80,11 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 		"CostManagementNotProgressing",
 		"CostManagementSecretRotated",  // deferred until COST-7694 emit path
 		"CostManagementDriftCorrected", // deferred until G4 emit path
-		"CostManagementCeleryBacklog",  // deferred until Celery worker scrape
+		// OpenShift Observe groups by alert name and hides labels, so one shared
+		// CostManagementCeleryBacklog is not usable to tell queues apart.
+		"CostManagementCeleryBacklog",
+		"CostManagementCeleryBacklogHcs",
+		"CostManagementCeleryBacklogSubsExtraction",
 	}
 	for _, a := range absent {
 		if names[a] {
@@ -179,7 +186,7 @@ func TestPrometheusRules_APIDownTreatsAbsentUp(t *testing.T) {
 	}
 }
 
-func prometheusRuleExpr(t *testing.T, pr *unstructured.Unstructured, alert string) string {
+func prometheusRule(t *testing.T, pr *unstructured.Unstructured, alert string) map[string]any {
 	t.Helper()
 	groups, found, err := unstructured.NestedSlice(pr.Object, "spec", "groups")
 	if err != nil || !found || len(groups) == 0 {
@@ -193,15 +200,14 @@ func prometheusRuleExpr(t *testing.T, pr *unstructured.Unstructured, alert strin
 	if !ok {
 		t.Fatalf("rules type %T", g0["rules"])
 	}
-	var matches []string
+	var matches []map[string]any
 	for _, raw := range rules {
 		rule, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		if rule["alert"] == alert {
-			expr, _ := rule["expr"].(string)
-			matches = append(matches, expr)
+			matches = append(matches, rule)
 		}
 	}
 	if len(matches) == 0 {
@@ -211,6 +217,12 @@ func prometheusRuleExpr(t *testing.T, pr *unstructured.Unstructured, alert strin
 		t.Fatalf("expected exactly one %q rule, got %d", alert, len(matches))
 	}
 	return matches[0]
+}
+
+func prometheusRuleExpr(t *testing.T, pr *unstructured.Unstructured, alert string) string {
+	t.Helper()
+	expr, _ := prometheusRule(t, pr, alert)["expr"].(string)
+	return expr
 }
 
 func TestAppServiceMonitor_BetaComponents(t *testing.T) {
@@ -259,9 +271,71 @@ func TestAppServiceMonitor_BetaComponents(t *testing.T) {
 			t.Errorf("missing component %q", want)
 		}
 	}
-	for _, absent := range []string{"listener", "ros-api", "ros-optimization", "gateway"} {
+	for _, absent := range []string{"listener", "ros-api", "ros-optimization", "gateway", "celery-worker"} {
 		if got[absent] {
 			t.Errorf("unexpected component %q", absent)
+		}
+	}
+}
+
+func TestCeleryServiceMonitor(t *testing.T) {
+	sm := CeleryServiceMonitor(testMonitoringCFG())
+	if sm.GetName() != "cost-management-celery-metrics" {
+		t.Errorf("name: got %q", sm.GetName())
+	}
+	exprs, found, err := unstructured.NestedSlice(sm.Object, "spec", "selector", "matchExpressions")
+	if err != nil || !found || len(exprs) != 1 {
+		t.Fatalf("matchExpressions: found=%v len=%d err=%v", found, len(exprs), err)
+	}
+	expr, ok := exprs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expr type %T", exprs[0])
+	}
+	values, ok := expr["values"].([]any)
+	if !ok || len(values) != 1 || values[0] != "celery-worker" {
+		t.Fatalf("values = %+v, want [celery-worker]", values)
+	}
+}
+
+func TestPrometheusRules_CeleryBacklogIdentifiesQueue(t *testing.T) {
+	pr := PrometheusRules(testMonitoringCFG())
+
+	// One rule per queue so Observe > Alerting Name column is distinct.
+	// max by (namespace) collapses per-pod scrape duplicates (the 12 identical rows).
+	cases := []struct {
+		alert, metric, queue string
+	}{
+		{"CostManagementCeleryBacklogDownload", "download_backlog", "download"},
+		{"CostManagementCeleryBacklogPriority", "priority_backlog", "priority"},
+		{"CostManagementCeleryBacklogSummary", "summary_backlog", "summary"},
+		{"CostManagementCeleryBacklogCelery", "default_backlog", "celery"},
+		{"CostManagementCeleryBacklogCostModel", "cost_model_backlog", "cost_model"},
+		{"CostManagementCeleryBacklogDownloadXl", "download_xl_backlog", "download_xl"},
+	}
+	for _, tc := range cases {
+		expr := prometheusRuleExpr(t, pr, tc.alert)
+		want := `max by (namespace) (` + tc.metric + `{namespace="cost-onprem"} > 1000)`
+		if expr != want {
+			t.Fatalf("%s expr=\n%s\nwant\n%s", tc.alert, expr, want)
+		}
+		rule := prometheusRule(t, pr, tc.alert)
+		lbl := rule["labels"].(map[string]any)
+		if lbl["queue"] != tc.queue {
+			t.Fatalf("%s queue label=%v want %s", tc.alert, lbl["queue"], tc.queue)
+		}
+		if rule["for"] != "10m" {
+			t.Fatalf("%s for=%v want 10m", tc.alert, rule["for"])
+		}
+		ann := rule["annotations"].(map[string]any)
+		sum, _ := ann["summary"].(string)
+		if !strings.Contains(sum, tc.queue) {
+			t.Fatalf("%s summary must name the queue: %s", tc.alert, sum)
+		}
+	}
+
+	for _, absent := range []string{"CostManagementCeleryBacklog", "CostManagementCeleryBacklogHcs", "CostManagementCeleryBacklogSubsExtraction"} {
+		if _, ok := alertNamesFromRules(t, pr)[absent]; ok {
+			t.Fatalf("unexpected alert %s", absent)
 		}
 	}
 }
