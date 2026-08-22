@@ -19,6 +19,80 @@ import (
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
+func TestReconcileMigration_EmptyKokuImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when API image is unset")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) {
+		t.Fatal("must not create a Koku migration Job without spec.costManagement.api.image")
+	}
+
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ImageNotSet" {
+		t.Fatalf("expected SchemaUpToDate=False ImageNotSet, got %+v", cond)
+	}
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDegraded) {
+		t.Fatal("expected Degraded=True when API image is unset")
+	}
+	degraded := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+	if degraded.Reason != "ImageNotSet" {
+		t.Errorf("Degraded reason = %q, want ImageNotSet", degraded.Reason)
+	}
+	if cfg.Status.Phase != costv1alpha1.PhaseDegraded {
+		t.Errorf("Phase = %q, want %q", cfg.Status.Phase, costv1alpha1.PhaseDegraded)
+	}
+}
+
+func TestReconcileMigration_EmptyRBACImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.RBAC.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when RBAC image is unset")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) {
+		t.Fatal("must not create any migration Job when a required image is unset")
+	}
+
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ImageNotSet" {
+		t.Fatalf("expected SchemaUpToDate=False ImageNotSet, got %+v", cond)
+	}
+}
+
+func TestReconcileMigration_ROSEnabledEmptyImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when ROS is enabled without an image")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) || jobExists(c, testNamespace, resources.NameROSMigration(cfg)) {
+		t.Fatal("must not create migration Jobs when ROS image is unset")
+	}
+
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ImageNotSet" {
+		t.Fatalf("expected SchemaUpToDate=False ImageNotSet, got %+v", cond)
+	}
+}
+
 func TestReconcileMigration_FirstReconcileCreatesKokuJob(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
 
@@ -240,6 +314,10 @@ func TestReconcileMigration_ROSDisabled_SkipsROSMigration(t *testing.T) {
 func TestReconcileMigration_ROSEnabled_IncludesROSMigration(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
 	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/ros",
+		Tag:        "v1",
+	}
 
 	// Step 1: Koku Job created
 	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
@@ -467,6 +545,14 @@ func newMigrationTestReconciler(t *testing.T) (*CostManagementServiceConfigRecon
 	cfg := minimalCR(testCRName, testNamespace)
 	cfg.Spec.Database.Deploy = boolPtr(true)
 	cfg.Spec.Cache.Deploy = boolPtr(true)
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/koku",
+		Tag:        "v1",
+	}
+	cfg.Spec.RBAC.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/rbac",
+		Tag:        "v1",
+	}
 
 	c := fakeClientWithApplySupport(scheme)
 	r := &CostManagementServiceConfigReconciler{

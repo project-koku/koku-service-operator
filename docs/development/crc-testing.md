@@ -143,7 +143,7 @@ values produce `InvalidImageName` (image `:`). See the BYOI sample CR and
 ## Image note: arm64 vs amd64
 
 CRC on Apple Silicon runs an **arm64** node. The production koku image
-(`quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:d8055ac`) is
+(`quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:768be82`) is
 **amd64-only** and segfaults under QEMU emulation.
 
 Use the local arm64 build for testing:

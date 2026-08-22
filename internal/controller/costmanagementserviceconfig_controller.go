@@ -423,6 +423,14 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 // Each Job must complete before the next is created. Previously-succeeded
 // Jobs are not re-created unless the image-tag annotation changed.
 func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	if msg := migrationImageError(cfg); msg != "" {
+		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse, "ImageNotSet", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "ImageNotSet", msg)
+		cfg.Status.Phase = costv1alpha1.PhaseDegraded
+		r.Recorder.Event(cfg, corev1.EventTypeWarning, "ImageNotSet", msg)
+		return Result{Stop: true}, nil
+	}
+
 	type migStep struct {
 		name     string
 		imageTag string
@@ -436,8 +444,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 			build:    func() *batchv1.Job { return resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag) },
 		},
 	}
-	// ROS schema migrate only when ROS is enabled — otherwise the Job uses an
-	// empty image tag (image ":") and fails DeadlineExceeded.
+	// ROS schema migrate only when ROS is enabled.
 	if costv1alpha1.ROSEnabled(cfg) {
 		steps = append(steps, migStep{
 			name:     resources.NameROSMigration(cfg),
@@ -479,6 +486,25 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	return Result{}, nil
 }
 
+// migrationImageError returns a human-readable error when a required workload
+// image is missing. Koku migrations use spec.costManagement.api.image (the same
+// image as API/Masu/listener). Empty images must fail closed rather than
+// creating Jobs with ":" or a hardcoded :latest tag.
+func migrationImageError(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if _, ok := resources.KokuImage(cfg); !ok {
+		return "spec.costManagement.api.image.repository and tag are required (Koku migration must use the same image as the API)"
+	}
+	if costv1alpha1.ROSEnabled(cfg) {
+		if _, ok := resources.ImageRef(cfg.Spec.ROS.Image); !ok {
+			return "spec.ros.image.repository and tag are required when ROS is enabled"
+		}
+	}
+	if _, ok := resources.ImageRef(cfg.Spec.RBAC.Image); !ok {
+		return "spec.rbac.image.repository and tag are required"
+	}
+	return ""
+}
+
 // runMigrationStep manages a single migration Job: create if absent, detect
 // upgrades, poll completion, surface failures. Returns a non-zero Result when
 // the pipeline should pause (job still running or just failed).
@@ -500,6 +526,9 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 
 	if errors.IsNotFound(err) {
 		job := build()
+		if job == nil {
+			return Result{}, fmt.Errorf("create %s: image is unset", jobName)
+		}
 		setOwnerRef(cfg, job)
 		if createErr := r.Create(ctx, job); createErr != nil {
 			return Result{}, fmt.Errorf("create %s: %w", jobName, createErr)
