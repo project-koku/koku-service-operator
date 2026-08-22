@@ -1,0 +1,14 @@
+{
+    "roles": [
+        {
+            "name": "Sources administrator",
+            "description": "Perform any available operation on any source.",
+            "system": true,
+            "version": 2,
+            "admin_default": true,
+            "access": [
+                {"permission": "sources:*:*"}
+            ]
+        }
+    ]
+}

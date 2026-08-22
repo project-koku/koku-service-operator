@@ -143,20 +143,15 @@ echo "=== ROS migrations completed ==="`
 // RBAC migration + seeding
 // -----------------------------------------------------------------------------
 
-// RBACMigrationJob builds the RBAC schema migration + chart-parity seeding Job.
-// Combines migrate, built-in seeds, cost-management/sources role seed,
-// admin_default groups, bootstrap_tenants, and platform_default cleanup.
+// RBACMigrationJob builds the RBAC schema migration + on-prem seeding Job.
+// Catalog JSON is mounted from ConfigMaps; seeds loads permissions, roles, and groups.
 func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
 	env := rbacMigrationEnv(cfg)
 	script := rbacMigrationScript()
 
-	vols := []corev1.Volume{{
-		Name:         "tmp",
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-	}}
-	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
+	vols, mounts := rbacVolumesAndMounts(cfg)
 
 	host := DatabaseHost(cfg)
 	dbPort := cfg.Spec.Database.Port
@@ -180,6 +175,7 @@ func rbacMigrationEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.En
 
 func rbacMigrationScript() string {
 	// DB readiness is handled by the waitForPostgres init container.
+	// Cost/sources catalog is mounted from ConfigMaps; seeds loads permissions → roles → groups.
 	return `set -e
 echo "=== insights-rbac migration job ==="
 cd /opt/rbac/rbac
@@ -187,129 +183,15 @@ python manage.py migrate --noinput
 echo "✓ Migrations complete"
 python manage.py seeds --skip-notifications
 echo "✓ Built-in seeding complete"
-
-echo "Seeding cost-management permissions and roles..."
-python manage.py shell <<'SEED_SCRIPT'
-from api.models import Tenant
-from management.models import Permission, Role, Access
-
-public_tenant = Tenant.objects.get(tenant_name='public')
-
-cm_perms = [
-    ("aws.account", "*"), ("aws.account", "read"),
-    ("aws.organizational_unit", "*"), ("aws.organizational_unit", "read"),
-    ("azure.subscription_guid", "*"), ("azure.subscription_guid", "read"),
-    ("gcp.account", "*"), ("gcp.account", "read"),
-    ("gcp.project", "*"), ("gcp.project", "read"),
-    ("openshift.cluster", "*"), ("openshift.cluster", "read"),
-    ("openshift.node", "*"), ("openshift.node", "read"),
-    ("openshift.project", "*"), ("openshift.project", "read"),
-    ("cost_model", "*"), ("cost_model", "read"), ("cost_model", "write"),
-    ("settings", "*"), ("settings", "read"), ("settings", "write"),
-    ("*", "*"),
-]
-
-perm_count = 0
-for res, verb in cm_perms:
-    _, created = Permission.objects.get_or_create(
-        application="cost-management", resource_type=res, verb=verb,
-        defaults={"permission": f"cost-management:{res}:{verb}", "tenant": public_tenant}
-    )
-    if created:
-        perm_count += 1
-
-_, created = Permission.objects.get_or_create(
-    application="sources", resource_type="*", verb="*",
-    defaults={"permission": "sources:*:*", "tenant": public_tenant}
-)
-if created:
-    perm_count += 1
-print(f"Seeded {perm_count} permissions")
-
-roles = [
-    ("Cost Administrator", "Perform any available operation on cost management resources.", True, False, [("cost-management", "*", "*")]),
-    ("Cost Price List Administrator", "Perform read and write operations on cost models.", False, False, [("cost-management", "cost_model", "*"), ("cost-management", "settings", "*")]),
-    ("Cost Price List Viewer", "Perform read operations on cost models.", False, False, [("cost-management", "cost_model", "read"), ("cost-management", "settings", "read")]),
-    ("Cost Cloud Viewer", "Perform read operations on cost reports related to cloud sources.", False, False, [("cost-management", "aws.account", "*"), ("cost-management", "aws.organizational_unit", "*"), ("cost-management", "azure.subscription_guid", "*"), ("cost-management", "gcp.account", "*"), ("cost-management", "gcp.project", "*")]),
-    ("Cost OpenShift Viewer", "Perform read operations on cost reports related to OpenShift sources.", False, False, [("cost-management", "openshift.cluster", "*")]),
-    ("Sources administrator", "Perform any available operation on any source.", True, False, [("sources", "*", "*")]),
-]
-
-role_count = 0
-for name, desc, admin_default, platform_default, access_list in roles:
-    role, created = Role.objects.get_or_create(
-        name=name, tenant=public_tenant,
-        defaults={"description": desc, "system": True, "platform_default": platform_default, "admin_default": admin_default, "version": 2}
-    )
-    if created:
-        role_count += 1
-    for app, res, verb in access_list:
-        perm = Permission.objects.get(application=app, resource_type=res, verb=verb, tenant=public_tenant)
-        Access.objects.get_or_create(role=role, permission=perm, defaults={"tenant": public_tenant})
-
-print(f"Seeded {role_count} roles (total: {Role.objects.count()})")
-print("RBAC seeding complete.")
-SEED_SCRIPT
-echo "✓ Cost-management seeding complete"
-
-echo "Creating admin_default group for org tenants..."
-python manage.py shell <<'ADMIN_DEFAULT_SCRIPT'
-from api.models import Tenant
-from management.models import Group, Policy, Role
-
-public_tenant = Tenant.objects.get(tenant_name='public')
-admin_default_roles = Role.objects.filter(admin_default=True, tenant=public_tenant)
-if not admin_default_roles.exists():
-    print("WARNING: No admin_default roles found, skipping admin_default group")
-else:
-    user_tenants = Tenant.objects.exclude(tenant_name='public').filter(org_id__isnull=False)
-    count = 0
-    for tenant in user_tenants:
-        grp, _ = Group.objects.get_or_create(
-            name='Cost Admin Default', tenant=tenant,
-            defaults={'admin_default': True, 'system': True,
-                      'description': 'Admin default: grants admin_default roles to is_org_admin users'}
-        )
-        grp.admin_default = True
-        grp.save()
-        policy, _ = Policy.objects.get_or_create(
-            name='Cost Admin Default Policy', tenant=tenant, group=grp
-        )
-        for role in admin_default_roles:
-            policy.roles.add(role)
-        count += 1
-    role_names = list(admin_default_roles.values_list('name', flat=True))
-    print(f"Created/updated admin_default group for {count} tenant(s) with roles: {role_names}")
-ADMIN_DEFAULT_SCRIPT
-echo "✓ Admin default group seeding complete"
-
 set +e
 python manage.py bootstrap_tenants --all -v 2
 bootstrap_rc=$?
 set -e
 if [ $bootstrap_rc -ne 0 ]; then
-  echo "WARNING: bootstrap_tenants exited with code $bootstrap_rc (non-fatal, continuing to cleanup)"
+  echo "WARNING: bootstrap_tenants exited with code $bootstrap_rc (non-fatal)"
+else
+  echo "✓ Tenant bootstrap complete"
 fi
-echo "✓ Tenant bootstrap complete"
-
-echo "Removing cost-management access from platform_default groups..."
-python manage.py shell <<'CLEANUP_DEFAULTS'
-from management.models import Group, Policy, Access
-
-removed = 0
-for group in Group.objects.filter(platform_default=True):
-    for policy in Policy.objects.filter(group=group):
-        for role in policy.roles.all():
-            has_cm_access = Access.objects.filter(
-                role=role,
-                permission__application='cost-management',
-            ).exists()
-            if has_cm_access:
-                policy.roles.remove(role)
-                removed += 1
-print(f"Removed {removed} role(s) with cost-management access from platform_default groups")
-CLEANUP_DEFAULTS
-echo "✓ Platform default cleanup complete"
 echo "=== insights-rbac migration job completed ==="`
 }
 
@@ -324,17 +206,16 @@ func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag s
 
 	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
 
-	env := append(rbacEnv(cfg),
+	baseEnv := rbacEnv(cfg)
+	env := make([]corev1.EnvVar, len(baseEnv), len(baseEnv)+3)
+	copy(env, baseEnv)
+	env = append(env,
 		EnvFromSecret("SYNC_ORG_ID", secretName, "org-id"),
 		EnvFromSecret("SYNC_ACCOUNT_NUMBER", secretName, "account-number"),
 		EnvFromSecret("SYNC_USERNAME", secretName, "username"),
 	)
 	script := rbacAdminBootstrapScript()
-	vols := []corev1.Volume{{
-		Name:         "tmp",
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-	}}
-	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
+	vols, mounts := rbacVolumesAndMounts(cfg)
 
 	host := DatabaseHost(cfg)
 	dbPort := cfg.Spec.Database.Port
@@ -349,66 +230,20 @@ func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag s
 
 func rbacAdminBootstrapScript() string {
 	// DB readiness is handled by the waitForPostgres init container.
+	// Identity comes from Secret via env; ensure_user is in the RBAC image (COST-8088).
 	return `set -e
 echo "=== insights-rbac admin bootstrap job ==="
-echo "Username: ${SYNC_USERNAME}"
-echo "Org ID: ${SYNC_ORG_ID}"
-echo "Account Number: ${SYNC_ACCOUNT_NUMBER}"
 cd /opt/rbac/rbac
-python manage.py shell <<'BOOTSTRAP_SCRIPT'
-import os
-from api.models import Tenant
-from management.models import Group, Policy, Role, Principal
-from django.core.cache import cache
-
-username = os.environ['SYNC_USERNAME']
-org_id = os.environ['SYNC_ORG_ID']
-acct_number = os.environ['SYNC_ACCOUNT_NUMBER']
-
-public_tenant = Tenant.objects.get(tenant_name='public')
-admin_default_roles = Role.objects.filter(admin_default=True, tenant=public_tenant)
-if not admin_default_roles.exists():
-    print("ERROR: No admin_default roles found — migration job may not have completed")
-    raise SystemExit(1)
-
-tenant, created = Tenant.objects.get_or_create(
-    org_id=org_id,
-    defaults={'tenant_name': 'acct' + acct_number, 'ready': True}
-)
-print(f"{'Created' if created else 'Existing'} tenant for org_id={org_id}")
-
-grp, _ = Group.objects.get_or_create(
-    name='Cost Admin Default', tenant=tenant,
-    defaults={'admin_default': True, 'system': True,
-              'description': 'Admin default: grants admin_default roles to bootstrap admin user'}
-)
-grp.admin_default = True
-grp.save()
-
-policy, _ = Policy.objects.get_or_create(
-    name='Cost Admin Default Policy', tenant=tenant, group=grp
-)
-for role in admin_default_roles:
-    policy.roles.add(role)
-
-principal, _ = Principal.objects.get_or_create(
-    username=username, tenant=tenant,
-    defaults={'type': 'user'}
-)
-grp.principals.add(principal)
-
-role_names = list(admin_default_roles.values_list('name', flat=True))
-cache.clear()
-print(f"✓ User '{username}' granted {role_names} for org={org_id}")
-BOOTSTRAP_SCRIPT
-echo "✓ Admin user bootstrap complete"
-set +e
-python manage.py bootstrap_tenants --org-id "${SYNC_ORG_ID}" --force
-bootstrap_rc=$?
-set -e
-if [ $bootstrap_rc -ne 0 ]; then
-  echo "WARNING: bootstrap_tenants exited with code $bootstrap_rc (non-fatal)"
-fi
+python manage.py ensure_user \
+  --username "${SYNC_USERNAME}" \
+  --org-id "${SYNC_ORG_ID}" \
+  --account-number "${SYNC_ACCOUNT_NUMBER}" \
+  --application cost-management \
+  --application sources \
+  --admin \
+  --admin-group-name "Cost Admin Default" \
+  --admin-group-description "Admin default: grants admin_default roles to bootstrap admin user" \
+  --admin-policy-name "Cost Admin Default Policy"
 echo "=== insights-rbac admin bootstrap job completed ==="`
 }
 
