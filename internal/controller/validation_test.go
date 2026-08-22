@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -94,15 +96,38 @@ func TestJWKSProbe(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			t.Cleanup(srv.Close)
-			err := jwksProbe(ctx, srv.URL, false, time.Second)
+			err := jwksProbe(ctx, srv.URL, false, nil, time.Second)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("jwksProbe status=%d body=%q: err=%v, wantErr=%v", tc.status, tc.body, err, tc.wantErr)
 			}
 		})
 	}
 
+	t.Run("TLS custom CA", func(t *testing.T) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(validJWKS))
+		}))
+		t.Cleanup(srv.Close)
+		pool := x509.NewCertPool()
+		pool.AddCert(srv.Certificate())
+		if err := jwksProbe(ctx, srv.URL, false, pool, time.Second); err != nil {
+			t.Fatalf("expected success with custom CA, got %v", err)
+		}
+	})
+
+	t.Run("TLS verification failure without custom CA", func(t *testing.T) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(validJWKS))
+		}))
+		t.Cleanup(srv.Close)
+		if err := jwksProbe(ctx, srv.URL, false, nil, time.Second); err == nil {
+			t.Fatal("expected TLS verification error")
+		}
+	})
+
 	t.Run("unreachable", func(t *testing.T) {
-		if err := jwksProbe(ctx, "http://"+localHost+":1/jwks", false, 200*time.Millisecond); err == nil {
+		if err := jwksProbe(ctx, "http://"+localHost+":1/jwks", false, nil, 200*time.Millisecond); err == nil {
 			t.Fatal("expected error for unreachable server")
 		}
 	})
@@ -114,7 +139,7 @@ func TestJWKSProbe(t *testing.T) {
 		t.Cleanup(srv.Close)
 		cancelled, cancel := context.WithCancel(context.Background())
 		cancel()
-		if err := jwksProbe(cancelled, srv.URL, false, time.Second); err == nil {
+		if err := jwksProbe(cancelled, srv.URL, false, nil, time.Second); err == nil {
 			t.Fatal("expected error when parent context is cancelled")
 		}
 	})
@@ -435,6 +460,101 @@ func TestReconcileValidation_OIDCJWKS(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReconcileValidation_OIDCWithCustomCA(t *testing.T) {
+	t.Run("custom CA", func(t *testing.T) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"1"}]}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+			Spec:       bundledNoKafkaSpec(),
+		}
+		cfg.Spec.Auth.Keycloak.URL = srv.URL
+		cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "keycloak-ca"
+		caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "keycloak-ca", Namespace: testNamespace},
+			Data:       map[string][]byte{caCertKey: caPEM},
+		}
+
+		r := newValidationReconciler(t, caSecret)
+		if _, err := r.reconcileValidation(context.Background(), cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+		if found == nil || found.Status != metav1.ConditionTrue || found.Reason != "OIDCReachable" {
+			t.Fatalf("AuthenticationReady=%+v, want OIDCReachable", found)
+		}
+	})
+
+	t.Run("missing CA Secret", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+			Spec:       bundledNoKafkaSpec(),
+		}
+		cfg.Spec.Auth.Keycloak.URL = "https://keycloak.example.com"
+		cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "missing-ca"
+
+		r := newValidationReconciler(t)
+		if _, err := r.reconcileValidation(context.Background(), cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+		if found == nil || found.Status != metav1.ConditionFalse || found.Reason != "OIDCCACertInvalid" {
+			t.Fatalf("AuthenticationReady=%+v, want OIDCCACertInvalid", found)
+		}
+	})
+
+	t.Run("invalid CA data", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+			Spec:       bundledNoKafkaSpec(),
+		}
+		cfg.Spec.Auth.Keycloak.URL = "https://keycloak.example.com"
+		cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "invalid-ca"
+		caSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid-ca", Namespace: testNamespace},
+			Data:       map[string][]byte{caCertKey: []byte("not-a-certificate")},
+		}
+
+		r := newValidationReconciler(t, caSecret)
+		if _, err := r.reconcileValidation(context.Background(), cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+		if found == nil || found.Status != metav1.ConditionFalse || found.Reason != "OIDCCACertInvalid" {
+			t.Fatalf("AuthenticationReady=%+v, want OIDCCACertInvalid", found)
+		}
+	})
+
+	t.Run("insecure skips CA Secret loading", func(t *testing.T) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"1"}]}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+			Spec:       bundledNoKafkaSpec(),
+		}
+		cfg.Spec.Auth.Keycloak.URL = srv.URL
+		cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "missing-ca"
+		cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify = true
+
+		r := newValidationReconciler(t)
+		if _, err := r.reconcileValidation(context.Background(), cfg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+		if found == nil || found.Status != metav1.ConditionTrue || found.Reason != "OIDCReachable" {
+			t.Fatalf("AuthenticationReady=%+v, want OIDCReachable", found)
+		}
+	})
 }
 
 func TestReconcileValidation_DBSecretMissingKeys(t *testing.T) {

@@ -206,29 +206,16 @@ branch.
 
 ---
 
-## 11. `jwksProbe` ignores `caCertSecretName` — false `AuthenticationReady: False`
+## 11. ~~`jwksProbe` ignores `caCertSecretName` — false `AuthenticationReady: False`~~ — **CLOSED**
 
 **Source:** PR #74 review (Jordi)
 
-**Problem:** `jwksProbe` (validation.go:195) builds its TLS transport from
-Go's default cert pool and only honours `insecureSkipVerify`. When a user
-sets `spec.authentication.keycloak.tls.caCertSecretName` for an internal
-Keycloak with a self-signed or private CA, Envoy gets the CA mounted via
-`/ca-extra` and validates JWKS fine — but the operator's own health probe
-uses a different TLS path and reports `AuthenticationReady: False /
-OIDCUnreachable` even though authentication works end-to-end.
-
-**Concrete failure mode:** user has a real CA, sets `caCertSecretName`,
-does NOT set `insecureSkipVerify` (correctly — they have a proper CA).
-Envoy works. Operator says auth is broken.
-
-**Fix:** Thread the CA secret into `jwksProbe` — read the Secret, load
-certs into a `tls.Config.RootCAs` pool, pass the custom transport.
-Requires Secrets read RBAC in the validation phase.
-
-**Workaround:** set `insecureSkipVerify: true` alongside `caCertSecretName`
-to suppress the false negative (Envoy still validates properly with the
-mounted CA).
+**Fixed:** `reconcileValidation` now delegates Keycloak CA loading to
+`keycloakCACertPool`, which reads `ca.crt` from
+`auth.keycloak.tls.caCertSecretName` and passes a custom `x509.CertPool` to
+`jwksProbe`. Missing or invalid CA data reports `OIDCCACertInvalid`. When
+`insecureSkipVerify=true`, the operator skips CA Secret loading and honors the
+explicit insecure setting.
 
 ---
 

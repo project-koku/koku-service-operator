@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -143,17 +144,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	r.validateObjectStorage(ctx, cfg)
 
 	// --- OIDC / Keycloak (non-blocking; skipped when URL not explicitly set) ---
-	if u := strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL); u != "" {
-		jwksURL := resources.KeycloakJWKSURL(cfg)
-		insecure := cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify
-		if err := jwksProbe(ctx, jwksURL, insecure, validationTimeout); err != nil {
-			r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
-				"OIDCUnreachable", fmt.Sprintf("JWKS %s: %v", jwksURL, err))
-		} else {
-			r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionTrue,
-				"OIDCReachable", jwksURL)
-		}
-	}
+	r.validateOIDC(ctx, cfg)
 
 	if !allReady {
 		// Blocking DB/Cache failures must not leave stale Available=True /
@@ -167,6 +158,52 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 	return Result{}, nil
+}
+
+// validateOIDC probes the configured Keycloak JWKS endpoint. It is
+// non-blocking for the reconciliation pipeline, but records authentication
+// readiness and invalid custom CA configuration in status.
+func (r *CostManagementServiceConfigReconciler) validateOIDC(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) {
+	if strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL) == "" {
+		return
+	}
+
+	jwksURL := resources.KeycloakJWKSURL(cfg)
+	insecure := cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify
+	caCertPool, err := r.keycloakCACertPool(ctx, cfg)
+	if err != nil {
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+			"OIDCCACertInvalid", fmt.Errorf("load Keycloak CA Secret: %w", err).Error())
+		return
+	}
+	if err := jwksProbe(ctx, jwksURL, insecure, caCertPool, validationTimeout); err != nil {
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+			"OIDCUnreachable", fmt.Sprintf("JWKS %s: %v", jwksURL, err))
+		return
+	}
+	r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionTrue,
+		"OIDCReachable", jwksURL)
+}
+
+// keycloakCACertPool loads the configured Keycloak CA unless TLS verification
+// was explicitly disabled. A nil pool preserves the system CA behavior.
+func (r *CostManagementServiceConfigReconciler) keycloakCACertPool(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (*x509.CertPool, error) {
+	if cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify {
+		return nil, nil
+	}
+	caName := cfg.Spec.Auth.Keycloak.TLS.CACertSecretName
+	if caName == "" {
+		return nil, nil
+	}
+	caSecret, err := r.getSecret(ctx, cfg.Namespace, caName, []string{caCertKey})
+	if err != nil {
+		return nil, err
+	}
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caSecret.Data[caCertKey]) {
+		return nil, fmt.Errorf("secret %q key %q contains no valid PEM certificates", caName, caCertKey)
+	}
+	return caCertPool, nil
 }
 
 // blockingDependencyMessage summarizes why DB/Cache validation blocked reconcile.
@@ -219,8 +256,9 @@ func kafkaTCPProbe(bootstrapServers string, timeout time.Duration) error {
 // with a non-empty keys array (what Envoy needs to validate JWTs).
 // 4xx is an error: 401/403 means the endpoint is misconfigured; 404 means
 // the JWKS URL or realm is wrong. Uses the reconcile context so shutdown
-// cancels an in-flight probe.
-func jwksProbe(ctx context.Context, rawURL string, insecureSkipVerify bool, timeout time.Duration) error {
+// cancels an in-flight probe. When caCertPool is non-nil, it is used instead
+// of the system CA pool for TLS verification.
+func jwksProbe(ctx context.Context, rawURL string, insecureSkipVerify bool, caCertPool *x509.CertPool, timeout time.Duration) error {
 	base, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		base = &http.Transport{}
@@ -231,6 +269,12 @@ func jwksProbe(ctx context.Context, rawURL string, insecureSkipVerify bool, time
 			transport.TLSClientConfig = &tls.Config{}
 		}
 		transport.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // user-opted-in
+	}
+	if caCertPool != nil {
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.RootCAs = caCertPool
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
