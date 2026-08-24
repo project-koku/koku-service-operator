@@ -69,13 +69,14 @@ func rbacEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
 	return env
 }
 
-// rbacVolumesAndMounts returns shared volumes for RBAC pods (/tmp + optional Valkey TLS).
+// rbacVolumesAndMounts returns shared volumes for RBAC pods (/tmp, seed JSON, optional Valkey TLS).
 func rbacVolumesAndMounts(cfg *costv1alpha1.CostManagementServiceConfig) ([]corev1.Volume, []corev1.VolumeMount) {
 	vols := []corev1.Volume{{
 		Name:         "tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	}}
 	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
+	vols, mounts = appendRBACSeedConfigVolumes(cfg, vols, mounts)
 	if cfg.Spec.Cache.TLS.Enabled && cfg.Spec.Cache.TLS.CACertSecretName != "" {
 		vols = append(vols, corev1.Volume{
 			Name: "redis-tls-ca",

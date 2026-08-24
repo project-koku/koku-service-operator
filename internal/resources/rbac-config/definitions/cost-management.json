@@ -1,0 +1,56 @@
+{
+    "roles": [
+        {
+            "name": "Cost Administrator",
+            "description": "Perform any available operation on cost management resources.",
+            "system": true,
+            "version": 2,
+            "admin_default": true,
+            "access": [
+                {"permission": "cost-management:*:*"}
+            ]
+        },
+        {
+            "name": "Cost Price List Administrator",
+            "description": "Perform read and write operations on cost models.",
+            "system": true,
+            "version": 2,
+            "access": [
+                {"permission": "cost-management:cost_model:*"},
+                {"permission": "cost-management:settings:*"}
+            ]
+        },
+        {
+            "name": "Cost Price List Viewer",
+            "description": "Perform read operations on cost models.",
+            "system": true,
+            "version": 2,
+            "access": [
+                {"permission": "cost-management:cost_model:read"},
+                {"permission": "cost-management:settings:read"}
+            ]
+        },
+        {
+            "name": "Cost Cloud Viewer",
+            "description": "Perform read operations on cost reports related to cloud sources.",
+            "system": true,
+            "version": 2,
+            "access": [
+                {"permission": "cost-management:aws.account:*"},
+                {"permission": "cost-management:aws.organizational_unit:*"},
+                {"permission": "cost-management:azure.subscription_guid:*"},
+                {"permission": "cost-management:gcp.account:*"},
+                {"permission": "cost-management:gcp.project:*"}
+            ]
+        },
+        {
+            "name": "Cost OpenShift Viewer",
+            "description": "Perform read operations on cost reports related to OpenShift sources.",
+            "system": true,
+            "version": 2,
+            "access": [
+                {"permission": "cost-management:openshift.cluster:*"}
+            ]
+        }
+    ]
+}
