@@ -11,13 +11,18 @@ import (
 )
 
 func minimalCRForResources(name, ns string) *costv1alpha1.CostManagementServiceConfig {
-	return &costv1alpha1.CostManagementServiceConfig{
+	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 			UID:       "test-uid-1234",
 		},
 	}
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/koku",
+		Tag:        "v1",
+	}
+	return cfg
 }
 
 // TestMigrationJob_UsesConstants verifies Job spec uses package-level constants
@@ -140,6 +145,7 @@ func TestAdminBootstrapJob_SecretKeyRefKeys(t *testing.T) {
 	cfg := minimalCRForResources("test", "ns")
 	cfg.Spec.Database.Deploy = boolPtr(true)
 	cfg.Spec.RBAC.Image.Tag = "rbac-tag"
+	cfg.Spec.RBAC.Image.Repository = "quay.io/test/rbac"
 	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
 	cfg.Spec.RBAC.BootstrapAdmin.SecretRef.Name = "rbac-bootstrap-admin"
 

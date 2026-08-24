@@ -11,8 +11,13 @@ const (
 	labelManagedBy = "app.kubernetes.io/managed-by"
 	labelComponent = "app.kubernetes.io/component"
 	labelVersion   = "app.kubernetes.io/version"
+	// labelMetricsRole marks pods selected by the aggregated Celery workers Service.
+	labelMetricsRole = "cost-management.openshift.io/metrics-role"
 
 	ManagedBy = "koku-service-operator"
+
+	// MetricsRoleCeleryWorker is the metrics-role value for Cost Management Celery workers.
+	MetricsRoleCeleryWorker = "celery-worker"
 )
 
 // Labels returns the full set of labels for a resource owned by cfg.

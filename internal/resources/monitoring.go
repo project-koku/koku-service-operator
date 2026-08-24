@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"strings"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -99,10 +101,15 @@ func GatewayServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstr
 	return serviceMonitor(cfg, cfg.Name+"-gateway-metrics", "admin", "/stats/prometheus", []string{"gateway"})
 }
 
+// CeleryServiceMonitor scrapes Cost Management Celery worker WorkerProbeServer
+// /metrics (queue backlog gauges) via the aggregated celery-workers Service.
+func CeleryServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
+	return serviceMonitor(cfg, cfg.Name+"-celery-metrics", "metrics", "/metrics", []string{"celery-worker"})
+}
+
 // PrometheusRules returns UWM-evaluable alert rules (COST-8108 option B gauges +
 // App/operator scrape series). Condition alerts use costmanagement_condition.
-// Deferred until emit/scrape paths exist: SecretRotated / DriftCorrected
-// (COST-7694 / G4); CeleryBacklog (needs Celery worker Service + metrics scrape).
+// Deferred until emit paths exist: SecretRotated / DriftCorrected (COST-7694 / G4).
 func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
 	instance := cfg.Name
 	ns := cfg.Namespace
@@ -118,7 +125,7 @@ func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 		}
 	}
 
-	rules := []any{
+	fixed := []any{
 		map[string]any{
 			"alert":  "CostManagementMigrationFailed",
 			"expr":   `costmanagement_migration_job_failed{namespace="` + ns + `",name="` + instance + `"} == 1`,
@@ -204,6 +211,13 @@ func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 		},
 	}
 
+	rules := make([]any, 0, len(fixed)+len(celeryBacklogQueues))
+	rules = append(rules, fixed...)
+	// One Prometheus rule per queue. OpenShift Observe groups by alert name and
+	// does not show labels in the Alerts table, so a shared CostManagementCeleryBacklog
+	// name is indistinguishable across queues (COST-7692).
+	rules = append(rules, celeryBacklogRules(ns, labels)...)
+
 	pr := &unstructured.Unstructured{}
 	pr.SetGroupVersionKind(prometheusRuleGVK)
 	pr.SetName(cfg.Name + "-alerts")
@@ -218,4 +232,60 @@ func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 	}, "spec", "groups")
 
 	return pr
+}
+
+// celeryBacklogQueues is metric -> Celery queue name for on-prem backlog alerts.
+// SaaS-only queues (hcs, subs_*) are omitted.
+var celeryBacklogQueues = []struct{ metric, queue string }{
+	{"download_backlog", "download"},
+	{"download_xl_backlog", "download_xl"},
+	{"download_penalty_backlog", "download_penalty"},
+	{"summary_backlog", "summary"},
+	{"summary_xl_backlog", "summary_xl"},
+	{"summary_penalty_backlog", "summary_penalty"},
+	{"priority_backlog", "priority"},
+	{"priority_xl_backlog", "priority_xl"},
+	{"priority_penalty_backlog", "priority_penalty"},
+	{"refresh_backlog", "refresh"},
+	{"refresh_xl_backlog", "refresh_xl"},
+	{"refresh_penalty_backlog", "refresh_penalty"},
+	{"cost_model_backlog", "cost_model"},
+	{"cost_model_xl_backlog", "cost_model_xl"},
+	{"cost_model_penalty_backlog", "cost_model_penalty"},
+	{"default_backlog", "celery"},
+	{"ocp_backlog", "ocp"},
+	{"ocp_xl_backlog", "ocp_xl"},
+	{"ocp_penalty_backlog", "ocp_penalty"},
+}
+
+func celeryBacklogAlertName(queue string) string {
+	var b strings.Builder
+	b.WriteString("CostManagementCeleryBacklog")
+	for part := range strings.SplitSeq(queue, "_") {
+		if part == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(part[:1]))
+		b.WriteString(part[1:])
+	}
+	return b.String()
+}
+
+func celeryBacklogRules(namespace string, labels func(string) map[string]any) []any {
+	out := make([]any, 0, len(celeryBacklogQueues))
+	for _, q := range celeryBacklogQueues {
+		lbl := labels("warning")
+		lbl["queue"] = q.queue
+		out = append(out, map[string]any{
+			"alert":  celeryBacklogAlertName(q.queue),
+			"expr":   `max by (namespace) (` + q.metric + `{namespace="` + namespace + `"} > 1000)`,
+			"for":    "10m",
+			"labels": lbl,
+			"annotations": map[string]any{
+				"summary":     "Cost Management Celery " + q.queue + " queue backlog high",
+				"description": "Celery queue " + q.queue + " depth is {{ $value }} (>1000) in namespace {{ $labels.namespace }} for more than 10 minutes.",
+			},
+		})
+	}
+	return out
 }

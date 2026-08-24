@@ -43,7 +43,7 @@ metadata:
               "api": {
                 "image": {
                   "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
-                  "tag": "d8055ac"
+                  "tag": "768be82"
                 },
                 "replicas": 1
               },
@@ -72,7 +72,7 @@ metadata:
               "masu": {
                 "image": {
                   "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
-                  "tag": "d8055ac"
+                  "tag": "768be82"
                 },
                 "replicas": 1
               }

@@ -7,11 +7,17 @@ Tests for database schema validation and migration status.
 import pytest
 
 from utils import (
+    assert_log_contains,
     exec_in_pod,
     execute_db_query,
     run_oc_command,
     get_job_logs,
     validate_logs,
+)
+
+# Koku migrate job wording varies by image; accept any known success line.
+_MIGRATION_LOG_SUCCESS_PATTERN = (
+    r"(Migrations completed successfully|=== Koku migrations completed ===)"
 )
 
 
@@ -184,11 +190,14 @@ class TestDatabaseMigrations:
         if logs is None:
             pytest.skip("Migration job logs not available (job may have been cleaned up)")
         
+        assert_log_contains(
+            logs,
+            _MIGRATION_LOG_SUCCESS_PATTERN,
+            regex=True,
+            message="Migration job did not log a known success marker",
+        )
         validate_logs(
             logs,
-            must_contain=[
-                "Migrations completed successfully",
-            ],
             must_not_contain=[
                 "Migration failed",
                 "Traceback (most recent call last)",

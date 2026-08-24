@@ -109,7 +109,7 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 2
       resources:
         requests:
@@ -121,7 +121,7 @@ spec:
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 2
       resources:
         requests:

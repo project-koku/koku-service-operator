@@ -54,11 +54,14 @@ func RBACSeedJobTag(imageTag string) string {
 // Koku migration
 // -----------------------------------------------------------------------------
 
-// MigrationJob builds the Koku Django migration Job.
+// MigrationJob builds the Koku Django migration Job using the same image as
+// the API/listener (spec.costManagement.api.image). Returns nil when that
+// image is unset — callers must treat a missing image as an error rather than
+// creating a Job with a hardcoded tag.
 func MigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	image := cfg.Spec.CostManagement.API.Image.Repository + ":" + cfg.Spec.CostManagement.API.Image.Tag
-	if image == ":" {
-		image = "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:latest"
+	image, ok := KokuImage(cfg)
+	if !ok {
+		return nil
 	}
 
 	env := KokuCommonEnv(cfg)
@@ -98,8 +101,12 @@ echo "=== Koku migrations completed ==="`
 // -----------------------------------------------------------------------------
 
 // ROSMigrationJob builds the ROS schema migration Job.
+// Returns nil when spec.ros.image repository or tag is unset.
 func ROSMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, ok := ImageRef(cfg.Spec.ROS.Image)
+	if !ok {
+		return nil
+	}
 
 	dbSecret := NameDBCredentials(cfg)
 	host := DatabaseHost(cfg)
@@ -145,8 +152,12 @@ echo "=== ROS migrations completed ==="`
 // RBACMigrationJob builds the RBAC schema migration + chart-parity seeding Job.
 // Combines migrate, built-in seeds, cost-management/sources role seed,
 // admin_default groups, bootstrap_tenants, and platform_default cleanup.
+// Returns nil when spec.rbac.image repository or tag is unset.
 func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
+	image, ok := ImageRef(cfg.Spec.RBAC.Image)
+	if !ok {
+		return nil
+	}
 
 	env := rbacMigrationEnv(cfg)
 	script := rbacMigrationScript()
@@ -313,7 +324,8 @@ echo "=== insights-rbac migration job completed ==="`
 }
 
 // AdminBootstrapJob builds the post-migrate Job that seeds a Tenant/Principal
-// in insights-rbac. Returns nil when disabled or secretRef.name is empty.
+// in insights-rbac. Returns nil when disabled, secretRef.name is empty, or the
+// RBAC image is unset.
 func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
 	ba := cfg.Spec.RBAC.BootstrapAdmin
 	if !ba.Enabled || ba.SecretRef.Name == "" {
@@ -321,7 +333,10 @@ func AdminBootstrapJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag s
 	}
 	secretName := ba.SecretRef.Name
 
-	image := cfg.Spec.RBAC.Image.Repository + ":" + cfg.Spec.RBAC.Image.Tag
+	image, ok := ImageRef(cfg.Spec.RBAC.Image)
+	if !ok {
+		return nil
+	}
 
 	env := append(rbacEnv(cfg),
 		EnvFromSecret("SYNC_ORG_ID", secretName, "org-id"),

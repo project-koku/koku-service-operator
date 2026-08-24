@@ -9,7 +9,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -18,6 +17,82 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
+
+func TestReconcileMigration_EmptyKokuImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when API image is unset")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) {
+		t.Fatal("must not create a Koku migration Job without spec.costManagement.api.image")
+	}
+	assertMigrationBlockedStatus(t, cfg, "ImageNotSet")
+}
+
+// ImageNotSet must flip a prior Ready status: Available/Progressing cannot
+// stay True while Phase is Degraded (review on PR #109).
+func TestReconcileMigration_ImageNotSet_ClearsStaleAvailable(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
+	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "")
+	cfg.Status.Phase = costv1alpha1.PhaseReady
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when API image is unset")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) {
+		t.Fatal("must not create a Koku migration Job after ImageNotSet")
+	}
+	assertMigrationBlockedStatus(t, cfg, "ImageNotSet")
+}
+
+func TestReconcileMigration_EmptyRBACImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.RBAC.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when RBAC image is unset")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) {
+		t.Fatal("must not create any migration Job when a required image is unset")
+	}
+	assertMigrationBlockedStatus(t, cfg, "ImageNotSet")
+}
+
+func TestReconcileMigration_ROSEnabledEmptyImage_DegradedNoJob(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{}
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileMigration: %v", err)
+	}
+	if !result.Stop {
+		t.Fatal("expected Stop=true when ROS is enabled without an image")
+	}
+	if jobExists(c, testNamespace, resources.NameKokuMigration(cfg)) || jobExists(c, testNamespace, resources.NameROSMigration(cfg)) {
+		t.Fatal("must not create migration Jobs when ROS image is unset")
+	}
+	assertMigrationBlockedStatus(t, cfg, "ImageNotSet")
+}
 
 func TestReconcileMigration_FirstReconcileCreatesKokuJob(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
@@ -160,18 +235,32 @@ func TestReconcileMigration_JobFailed_DegradedAndStop(t *testing.T) {
 	if jobExists(c, testNamespace, resources.NameRBACMigration(cfg)) {
 		t.Fatal("expected RBAC Job to NOT exist after Koku failure (pipeline stops)")
 	}
+	assertMigrationBlockedStatus(t, cfg, "MigrationFailed")
+}
 
-	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "MigrationFailed" {
-		t.Fatalf("expected SchemaUpToDate=False MigrationFailed, got %+v", cond)
+// MigrationFailed must flip a prior Ready status: Available cannot stay True
+// while schema migrate failed and core services were not rolled.
+func TestReconcileMigration_MigrationFailed_ClearsStaleAvailable(t *testing.T) {
+	r, cfg, c := newMigrationTestReconciler(t)
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
+	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "")
+	cfg.Status.Phase = costv1alpha1.PhaseReady
+
+	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDegraded) {
-		t.Fatal("expected Degraded=True on migration failure")
+	markJobFailed(t, c, testNamespace, resources.NameKokuMigration(cfg))
+
+	result, err := r.reconcileMigration(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("after failure: %v", err)
 	}
-	degraded := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
-	if degraded.Reason != "MigrationFailed" {
-		t.Errorf("Degraded reason = %q, want MigrationFailed", degraded.Reason)
+	if !result.Stop {
+		t.Fatal("expected Stop=true when Job fails")
 	}
+	assertMigrationBlockedStatus(t, cfg, "MigrationFailed")
 }
 
 func TestReconcileMigration_ImageTagChange_RecreatesJob(t *testing.T) {
@@ -240,6 +329,10 @@ func TestReconcileMigration_ROSDisabled_SkipsROSMigration(t *testing.T) {
 func TestReconcileMigration_ROSEnabled_IncludesROSMigration(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
 	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/ros",
+		Tag:        "v1",
+	}
 
 	// Step 1: Koku Job created
 	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
@@ -458,6 +551,30 @@ func jobUIDs(c client.Client, ns string) map[string]types.UID {
 	return out
 }
 
+// assertMigrationBlockedStatus checks OpenShift top-level conditions for a
+// migration gate that stopped the pipeline (ImageNotSet or MigrationFailed).
+func assertMigrationBlockedStatus(t *testing.T, cfg *costv1alpha1.CostManagementServiceConfig, reason string) {
+	t.Helper()
+	want := []struct {
+		typ    string
+		status metav1.ConditionStatus
+	}{
+		{costv1alpha1.ConditionAvailable, metav1.ConditionFalse},
+		{costv1alpha1.ConditionProgressing, metav1.ConditionFalse},
+		{costv1alpha1.ConditionDegraded, metav1.ConditionTrue},
+		{costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse},
+	}
+	for _, w := range want {
+		cond := findCondition(cfg.Status.Conditions, w.typ)
+		if cond == nil || cond.Status != w.status || cond.Reason != reason {
+			t.Errorf("%s: got %+v, want status=%s reason=%s", w.typ, cond, w.status, reason)
+		}
+	}
+	if cfg.Status.Phase != costv1alpha1.PhaseDegraded {
+		t.Errorf("Phase = %q, want %q", cfg.Status.Phase, costv1alpha1.PhaseDegraded)
+	}
+}
+
 // newMigrationTestReconciler returns a reconciler and CR with bundled DB/Cache
 // (so Job builders resolve in-cluster endpoints) and a noopRecorder.
 // Tests call reconcileMigration directly; Validation is not run.
@@ -467,6 +584,14 @@ func newMigrationTestReconciler(t *testing.T) (*CostManagementServiceConfigRecon
 	cfg := minimalCR(testCRName, testNamespace)
 	cfg.Spec.Database.Deploy = boolPtr(true)
 	cfg.Spec.Cache.Deploy = boolPtr(true)
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/koku",
+		Tag:        "v1",
+	}
+	cfg.Spec.RBAC.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/test/rbac",
+		Tag:        "v1",
+	}
 
 	c := fakeClientWithApplySupport(scheme)
 	r := &CostManagementServiceConfigReconciler{

@@ -17,7 +17,7 @@ import (
 // KokuAPIDeployment builds the Koku API Deployment.
 func KokuAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.CostManagement.API
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := KokuImage(cfg)
 	replicas := spec.Replicas
 	if replicas == 0 {
 		replicas = 1
@@ -80,9 +80,9 @@ func KokuAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servi
 // MasuDeployment builds the Masu data processor Deployment.
 func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.CostManagement.Masu
-	image := spec.Image.Repository + ":" + spec.Image.Tag
-	if image == ":" {
-		image = cfg.Spec.CostManagement.API.Image.Repository + ":" + cfg.Spec.CostManagement.API.Image.Tag
+	image, ok := ImageRef(spec.Image)
+	if !ok {
+		image, _ = KokuImage(cfg)
 	}
 	replicas := spec.Replicas
 	if replicas == 0 {
@@ -143,7 +143,7 @@ func MasuService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service 
 // ListenerDeployment builds the Kafka Listener Deployment.
 func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.CostManagement.Listener
-	image := cfg.Spec.CostManagement.API.Image.Repository + ":" + cfg.Spec.CostManagement.API.Image.Tag
+	image, _ := KokuImage(cfg)
 	replicas := spec.Replicas
 	if replicas == 0 {
 		replicas = 2
@@ -169,7 +169,7 @@ func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.D
 
 // CeleryBeatDeployment builds the Celery Beat scheduler Deployment.
 func CeleryBeatDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.CostManagement.API.Image.Repository + ":" + cfg.Spec.CostManagement.API.Image.Tag
+	image, _ := KokuImage(cfg)
 	replicas := int32(1)
 
 	env := KokuCommonEnv(cfg)
@@ -199,9 +199,14 @@ func CeleryBeatDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 // Celery Workers
 // -----------------------------------------------------------------------------
 
+const celeryWorkerMetricsPort = int32(9000)
+
 // CeleryWorkerDeployment builds a Celery worker Deployment for the given queue.
+// When replicas > 0, pods expose WorkerProbeServer /metrics on port 9000 and
+// carry metrics-role=celery-worker for the aggregated CeleryWorkers Service.
+// Zero-replica workers stay unscrapeable (no metrics port / scrape label).
 func CeleryWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig, queue string, spec costv1alpha1.CeleryWorkerSpec) *appsv1.Deployment {
-	image := cfg.Spec.CostManagement.API.Image.Repository + ":" + cfg.Spec.CostManagement.API.Image.Tag
+	image, _ := KokuImage(cfg)
 	replicas := spec.Replicas
 	concurrency := spec.Concurrency
 	if concurrency == 0 {
@@ -219,13 +224,44 @@ func CeleryWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig, queue
 		EnvVal("CELERY_WORKER_CONCURRENCY", int32String(concurrency)),
 	)
 
-	return deployment(cfg, NameCeleryWorker(cfg, queue), component, image, replicas, spec.Resources,
+	d := deployment(cfg, NameCeleryWorker(cfg, queue), component, image, replicas, spec.Resources,
 		nil, nil, env,
 		[]string{
 			"/bin/sh", "-c",
 			"cd $APP_HOME && PYTHONPATH=$APP_HOME celery -A koku worker --without-gossip -E -l ${CELERY_LOG_LEVEL:-info} -Q ${WORKER_QUEUES}",
 		},
 	)
+	if replicas > 0 {
+		// Scrape label on the pod template only — never on Spec.Selector (immutable).
+		d.Spec.Template.Labels[labelMetricsRole] = MetricsRoleCeleryWorker
+		d.Spec.Template.Spec.Containers[0].Ports = []corev1.ContainerPort{
+			{Name: "metrics", ContainerPort: celeryWorkerMetricsPort, Protocol: corev1.ProtocolTCP},
+		}
+	}
+	return d
+}
+
+// CeleryWorkersService selects Cost Management Celery worker pods that expose
+// /metrics (metrics-role=celery-worker). Zero-replica queues omit that label.
+func CeleryWorkersService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service {
+	return &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      NameCeleryWorkersService(cfg),
+			Namespace: cfg.Namespace,
+			Labels:    Labels(cfg, "celery-worker"),
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				labelApp:         cfg.Name,
+				labelInstance:    cfg.Name,
+				labelMetricsRole: MetricsRoleCeleryWorker,
+			},
+			Ports: []corev1.ServicePort{
+				{Name: "metrics", Port: celeryWorkerMetricsPort, TargetPort: intstr.FromString("metrics"), Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
 }
 
 // CeleryWorkerDeployments returns all Celery worker Deployments.

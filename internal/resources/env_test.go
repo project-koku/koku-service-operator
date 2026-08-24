@@ -112,6 +112,11 @@ func TestKokuWorkloadsCarryS3CredentialEnv(t *testing.T) {
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				SecretName: "user-s3-creds",
 			},
+			CostManagement: costv1alpha1.CostManagementConfig{
+				API: costv1alpha1.KokuAPISpec{
+					Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
+				},
+			},
 		},
 	}
 	wantSecret := NameStorageSecret(cfg)
@@ -322,6 +327,13 @@ func TestKokuCommonEnvSharedDefaults(t *testing.T) {
 func TestWorkloadKokuLogLevelOverrides(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			CostManagement: costv1alpha1.CostManagementConfig{
+				API: costv1alpha1.KokuAPISpec{
+					Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
+				},
+			},
+		},
 	}
 
 	workloads := []struct {

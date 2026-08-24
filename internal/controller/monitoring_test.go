@@ -119,12 +119,13 @@ func TestMonitoringAppliesServiceMonitorAndPrometheusRule(t *testing.T) {
 	if _, err := r.reconcileMonitoring(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileMonitoring: %v", err)
 	}
-	if len(patchKinds) != 4 ||
+	if len(patchKinds) != 5 ||
 		patchKinds[0] != "ServiceMonitor" ||
 		patchKinds[1] != "ServiceMonitor" ||
 		patchKinds[2] != "ServiceMonitor" ||
-		patchKinds[3] != "PrometheusRule" {
-		t.Errorf("expected App+Gateway+Operator ServiceMonitors then PrometheusRule, got %v", patchKinds)
+		patchKinds[3] != "ServiceMonitor" ||
+		patchKinds[4] != "PrometheusRule" {
+		t.Errorf("expected App+Gateway+Operator+Celery ServiceMonitors then PrometheusRule, got %v", patchKinds)
 	}
 }
 
