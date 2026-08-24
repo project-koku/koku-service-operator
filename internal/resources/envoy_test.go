@@ -327,6 +327,16 @@ func TestEnvoyResourceNames(t *testing.T) {
 	}
 }
 
+func TestEnvoyDeployment_DefaultImageWhenUnset(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Envoy.Image = costv1alpha1.ImageSpec{}
+	d := EnvoyDeployment(cfg)
+	const want = "docker.io/envoyproxy/envoy:v1.32.13"
+	if got := d.Spec.Template.Spec.Containers[0].Image; got != want {
+		t.Errorf("default envoy image = %q, want %q", got, want)
+	}
+}
+
 // TestEnvoyDeploymentHasConfigHash verifies that EnvoyDeployment includes a
 // content hash of the ConfigMap in the pod template annotations. Without this,
 // Envoy pods are never restarted when the ConfigMap changes (e.g., OIDC URL

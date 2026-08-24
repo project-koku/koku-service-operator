@@ -88,6 +88,9 @@ spec:
         - "cost-management-operator"
         - "cost-management-ui"
     envoy:
+      # OSSM proxyv2-rhel9:2.6 is deprecated (EOL 2026-06-30). Keep this product
+      # tag until a replacement (e.g. istio-proxyv2-rhel9) is proven against
+      # the operator's Envoy bootstrap. Community sample uses envoyproxy/envoy.
       image:
         repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
         tag: "2.6"

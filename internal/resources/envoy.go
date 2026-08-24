@@ -22,8 +22,11 @@ const (
 
 	defaultKeycloakURL   = "https://keycloak.keycloak.svc.cluster.local"
 	defaultKeycloakRealm = "kubernetes"
-	defaultEnvoyImage    = "registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"
-	defaultEnvoyTag      = "2.6"
+	// Public Envoy pin matching OSSM 2.6's Envoy 1.32 line. Product CRs must
+	// still set registry.redhat.io/openshift-service-mesh/proxyv2-rhel9:2.6
+	// (deprecated; do not guess istio-proxyv2-rhel9 without a proven tag).
+	defaultEnvoyImage = "docker.io/envoyproxy/envoy"
+	defaultEnvoyTag   = "v1.32.13"
 )
 
 // KeycloakURL returns the Keycloak base URL from the CR (or the chart default).

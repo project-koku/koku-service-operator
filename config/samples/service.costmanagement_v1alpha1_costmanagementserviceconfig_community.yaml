@@ -1,12 +1,12 @@
-# Community / public-registry sample (COST-8133)
+# Community / public-registry sample (COST-8133, COST-8134)
 #
 # Same operator binary as product. Product vs community is which CR you apply
 # (and the Go fallback when spec.*.image is omitted).
 #
 # This is the community/dev bundled path (database.deploy / cache.deploy true).
-# oauth2-proxy is public (quay.io) so no registry.redhat.io pull secret is
-# required for the UI sidecar. Envoy and bundled Postgres/Valkey still use
-# product images here; COST-8134 / COST-8135 switch those to public pins.
+# oauth2-proxy and Envoy are public so no registry.redhat.io pull secret is
+# required for those two. Bundled Postgres/Valkey still use product images
+# here; COST-8135 switches those to public SCL pins.
 #
 # Product/OpenShift: use the default sample or production.yaml (redhat.io for
 # oauth2-proxy and Envoy). Production has deploy:false for DB/cache.
@@ -109,8 +109,8 @@ spec:
   auth:
     envoy:
       image:
-        repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
-        tag: "2.6"
+        repository: docker.io/envoyproxy/envoy
+        tag: "v1.32.13"
       replicas: 2
     keycloak:
       # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public

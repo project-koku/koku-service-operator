@@ -70,6 +70,14 @@ func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 		t.Errorf("community oauth2-proxy = %s:%s, want quay.io/oauth2-proxy/oauth2-proxy:v7.6.0", oauth.Repository, oauth.Tag)
 	}
 
+	envoy := cfg.Spec.Auth.Envoy.Image
+	if strings.Contains(envoy.Repository, redhatRegistry) {
+		t.Errorf("community envoy repository = %q, must not use %s", envoy.Repository, redhatRegistry)
+	}
+	if envoy.Repository != "docker.io/envoyproxy/envoy" || envoy.Tag != "v1.32.13" {
+		t.Errorf("community envoy = %s:%s, want docker.io/envoyproxy/envoy:v1.32.13", envoy.Repository, envoy.Tag)
+	}
+
 	if !BoolVal(cfg.Spec.Database.Deploy, true) {
 		t.Error("community sample database.deploy: want true (bundled/dev path)")
 	}
