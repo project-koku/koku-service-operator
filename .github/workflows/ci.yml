@@ -263,16 +263,19 @@ jobs:
 
       - name: Build and push catalog image
         run: |
+          # Match operator/bundle short-SHA tags (metadata-action {{sha}} default length).
+          SHORT_SHA="${GITHUB_SHA::7}"
+          CATALOG_IMG="quay.io/project-koku/koku-service-operator-catalog:${SHORT_SHA}"
           make catalog-build \
             BUNDLE_IMGS=quay.io/project-koku/koku-service-operator-bundle@${{ steps.bundle-push.outputs.digest }} \
-            CATALOG_IMG=quay.io/project-koku/koku-service-operator-catalog:${{ github.sha }}
-          docker tag \
-            quay.io/project-koku/koku-service-operator-catalog:${{ github.sha }} \
+            CATALOG_IMG="${CATALOG_IMG}"
+          docker tag "${CATALOG_IMG}" \
             quay.io/project-koku/koku-service-operator-catalog:latest
-          docker tag \
-            quay.io/project-koku/koku-service-operator-catalog:${{ github.sha }} \
+          docker tag "${CATALOG_IMG}" \
             quay.io/project-koku/koku-service-operator-catalog:main
-          docker push -a quay.io/project-koku/koku-service-operator-catalog
+          docker push "${CATALOG_IMG}"
+          docker push quay.io/project-koku/koku-service-operator-catalog:latest
+          docker push quay.io/project-koku/koku-service-operator-catalog:main
 
   e2e:
     name: E2E
