@@ -47,6 +47,16 @@ func TestUIDeploymentServiceAccount(t *testing.T) {
 	}
 }
 
+func TestUIDeployment_DefaultOAuthProxyImageWhenUnset(t *testing.T) {
+	cfg := uiTestCfg()
+	cfg.Spec.UI.OAuthProxy.Image = costv1alpha1.ImageSpec{}
+	proxy := containerByName(t, UIDeployment(cfg).Spec.Template.Spec.Containers, "oauth-proxy")
+	const want = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
+	if proxy.Image != want {
+		t.Errorf("default oauth2-proxy image = %q, want %q", proxy.Image, want)
+	}
+}
+
 func TestUIDeploymentOAuthProxySecurityContext(t *testing.T) {
 	dep := UIDeployment(uiTestCfg())
 	proxy := containerByName(t, dep.Spec.Template.Spec.Containers, "oauth-proxy")

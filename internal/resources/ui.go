@@ -14,8 +14,13 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-const uiProxyPort = int32(8443)
-const uiAppPort = int32(8080)
+const (
+	uiProxyPort = int32(8443)
+	uiAppPort   = int32(8080)
+
+	defaultOAuthProxyImage = "quay.io/oauth2-proxy/oauth2-proxy"
+	defaultOAuthProxyTag   = "v7.6.0"
+)
 
 // NameUINginxConfigMap returns the nginx ConfigMap name for the UI.
 func NameUINginxConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
@@ -159,6 +164,20 @@ func uiProfileResources(profile costv1alpha1.Profile) corev1.ResourceRequirement
 	}
 }
 
+// oauthProxyImage returns spec.ui.oauthProxy.image, defaulting empty
+// repository/tag to the public community pin (product CRs set registry.redhat.io).
+func oauthProxyImage(spec costv1alpha1.OAuthProxySpec) string {
+	repo := spec.Image.Repository
+	tag := spec.Image.Tag
+	if repo == "" {
+		repo = defaultOAuthProxyImage
+	}
+	if tag == "" {
+		tag = defaultOAuthProxyTag
+	}
+	return repo + ":" + tag
+}
+
 // UIDeployment builds the UI Deployment with the oauth2-proxy sidecar and nginx app.
 func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.UI
@@ -175,7 +194,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 	backendLogoutURL := issuerURL + "/protocol/openid-connect/logout?id_token_hint={id_token}"
 	upstream := fmt.Sprintf("http://localhost:%d", uiAppPort)
 
-	proxyImage := spec.OAuthProxy.Image.Repository + ":" + spec.OAuthProxy.Image.Tag
+	proxyImage := oauthProxyImage(spec.OAuthProxy)
 	appImage := spec.App.Image.Repository + ":" + spec.App.Image.Tag
 
 	proxyResources := spec.OAuthProxy.Resources

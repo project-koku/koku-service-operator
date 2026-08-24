@@ -136,8 +136,10 @@ For RHBK Route TLS/OIDC, also set `spec.auth.keycloak.issuerURL` to the public
 issuer (`iss`) and either `spec.auth.keycloak.tls.caCertSecretName` or
 `insecureSkipVerify` as needed for JWKS fetch.
 
-Set `ui.app.image` and `ui.oauthProxy.image` (repository **and** tag). Empty
-values produce `InvalidImageName` (image `:`). See the BYOI sample CR and
+Set `ui.app.image` (repository **and** tag). Empty app values produce
+`InvalidImageName` (image `:`). Empty `ui.oauthProxy.image` defaults to
+`quay.io/oauth2-proxy/oauth2-proxy:v7.6.0` (product samples still set
+`registry.redhat.io`). See the BYOI sample CR and
 [pre-prod-install.md](pre-prod-install.md).
 
 ## Image note: arm64 vs amd64

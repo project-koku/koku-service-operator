@@ -1,6 +1,18 @@
-# Product / OpenShift lab sample (registry.redhat.io for oauth2-proxy, Envoy,
-# bundled Postgres/Valkey). Community/public-registry equivalent:
-#   service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+# Community / public-registry sample (COST-8133)
+#
+# Same operator binary as product. Product vs community is which CR you apply
+# (and the Go fallback when spec.*.image is omitted).
+#
+# This is the community/dev bundled path (database.deploy / cache.deploy true).
+# oauth2-proxy is public (quay.io) so no registry.redhat.io pull secret is
+# required for the UI sidecar. Envoy and bundled Postgres/Valkey still use
+# product images here; COST-8134 / COST-8135 switch those to public pins.
+#
+# Product/OpenShift: use the default sample or production.yaml (redhat.io for
+# oauth2-proxy and Envoy). Production has deploy:false for DB/cache.
+#
+# Apply individually — do not add this file to kustomization.yaml resources
+# (CSV alm-examples stay on the default product sample).
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
@@ -121,7 +133,7 @@ spec:
     #   name: cost-management-ui-oauth-client
     oauthProxy:
       image:
-        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
+        repository: quay.io/oauth2-proxy/oauth2-proxy
         tag: "v7.6.0"
     app:
       image:
