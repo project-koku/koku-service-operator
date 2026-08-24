@@ -164,8 +164,8 @@ func uiProfileResources(profile costv1alpha1.Profile) corev1.ResourceRequirement
 	}
 }
 
-// oauthProxyImage returns spec.ui.oauthProxy.image, defaulting empty
-// repository/tag to the public community pin (product CRs set registry.redhat.io).
+// oauthProxyImage returns spec.ui.oauthProxy.image, or defaultOAuthProxyImage
+// when repository/tag are empty.
 func oauthProxyImage(spec costv1alpha1.OAuthProxySpec) string {
 	repo := spec.Image.Repository
 	tag := spec.Image.Tag

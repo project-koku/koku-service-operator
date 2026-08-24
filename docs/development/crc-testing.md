@@ -105,7 +105,7 @@ eval "$(crc oc-env)"
 oc apply -n cost-onprem \
   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
 
-# Without a registry.redhat.io pull secret, use the community sample instead:
+# Public-registry images (oauth2-proxy, Envoy, bundled Postgres/Valkey):
 # oc apply -n cost-onprem \
 #   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 
@@ -142,8 +142,7 @@ issuer (`iss`) and either `spec.auth.keycloak.tls.caCertSecretName` or
 
 Set `ui.app.image` (repository **and** tag). Empty app values produce
 `InvalidImageName` (image `:`). Empty `ui.oauthProxy.image` defaults to
-`quay.io/oauth2-proxy/oauth2-proxy:v7.6.0` (product samples still set
-`registry.redhat.io`). See the BYOI sample CR and
+`quay.io/oauth2-proxy/oauth2-proxy:v7.6.0`. See the BYOI sample CR and
 [pre-prod-install.md](pre-prod-install.md).
 
 ## Image note: arm64 vs amd64

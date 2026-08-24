@@ -9,9 +9,8 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// Community/dev fallback when spec.cache.image is empty. SCL matches the
-// current builder (valkey-server, valkey-cli, /data, fsGroup 1000). Product
-// CRs set registry.redhat.io/rhel10/valkey-8.
+// Used when spec.cache.image is empty. Matches CacheDeployment
+// (valkey-server, valkey-cli, /data, fsGroup 1000).
 const defaultCacheImage = "quay.io/sclorg/valkey-8-c10s:c10s"
 
 func cacheImage(spec costv1alpha1.ImageSpec) string {

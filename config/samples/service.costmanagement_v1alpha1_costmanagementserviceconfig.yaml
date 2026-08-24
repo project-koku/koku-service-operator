@@ -1,6 +1,5 @@
-# Product / OpenShift lab sample (registry.redhat.io for oauth2-proxy, Envoy,
-# bundled Postgres/Valkey). Community/public-registry equivalent:
-#   service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+# Bundled-dev sample (database.deploy / cache.deploy). For public-registry
+# images, apply costmanagementserviceconfig_community.yaml instead.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
@@ -96,8 +95,8 @@ spec:
   # Without it, gateway pods can become Ready while API calls return 401.
   auth:
     envoy:
-      # Product pin. OSSM 2.6 is deprecated; do not switch this sample to
-      # istio-proxyv2-rhel9 without a proven replacement tag.
+      # OSSM 2.6 is deprecated; do not change this tag without checking the
+      # operator Envoy bootstrap still matches.
       image:
         repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
         tag: "2.6"

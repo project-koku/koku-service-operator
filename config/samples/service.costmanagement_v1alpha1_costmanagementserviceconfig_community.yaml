@@ -1,21 +1,10 @@
-# Community / public-registry sample (COST-8133, COST-8134, COST-8135)
+# Bundled-dev sample that uses public images for oauth2-proxy, Envoy,
+# Postgres, and Valkey. Same metadata.name as the default sample — apply
+# this file instead of it, not via kustomize.
 #
-# Same operator binary as product. Product vs community is which CR you apply
-# (and the Go fallback when spec.*.image is omitted).
-#
-# This is the community/dev bundled path (database.deploy / cache.deploy true).
-# oauth2-proxy, Envoy, bundled Postgres, and Valkey are public images so no
-# registry.redhat.io pull secret is required for those four.
-#
-# Postgres/Valkey use SCL images (quay.io/sclorg/...) that match the operator
-# StatefulSet/Deployment contract. docker.io/library/postgres:16 is the BYOI
-# fixture image and is not compatible with DatabaseStatefulSet.
-#
-# Product/OpenShift: use the default sample or production.yaml (redhat.io for
-# oauth2-proxy and Envoy). Production has deploy:false for DB/cache.
-#
-# Apply individually — do not add this file to kustomization.yaml resources
-# (CSV alm-examples stay on the default product sample).
+# Postgres/Valkey are SCL images so they match DatabaseStatefulSet /
+# CacheDeployment (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data, fsGroup
+# 1000). docker.io/library/postgres:16 is for the BYOI fixture only.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:

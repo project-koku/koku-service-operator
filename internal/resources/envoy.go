@@ -22,9 +22,7 @@ const (
 
 	defaultKeycloakURL   = "https://keycloak.keycloak.svc.cluster.local"
 	defaultKeycloakRealm = "kubernetes"
-	// Public Envoy pin matching OSSM 2.6's Envoy 1.32 line. Product CRs must
-	// still set registry.redhat.io/openshift-service-mesh/proxyv2-rhel9:2.6
-	// (deprecated; do not guess istio-proxyv2-rhel9 without a proven tag).
+	// Empty spec.auth.envoy.image uses upstream Envoy 1.32 (same line as OSSM 2.6).
 	defaultEnvoyImage = "docker.io/envoyproxy/envoy"
 	defaultEnvoyTag   = "v1.32.13"
 )

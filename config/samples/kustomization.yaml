@@ -5,10 +5,7 @@ resources:
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
-# Community/public-registry bundled sample (same metadata.name as the default
-# product sample — apply instead of it, not via kustomize, so CSV alm-examples
-# stay on registry.redhat.io). No registry.redhat.io pull secret for
-# oauth2-proxy, Envoy, or bundled Postgres/Valkey:
+# Same metadata.name as the default sample — apply instead of it, not via kustomize:
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
 #   kubectl apply -k config/samples/byoi/infra

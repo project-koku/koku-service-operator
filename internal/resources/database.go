@@ -9,10 +9,9 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// Community/dev fallback when spec.database.image is empty. Must stay SCL/RHEL
-// layout (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data).
-// docker.io/library/postgres is not compatible with DatabaseStatefulSet.
-// Product CRs set registry.redhat.io.
+// Used when spec.database.image is empty. SCL/RHEL layout
+// (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data); docker.io/library/postgres
+// is not compatible with DatabaseStatefulSet.
 const defaultDatabaseImage = "quay.io/sclorg/postgresql-16-c10s:c10s"
 
 func databaseImage(spec costv1alpha1.ImageSpec) string {
