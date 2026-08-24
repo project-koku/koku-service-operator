@@ -105,7 +105,7 @@ eval "$(crc oc-env)"
 oc apply -n cost-onprem \
   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
 
-# Public-registry images (oauth2-proxy, Envoy, bundled Postgres/Valkey):
+# Alternative sample with public images:
 # oc apply -n cost-onprem \
 #   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 

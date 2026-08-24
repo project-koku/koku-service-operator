@@ -40,7 +40,7 @@ func loadSampleCR(t *testing.T, name string) *CostManagementServiceConfig {
 	return &cfg
 }
 
-func TestSampleCRs_ProductOauthAndEnvoyStayRedHat(t *testing.T) {
+func TestSampleCRs_DefaultAndProductionOauthAndEnvoyImages(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{sampleDefault, sampleProduction} {
 		t.Run(name, func(t *testing.T) {

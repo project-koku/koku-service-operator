@@ -1,10 +1,8 @@
-# Bundled-dev sample that uses public images for oauth2-proxy, Envoy,
-# Postgres, and Valkey. Same metadata.name as the default sample — apply
-# this file instead of it, not via kustomize.
+# Public images for oauth2-proxy, Envoy, Postgres, and Valkey.
+# Same metadata.name as the default sample — apply this file instead of it.
 #
-# Postgres/Valkey are SCL images so they match DatabaseStatefulSet /
-# CacheDeployment (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data, fsGroup
-# 1000). docker.io/library/postgres:16 is for the BYOI fixture only.
+# Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
+# POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:

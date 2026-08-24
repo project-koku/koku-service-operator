@@ -47,14 +47,14 @@ func TestDatabaseStatefulSet_DefaultImageAndSCLContract(t *testing.T) {
 	}
 }
 
-func TestDatabaseStatefulSet_ExplicitProductImage(t *testing.T) {
+func TestDatabaseStatefulSet_ExplicitImage(t *testing.T) {
 	cfg := testCfg()
 	cfg.Spec.Database.Image.Repository = "registry.redhat.io/rhel10/postgresql-16"
 	cfg.Spec.Database.Image.Tag = "10.1"
 	sts := DatabaseStatefulSet(cfg)
 	got := sts.Spec.Template.Spec.Containers[0].Image
 	if got != "registry.redhat.io/rhel10/postgresql-16:10.1" {
-		t.Errorf("product image = %q", got)
+		t.Errorf("image = %q", got)
 	}
 }
 
