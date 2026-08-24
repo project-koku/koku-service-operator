@@ -9,6 +9,20 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+// Community/dev fallback when spec.database.image is empty. Must stay SCL/RHEL
+// layout (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data).
+// docker.io/library/postgres is not compatible with DatabaseStatefulSet.
+// Product CRs set registry.redhat.io.
+const defaultDatabaseImage = "quay.io/sclorg/postgresql-16-c10s:c10s"
+
+func databaseImage(spec costv1alpha1.ImageSpec) string {
+	image := spec.Repository + ":" + spec.Tag
+	if image == ":" {
+		return defaultDatabaseImage
+	}
+	return image
+}
+
 // DatabaseStatefulSet builds the PostgreSQL StatefulSet.
 func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.StatefulSet {
 	name := NameDatabase(cfg)
@@ -17,10 +31,7 @@ func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 	dbSecret := NameDBCredentials(cfg)
 
 	dbSpec := cfg.Spec.Database
-	image := dbSpec.Image.Repository + ":" + dbSpec.Image.Tag
-	if image == ":" {
-		image = "registry.redhat.io/rhel10/postgresql-16:10.1"
-	}
+	image := databaseImage(dbSpec.Image)
 
 	storageSize := dbSpec.Storage.Size
 	if storageSize.IsZero() {

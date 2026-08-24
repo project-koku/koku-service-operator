@@ -105,6 +105,10 @@ eval "$(crc oc-env)"
 oc apply -n cost-onprem \
   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
 
+# Without a registry.redhat.io pull secret, use the community sample instead:
+# oc apply -n cost-onprem \
+#   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+
 # Watch reconciliation
 oc get cmsc -n cost-onprem -w
 oc describe cmsc cost-management -n cost-onprem

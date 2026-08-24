@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestWaitForPostgres_DefaultImageWhenUnset(t *testing.T) {
+	cfg := testCfg()
+	c := waitForPostgres(cfg, "db.svc", "5432")
+	if c.Image != defaultDatabaseImage {
+		t.Errorf("bundled wait-for-postgres image = %q, want %q", c.Image, defaultDatabaseImage)
+	}
+	if c.Name != "wait-for-postgres" {
+		t.Errorf("Name = %q", c.Name)
+	}
+}
+
 func TestIsValidHost(t *testing.T) {
 	valid := []string{
 		"postgres.databases.svc.cluster.local",

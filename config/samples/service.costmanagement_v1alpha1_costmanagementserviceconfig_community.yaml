@@ -1,12 +1,15 @@
-# Community / public-registry sample (COST-8133, COST-8134)
+# Community / public-registry sample (COST-8133, COST-8134, COST-8135)
 #
 # Same operator binary as product. Product vs community is which CR you apply
 # (and the Go fallback when spec.*.image is omitted).
 #
 # This is the community/dev bundled path (database.deploy / cache.deploy true).
-# oauth2-proxy and Envoy are public so no registry.redhat.io pull secret is
-# required for those two. Bundled Postgres/Valkey still use product images
-# here; COST-8135 switches those to public SCL pins.
+# oauth2-proxy, Envoy, bundled Postgres, and Valkey are public images so no
+# registry.redhat.io pull secret is required for those four.
+#
+# Postgres/Valkey use SCL images (quay.io/sclorg/...) that match the operator
+# StatefulSet/Deployment contract. docker.io/library/postgres:16 is the BYOI
+# fixture image and is not compatible with DatabaseStatefulSet.
 #
 # Product/OpenShift: use the default sample or production.yaml (redhat.io for
 # oauth2-proxy and Envoy). Production has deploy:false for DB/cache.
@@ -26,16 +29,16 @@ spec:
   database:
     deploy: true
     image:
-      repository: registry.redhat.io/rhel10/postgresql-16
-      tag: "10.1"
+      repository: quay.io/sclorg/postgresql-16-c10s
+      tag: "c10s"
     storage:
       size: 30Gi
 
   cache:
     deploy: true
     image:
-      repository: registry.redhat.io/rhel10/valkey-8
-      tag: "10.1"
+      repository: quay.io/sclorg/valkey-8-c10s
+      tag: "c10s"
     persistence:
       size: 5Gi
 

@@ -9,6 +9,19 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+// Community/dev fallback when spec.cache.image is empty. SCL matches the
+// current builder (valkey-server, valkey-cli, /data, fsGroup 1000). Product
+// CRs set registry.redhat.io/rhel10/valkey-8.
+const defaultCacheImage = "quay.io/sclorg/valkey-8-c10s:c10s"
+
+func cacheImage(spec costv1alpha1.ImageSpec) string {
+	image := spec.Repository + ":" + spec.Tag
+	if image == ":" {
+		return defaultCacheImage
+	}
+	return image
+}
+
 // CacheDeployment builds the bundled Valkey Deployment (dev/CI only).
 //
 // The server runs with --protected-mode no and no --requirepass / TLS flags.
@@ -23,10 +36,7 @@ func CacheDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	allLabels := Labels(cfg, "cache")
 
 	c := cfg.Spec.Cache
-	image := c.Image.Repository + ":" + c.Image.Tag
-	if image == ":" {
-		image = "registry.redhat.io/rhel10/valkey-8:10.1"
-	}
+	image := cacheImage(c.Image)
 
 	port := c.Port
 	if port == 0 {

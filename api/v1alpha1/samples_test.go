@@ -58,6 +58,17 @@ func TestSampleCRs_ProductOauthAndEnvoyStayRedHat(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleProduction)
+	if BoolVal(cfg.Spec.Database.Deploy, true) {
+		t.Error("production database.deploy: want false (BYOI)")
+	}
+	if BoolVal(cfg.Spec.Cache.Deploy, true) {
+		t.Error("production cache.deploy: want false (BYOI)")
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)
@@ -76,6 +87,28 @@ func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	}
 	if envoy.Repository != "docker.io/envoyproxy/envoy" || envoy.Tag != "v1.32.13" {
 		t.Errorf("community envoy = %s:%s, want docker.io/envoyproxy/envoy:v1.32.13", envoy.Repository, envoy.Tag)
+	}
+
+	db := cfg.Spec.Database.Image
+	if strings.Contains(db.Repository, redhatRegistry) {
+		t.Errorf("community database repository = %q, must not use %s", db.Repository, redhatRegistry)
+	}
+	if strings.Contains(db.Repository, "docker.io/library/postgres") {
+		t.Errorf("community database repository = %q is not SCL-compatible with DatabaseStatefulSet", db.Repository)
+	}
+	if db.Repository != "quay.io/sclorg/postgresql-16-c10s" || db.Tag != "c10s" {
+		t.Errorf("community database = %s:%s, want quay.io/sclorg/postgresql-16-c10s:c10s", db.Repository, db.Tag)
+	}
+
+	cache := cfg.Spec.Cache.Image
+	if strings.Contains(cache.Repository, redhatRegistry) {
+		t.Errorf("community cache repository = %q, must not use %s", cache.Repository, redhatRegistry)
+	}
+	if strings.Contains(cache.Repository, "docker.io/valkey/valkey") {
+		t.Errorf("community cache repository = %q does not match operator fsGroup 1000", cache.Repository)
+	}
+	if cache.Repository != "quay.io/sclorg/valkey-8-c10s" || cache.Tag != "c10s" {
+		t.Errorf("community cache = %s:%s, want quay.io/sclorg/valkey-8-c10s:c10s", cache.Repository, cache.Tag)
 	}
 
 	if !BoolVal(cfg.Spec.Database.Deploy, true) {

@@ -68,7 +68,7 @@ func TestCacheDeployment_Defaults(t *testing.T) {
 func TestCacheDeployment_DefaultImageWhenUnset(t *testing.T) {
 	cfg := testCfg()
 	d := CacheDeployment(cfg)
-	if got := d.Spec.Template.Spec.Containers[0].Image; got != "registry.redhat.io/rhel10/valkey-8:10.1" {
+	if got := d.Spec.Template.Spec.Containers[0].Image; got != defaultCacheImage {
 		t.Errorf("default image = %q", got)
 	}
 }
