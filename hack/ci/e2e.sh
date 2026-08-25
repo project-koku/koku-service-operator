@@ -42,6 +42,22 @@ if [[ -z "$KUBECTL" ]]; then
 fi
 
 KUBECTL_COMPAT_DIR=""
+KUBECONFIG_ISOLATED_DIR=""
+
+# Flattened kubeconfig can contain token or client-key data. Install cleanup
+# before pin_kube_context writes the file so whoami/API failures cannot leak it.
+cleanup_temp_dirs() {
+  if [[ -n "${KUBECTL_COMPAT_DIR:-}" ]]; then
+    rm -rf "$KUBECTL_COMPAT_DIR"
+    KUBECTL_COMPAT_DIR=""
+  fi
+  if [[ -n "${KUBECONFIG_ISOLATED_DIR:-}" ]]; then
+    rm -rf "$KUBECONFIG_ISOLATED_DIR"
+    KUBECONFIG_ISOLATED_DIR=""
+  fi
+}
+trap cleanup_temp_dirs EXIT
+
 if ! command -v kubectl >/dev/null 2>&1 && command -v oc >/dev/null 2>&1; then
   KUBECTL_COMPAT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/koku-kubectl-compat.XXXXXX")"
   ln -sf "$(command -v oc)" "${KUBECTL_COMPAT_DIR}/kubectl"
@@ -52,8 +68,6 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "error: python3 is required for artifact redaction and Secret handling" >&2
   exit 1
 fi
-
-KUBECONFIG_ISOLATED_DIR=""
 
 # Resolve KUBE_CONTEXT from a single-context kubeconfig when unset.
 resolve_kube_context_from_kubeconfig() {
@@ -272,6 +286,11 @@ dump() {
     >"${dest}/app-resources.txt" 2>/dev/null || true
 }
 
+on_exit() {
+  dump || true
+  cleanup_temp_dirs
+}
+
 copy_junit() {
   local src="${ROOT}/test/pytest/reports/junit.xml"
   local dest_dir="${ARTIFACT_DIR:-${ROOT}/test/pytest/reports}"
@@ -339,6 +358,7 @@ json.dump(obj, sys.stdout)
 }
 
 pin_kube_context
+trap on_exit EXIT
 
 if ! "$KUBECTL" get crd costmanagementserviceconfigs.service.costmanagement.openshift.io >/dev/null 2>&1; then
   echo "error: CMSC CRD not found. Install the operator first" >&2
@@ -357,17 +377,6 @@ echo "Operator NS:  $OPERATOR_NAMESPACE"
 echo "CHART_ROOT:   ${CHART_ROOT:-<unset>}"
 echo "Context:      ${KUBE_CONTEXT} ($("$KUBECTL" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo unknown))"
 echo ""
-
-on_exit() {
-  dump
-  if [[ -n "${KUBECTL_COMPAT_DIR:-}" ]]; then
-    rm -rf "$KUBECTL_COMPAT_DIR"
-  fi
-  if [[ -n "${KUBECONFIG_ISOLATED_DIR:-}" ]]; then
-    rm -rf "$KUBECONFIG_ISOLATED_DIR"
-  fi
-}
-trap on_exit EXIT
 
 "$KUBECTL" create namespace "${NAMESPACE}" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
