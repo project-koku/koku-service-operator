@@ -5,6 +5,8 @@ resources:
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
+# Same metadata.name as the default sample — apply instead of it, not via kustomize:
+#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
 #   kubectl apply -k config/samples/byoi/infra
 #   kubectl apply -k config/samples/byoi/app

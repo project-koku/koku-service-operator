@@ -79,7 +79,7 @@ func waitForHTTP(containerName, url string) corev1.Container {
 // control which image is available in that environment.
 func waitForPostgres(cfg *costv1alpha1.CostManagementServiceConfig, dbHost, dbPort string) corev1.Container {
 	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
-		img := cfg.Spec.Database.Image.Repository + ":" + cfg.Spec.Database.Image.Tag
+		img, _ := ImageRef(cfg.Spec.Database.Image)
 		return corev1.Container{
 			Name:  "wait-for-postgres",
 			Image: img,

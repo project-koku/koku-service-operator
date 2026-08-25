@@ -1,3 +1,8 @@
+# Public images for oauth2-proxy, Envoy, Postgres, and Valkey.
+# Same metadata.name as the default sample — apply this file instead of it.
+#
+# Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
+# POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
@@ -11,16 +16,16 @@ spec:
   database:
     deploy: true
     image:
-      repository: registry.redhat.io/rhel10/postgresql-16
-      tag: "10.1"
+      repository: quay.io/sclorg/postgresql-16-c10s
+      tag: "c10s"
     storage:
       size: 30Gi
 
   cache:
     deploy: true
     image:
-      repository: registry.redhat.io/rhel10/valkey-8
-      tag: "10.1"
+      repository: quay.io/sclorg/valkey-8-c10s
+      tag: "c10s"
     persistence:
       size: 5Gi
 
@@ -41,12 +46,12 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "d8055ac"
       replicas: 1
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "d8055ac"
       replicas: 1
     listener:
       replicas: 2
@@ -93,11 +98,9 @@ spec:
   # Without it, gateway pods can become Ready while API calls return 401.
   auth:
     envoy:
-      # OSSM 2.6 is deprecated; do not change this tag without checking the
-      # operator Envoy bootstrap still matches.
       image:
-        repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
-        tag: "2.6"
+        repository: docker.io/envoyproxy/envoy
+        tag: "v1.32.13"
       replicas: 2
     keycloak:
       # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
@@ -120,7 +123,7 @@ spec:
     #   name: cost-management-ui-oauth-client
     oauthProxy:
       image:
-        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
+        repository: quay.io/oauth2-proxy/oauth2-proxy
         tag: "v7.6.0"
     app:
       image:

@@ -215,16 +215,23 @@ Then apply the CR (edit hosts / domain / Keycloak issuer to match Part A):
 kubectl apply -f config/samples/byoi/app/costmanagementserviceconfig.yaml
 ```
 
-Required image fields (empty `repository`/`tag` → `InvalidImageName` / image `:`):
+Required image fields (`repository` and `tag`). The operator does **not**
+default workload images; omit a required field and reconcile sets
+`Degraded=True` with reason `ImageNotSet`:
 
 | Spec path | Purpose |
 |-----------|---------|
-| `costManagement.api/masu.image` | Koku |
+| `database.image` | Bundled Postgres (`deploy: true` only) |
+| `cache.image` | Bundled Valkey (`deploy: true` only) |
+| `costManagement.api.image` | Koku (`masu.image` may inherit this) |
 | `rbac.image` | Insights RBAC |
 | `auth.envoy.image` | Gateway |
 | `ingress.image` | Upload handler |
 | `ui.app.image` | UI |
 | `ui.oauthProxy.image` | oauth2-proxy sidecar |
+| `ros.image` / `kruize.image` | Required only when `ros.enabled: true` |
+
+Pin product or community images on the CR (see `config/samples`).
 
 **CRD default and samples:** `spec.ros.enabled` defaults to **`false`** (beta is
 Cost-only — no ROS/Kruize). Samples set `enabled: false` explicitly. That skips

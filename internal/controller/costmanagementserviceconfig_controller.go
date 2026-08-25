@@ -59,6 +59,8 @@ const (
 	reasonKokuAvailable          = "KokuAvailable"
 	reasonDeploymentNotReady     = "DeploymentNotReady"
 	reasonDeploymentReady        = "DeploymentReady"
+	reasonReconcileError         = "ReconcileError"
+	reasonImageNotSet            = "ImageNotSet"
 	msgWaitingForRBACAPI         = "waiting for RBAC API"
 	msgWaitingForRBACWorker      = "waiting for RBAC worker"
 	msgWaitingForKokuAPI         = "waiting for Koku API"
@@ -230,14 +232,15 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 }
 
 // reconcile drives the ordered, staged rollout:
-//  0. Discovery (cluster domain, StorageClass, S3)
-//  1. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
-//  2. Infrastructure (PostgreSQL, Valkey)
-//  3. Validation (TCP/HTTP probes for external deps, Secret key checks)
-//  4. DB migration gate (Koku → ROS → RBAC)
-//  5. Core services (Koku API, Masu, Listener)
-//  6. Workers (Celery, ROS, Kruize)
-//  7. Edge (Envoy gateway, UI, Route)
+//  0. Workload images (spec.*.image required; no operator catalog default)
+//  1. Discovery (cluster domain, StorageClass, S3)
+//  2. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
+//  3. Infrastructure (PostgreSQL, Valkey)
+//  4. Validation (TCP/HTTP probes for external deps, Secret key checks)
+//  5. DB migration gate (Koku → ROS → RBAC)
+//  6. Core services (Koku API, Masu, Listener)
+//  7. Workers (Celery, ROS, Kruize)
+//  8. Edge (Envoy gateway, UI, Route)
 func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (ctrl.Result, error) {
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
@@ -247,6 +250,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
 	result, err := runPhases([]PhaseFn{
+		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
 		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
 		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
 		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
@@ -263,11 +267,12 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		applyPhaseError(cfg, err)
 		// For any error (structured or plain), ensure Degraded is visible in status.
 		// Without this, plain fmt.Errorf from phases left Degraded unset.
+		reason := degradedReason(err)
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue,
-			"ReconcileError", err.Error())
+			reason, err.Error())
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseDegraded)
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
+		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, reason, "%v", err)
 		return ctrl.Result{RequeueAfter: requeueSlow}, err
 	}
 	if !result.IsZero() {
@@ -294,6 +299,34 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// -----------------------------------------------------------------------------
+// Stage 0 — Workload images
+// -----------------------------------------------------------------------------
+
+func (r *CostManagementServiceConfigReconciler) reconcileWorkloadImages(_ context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	missing := resources.MissingWorkloadImages(cfg)
+	if len(missing) == 0 {
+		return Result{}, nil
+	}
+	return Result{}, &imageNotSetError{
+		msg: fmt.Sprintf("set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", ")),
+	}
+}
+
+// imageNotSetError is a user-config error: required spec.*.image is empty.
+// Degraded reason ImageNotSet (not ReconcileError) so alerts can match it.
+type imageNotSetError struct{ msg string }
+
+func (e *imageNotSetError) Error() string { return e.msg }
+
+func degradedReason(err error) string {
+	var ins *imageNotSetError
+	if stderrors.As(err, &ins) {
+		return reasonImageNotSet
+	}
+	return reasonReconcileError
 }
 
 // -----------------------------------------------------------------------------

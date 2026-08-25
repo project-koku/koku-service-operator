@@ -888,6 +888,7 @@ func TestReconcile_VCTMismatchPersistsStatus(t *testing.T) {
 	cfg.Spec.Global.ClusterDomain = "apps.example.com"
 	cfg.Spec.Global.StorageClass = "gp3"
 	cfg.Spec.ObjectStorage.SecretName = "s3-creds"
+	pinTestImages(cfg)
 	controllerutil.AddFinalizer(cfg, finalizerName)
 
 	existing := resources.DatabaseStatefulSet(cfg)

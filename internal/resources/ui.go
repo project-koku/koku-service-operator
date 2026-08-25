@@ -14,8 +14,10 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-const uiProxyPort = int32(8443)
-const uiAppPort = int32(8080)
+const (
+	uiProxyPort = int32(8443)
+	uiAppPort   = int32(8080)
+)
 
 // NameUINginxConfigMap returns the nginx ConfigMap name for the UI.
 func NameUINginxConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
@@ -175,8 +177,8 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 	backendLogoutURL := issuerURL + "/protocol/openid-connect/logout?id_token_hint={id_token}"
 	upstream := fmt.Sprintf("http://localhost:%d", uiAppPort)
 
-	proxyImage := spec.OAuthProxy.Image.Repository + ":" + spec.OAuthProxy.Image.Tag
-	appImage := spec.App.Image.Repository + ":" + spec.App.Image.Tag
+	proxyImage, _ := ImageRef(spec.OAuthProxy.Image)
+	appImage, _ := ImageRef(spec.App.Image)
 
 	proxyResources := spec.OAuthProxy.Resources
 	if len(proxyResources.Requests) == 0 && len(proxyResources.Limits) == 0 {

@@ -22,8 +22,6 @@ const (
 
 	defaultKeycloakURL   = "https://keycloak.keycloak.svc.cluster.local"
 	defaultKeycloakRealm = "kubernetes"
-	defaultEnvoyImage    = "registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"
-	defaultEnvoyTag      = "2.6"
 )
 
 // KeycloakURL returns the Keycloak base URL from the CR (or the chart default).
@@ -148,15 +146,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	sel := SelectorLabels(cfg, envoyComponent)
 	all := Labels(cfg, envoyComponent)
 
-	repo := cfg.Spec.Auth.Envoy.Image.Repository
-	tag := cfg.Spec.Auth.Envoy.Image.Tag
-	if repo == "" {
-		repo = defaultEnvoyImage
-	}
-	if tag == "" {
-		tag = defaultEnvoyTag
-	}
-	image := repo + ":" + tag
+	image, _ := ImageRef(cfg.Spec.Auth.Envoy.Image)
 
 	replicas := cfg.Spec.Auth.Envoy.Replicas
 	if replicas == 0 {

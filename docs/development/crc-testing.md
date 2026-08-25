@@ -105,6 +105,10 @@ eval "$(crc oc-env)"
 oc apply -n cost-onprem \
   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
 
+# Alternative sample with public images:
+# oc apply -n cost-onprem \
+#   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+
 # Watch reconciliation
 oc get cmsc -n cost-onprem -w
 oc describe cmsc cost-management -n cost-onprem
@@ -136,8 +140,8 @@ For RHBK Route TLS/OIDC, also set `spec.auth.keycloak.issuerURL` to the public
 issuer (`iss`) and either `spec.auth.keycloak.tls.caCertSecretName` or
 `insecureSkipVerify` as needed for JWKS fetch.
 
-Set `ui.app.image` and `ui.oauthProxy.image` (repository **and** tag). Empty
-values produce `InvalidImageName` (image `:`). See the BYOI sample CR and
+Set `ui.app.image` and `ui.oauthProxy.image` (repository **and** tag on each).
+The operator does not default either field. See the sample CRs and
 [pre-prod-install.md](pre-prod-install.md).
 
 ## Image note: arm64 vs amd64

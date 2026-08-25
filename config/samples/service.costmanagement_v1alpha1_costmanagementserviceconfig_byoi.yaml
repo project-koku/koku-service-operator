@@ -68,6 +68,11 @@ spec:
     #   mechanism: "SCRAM-SHA-512"
     #   existingSecret: "my-kafka-sasl-credentials"
 
+  ingress:
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
   # External S3-compatible storage (ODF, AWS S3, etc.)
   objectStorage:
     endpoint: "s3.openshift-storage.svc.cluster.local"
