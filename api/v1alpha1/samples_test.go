@@ -69,6 +69,34 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_DefaultDoesNotBundleDBCache(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if BoolVal(cfg.Spec.Database.Deploy, true) {
+		t.Error("default sample database.deploy: want false (BYOI)")
+	}
+	if BoolVal(cfg.Spec.Cache.Deploy, true) {
+		t.Error("default sample cache.deploy: want false (BYOI)")
+	}
+}
+
+func TestSampleCRs_DefaultLeavesExternalDBCacheValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Database.Host != "" {
+		t.Errorf("default sample database.host = %q, want empty string", cfg.Spec.Database.Host)
+	}
+	if cfg.Spec.Database.SecretName != "" {
+		t.Errorf("default sample database.secretName = %q, want empty string", cfg.Spec.Database.SecretName)
+	}
+	if cfg.Spec.Cache.Host != "" {
+		t.Errorf("default sample cache.host = %q, want empty string", cfg.Spec.Cache.Host)
+	}
+	if cfg.Spec.Cache.Auth.SecretName != "" {
+		t.Errorf("default sample cache.auth.secretName = %q, want empty string", cfg.Spec.Cache.Auth.SecretName)
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)

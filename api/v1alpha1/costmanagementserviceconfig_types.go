@@ -122,7 +122,7 @@ type GlobalConfig struct {
 type DatabaseConfig struct {
 	// Deploy the bundled PostgreSQL StatefulSet (dev/CI only — not for production).
 	// Set false to connect to an external database.
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	Deploy  *bool               `json:"deploy,omitempty"`
 	Image   ImageSpec           `json:"image,omitempty"`
 	Storage DatabaseStorageSpec `json:"storage,omitempty"`
@@ -159,7 +159,7 @@ type DatabaseStorageSpec struct {
 type CacheConfig struct {
 	// Deploy the bundled Valkey instance (dev/CI only — not for production).
 	// Set false to connect to an external Redis/Valkey endpoint.
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	Deploy *bool     `json:"deploy,omitempty"`
 	Image  ImageSpec `json:"image,omitempty"`
 

@@ -9,20 +9,19 @@ spec:
     storageClass: ""  # empty = use cluster default; set to ocs-storagecluster-ceph-rbd on ODF clusters
 
   database:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/postgresql-16
-      tag: "10.1"
-    storage:
-      size: 30Gi
+    deploy: false
+    host: ""
+    port: 5432
+    sslMode: "require"
+    secretName: ""
 
   cache:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/valkey-8
-      tag: "10.1"
-    persistence:
-      size: 5Gi
+    deploy: false
+    host: ""
+    port: 6379
+    auth:
+      enabled: true
+      secretName: ""
 
   kafka:
     bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
