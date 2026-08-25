@@ -63,10 +63,12 @@ func AppServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructu
 	})
 }
 
-// KruizeServiceMonitor watches Kruize which exposes metrics on port 8080.
-// Not applied in beta; retained for ROS cleanup when ros.enabled flips false.
+// KruizeServiceMonitor watches Kruize's Quarkus metrics on the http Service
+// port (8080) at /q/metrics, matching the Helm chart. The Service has no
+// port named "metrics". Not applied in beta; retained for ROS cleanup when
+// ros.enabled flips false.
 func KruizeServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	return serviceMonitor(cfg, cfg.Name+"-kruize-metrics", "metrics", "/metrics", []string{"ros-optimization"})
+	return serviceMonitor(cfg, cfg.Name+"-kruize-metrics", "http", "/q/metrics", []string{"ros-optimization"})
 }
 
 // OperatorServiceMonitor watches the controller-manager metrics endpoint.

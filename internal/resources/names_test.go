@@ -133,8 +133,8 @@ func TestCeleryWorkerDeploymentKeepsCeleryQueue(t *testing.T) {
 }
 
 // TestROSAPINetworkPolicyExists verifies that ROSAPINetworkPolicy is defined
-// and restricts ingress to only the gateway. Without this policy any pod in
-// the namespace can reach the ROS API on port 8000, bypassing Envoy JWT auth.
+// and has ingress rules. Gateway traffic on 8000 is JWT-authenticated; metrics
+// scrape on 9000 is allowed from OpenShift monitoring namespaces.
 func TestROSAPINetworkPolicyExists(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "test"},

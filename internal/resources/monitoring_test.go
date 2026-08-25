@@ -150,6 +150,26 @@ func TestGatewayServiceMonitor(t *testing.T) {
 	}
 }
 
+func TestKruizeServiceMonitor_QuarkusMetricsEndpoint(t *testing.T) {
+	// Chart scrapes Kruize on the http Service port at /q/metrics (Quarkus).
+	// The Service only exposes port "http"; a "metrics" port name would match nothing.
+	sm := KruizeServiceMonitor(testMonitoringCFG())
+	if sm.GetName() != "cost-management-kruize-metrics" {
+		t.Errorf("name: got %q", sm.GetName())
+	}
+	endpoints, found, err := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
+	if err != nil || !found || len(endpoints) != 1 {
+		t.Fatalf("endpoints: found=%v len=%d err=%v", found, len(endpoints), err)
+	}
+	ep := endpoints[0].(map[string]any)
+	if ep["port"] != "http" {
+		t.Errorf("port: got %v want http (Kruize Service port name)", ep["port"])
+	}
+	if ep["path"] != "/q/metrics" {
+		t.Errorf("path: got %v want /q/metrics (Quarkus metrics)", ep["path"])
+	}
+}
+
 func TestPrometheusRules_ReconcileFailureFiresOnAnyRecentError(t *testing.T) {
 	pr := PrometheusRules(testMonitoringCFG())
 	groups, _, _ := unstructured.NestedSlice(pr.Object, "spec", "groups")

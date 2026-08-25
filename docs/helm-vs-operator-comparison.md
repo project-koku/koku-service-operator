@@ -1,288 +1,91 @@
 # Helm Chart vs Operator Comparison Report
 
-Updated: 2026-08-21 (validated against `main`: ENHANCED_ORG_ADMIN, Celery beat resources, Masu Service ports, Gateway Route timeout)
+Updated: 2026-08-25 (remaining gaps only; closed items from 2026-08-21 dropped)
 
 Systematic comparison of `cost-onprem-chart/cost-onprem/` (Helm chart) against
-`koku-service-operator` (operator) — identifying deviations, missing pieces,
-and bugs.
-
-Both projects deploy the same Cost Management on-premise stack: Koku API,
-Masu, Listener, Celery workers, RBAC, ROS, Kruize, Ingress, Envoy gateway,
-and UI. The Helm chart uses `values.yaml` + Go templates; the operator uses
-a `CostManagementServiceConfig` CR + Go reconciler.
+`koku-service-operator` (operator). Both deploy the same Cost Management
+on-premise stack. This document tracks **open** deviations only.
 
 ---
 
-## 1. Resource Inventory
+## 1. Remaining resource gaps
 
 | Component | Helm Chart | Operator | Status |
 |-----------|-----------|----------|--------|
-| PostgreSQL StatefulSet + Service | yes | yes | match |
-| Valkey Deployment + PVC + Service | yes | yes | match |
-| DB Credentials Secret | install script | auto-generated | operator better |
-| Django Secret | install script | auto-generated | operator better |
-| Storage Credentials Secret | install script | auto-generated (placeholder) | operator better |
-| DB Init ConfigMap | yes | yes | match |
-| AWS Config ConfigMap | yes | yes | match |
-| CA Combine ConfigMap | yes | yes | match |
-| Service CA ConfigMap | yes | yes | match |
-| Koku API Deployment + Service | yes | yes | match |
-| Masu Deployment + Service | yes | yes | **fixed** (8000 http, 9000 metrics) |
-| Listener Deployment | yes | yes | match |
-| Koku ServiceAccount | yes | yes | match |
-| Koku Migration Job | yes | yes | match |
-| Celery Beat Deployment | yes | yes | **fixed** (50m/200Mi req, 100m/400Mi lim) |
-| Celery Workers (10 queues) | yes | yes | match |
-| RBAC API Deployment + Service | yes | yes | match |
-| RBAC Worker Deployment | yes | yes | match |
-| RBAC Migration Job | yes | yes | operator has richer seeding |
-| RBAC Admin Bootstrap Job | yes | yes | match |
-| RBAC Keycloak Sync CronJob + ConfigMap | yes | yes | match |
-| RBAC NetworkPolicy | yes | yes | match |
-| ROS API Deployment + Service | yes | yes | match |
-| ROS Processor Deployment | yes | yes | match |
-| ROS Processor Service | yes | **MISSING** | **gap** |
-| ROS Recommendation Poller Deployment | yes | yes | match |
-| ROS Recommendation Poller Service | yes | **MISSING** | **gap** |
-| ROS Housekeeper Deployment | yes | yes | match |
-| ROS Migration Job | yes | yes | match |
-| ROS Partition Cleaner CronJob | yes | yes | match |
-| ROS ServiceAccount | yes | yes | match |
-| ROS API NetworkPolicy (access) | yes | yes | match |
-| ROS/Koku metrics + access NPs (6) | yes | **partial** | **gap** (see §3.2) |
-| Cdapp ConfigMap (ROS/Kruize) | yes | yes | match |
-| Kruize Deployment + Service | yes | yes | match |
-| Kruize ServiceAccount | yes | yes | match |
-| Kruize ClusterRole + ClusterRoleBinding | yes | yes | match |
-| Kruize ConfigMap | yes | yes | match |
-| Kruize Partition CronJob | yes | yes | match |
-| Kruize NetworkPolicy | yes | yes | match |
-| Ingress Deployment + Service | yes | yes | match |
-| Ingress NetworkPolicy | yes | yes | match |
-| Envoy Gateway Deployment + Service | yes | yes | match |
-| Envoy ConfigMap | yes | yes | routing differences |
-| Gateway CA ConfigMap | yes | handled via combined CA | equivalent |
-| Gateway NetworkPolicy | yes | yes | match |
-| Gateway Route | yes | yes | match |
-| UI Deployment (oauth-proxy + nginx) | yes | yes | match |
-| UI Service | yes | yes | match |
-| UI nginx ConfigMap | yes | yes | match |
-| UI Route | yes | yes | match |
-| UI ConsoleLink | yes | yes | match |
-| Koku ServiceMonitor | yes | yes | match |
-| Kruize ServiceMonitor | yes | yes | match |
-| RBAC ServiceMonitor | yes | **MISSING** | **gap** |
-| Gateway ServiceMonitor | yes | **MISSING** | **gap** |
-| ROS Processor/Poller ServiceMonitors | yes | **MISSING** | **gap** |
-| **PrometheusRules (5 alert rules)** | **no** | **yes** | **operator better** |
-| Koku API NetworkPolicy | yes (cost-api-access) | yes | operator richer (adds monitoring peer) |
-| Masu NetworkPolicy | no | yes | operator better |
-| Cache NetworkPolicy | no | yes | operator better |
-| Database NetworkPolicy | no | yes | operator better |
-| Operator ServiceMonitor | no | yes | operator better |
-| Keycloak Debug ConfigMap | yes | no | not needed |
+| ROS Processor Service | yes (metrics 9000) | **MISSING** | **gap** |
+| ROS Recommendation Poller Service | yes (metrics 9000) | **MISSING** | **gap** |
+| ROS processor-metrics NetworkPolicy | yes | **MISSING** | **gap** |
+| ROS poller-metrics NetworkPolicy | yes | **MISSING** | **gap** |
+| ROS API ServiceMonitor | yes | **MISSING** | **gap** |
+| ROS Processor/Poller ServiceMonitors | yes | **MISSING** | **gap** (need Services first) |
+| Kruize ServiceMonitor | yes (`http` / `/q/metrics`) | builder only, **not applied** | **gap** (COST-8054) |
+| RBAC ServiceMonitor | yes (`http` / `/metrics`) | **MISSING** | **gap** |
+
+ROS API already has a Service with a named `metrics` port and a NetworkPolicy
+that allows gateway (8000) plus OpenShift monitoring (9000). Processor and
+poller Deployments expose container port `metrics` but have no Service or
+scrape NetworkPolicy.
 
 ---
 
-## 2. Open Issues (Broken / Wrong)
+## 2. Missing Resources (Gaps)
 
-### 2.1 Celery beat has zero resource limits **FIXED**
-
-**Severity: MEDIUM — unbounded resource consumption**
-
-`CeleryBeatDeployment()` in `koku.go` previously passed `corev1.ResourceRequirements{}`
-(empty). The chart sets requests `{cpu: 50m, mem: 200Mi}` and limits
-`{cpu: 100m, mem: 400Mi}`. **Now fixed** — operator matches chart defaults.
-
-### 2.2 Masu Service port mismatch **FIXED**
-
-**Severity: MEDIUM — metrics scraping may break**
-
-Operator `MasuService()` previously exposed only port 9000 (metrics). The Helm
-chart's Masu service exposes port 8000 (HTTP). **Now fixed** — operator exposes
-both ports: 8000 (http) and 9000 (metrics).
-
----
-
-## 3. Missing Resources (Gaps)
-
-### 3.1 ROS Processor and Recommendation Poller Services
+### 2.1 ROS Processor and Recommendation Poller Services
 
 The chart creates Service objects for both with a metrics port (9000),
 enabling Prometheus scraping. The operator creates Deployments but no
-Services.
+Services. Owned by [COST-8054](jira/COST-8054.md) (ROS, out of Cost beta).
 
-### 3.2 Metrics-scraping NetworkPolicies (partially fixed)
+### 2.2 Metrics-scraping NetworkPolicies
 
-The chart's `ros/networkpolicies.yaml` contains 6 NetworkPolicies:
-4 metrics-scraping (ros-api-metrics, cost-api-metrics, processor-metrics,
-poller-metrics) and 2 access (ros-api-access, cost-api-access).
+The chart's `ros/networkpolicies.yaml` has dedicated metrics NPs for ROS API,
+processor, and poller. ROS API monitoring ingress is now on
+`ROSAPINetworkPolicy`. Still missing:
 
-The operator now covers monitoring ingress for **Gateway** (admin port),
-**Koku API** (port 9000), and **Masu** (port 9000) via their respective
-NetworkPolicies. Still missing:
+- **processor-metrics** — no NetworkPolicy for ROS Processor
+- **poller-metrics** — no NetworkPolicy for ROS Recommendation Poller
 
-- **ros-api-metrics** — ROSAPINetworkPolicy allows gateway only, no monitoring peer
-- **processor-metrics** — no NetworkPolicy for ROS Processor at all
-- **poller-metrics** — no NetworkPolicy for ROS Recommendation Poller at all
+Prometheus cannot scrape those pods in a default-deny environment. Also
+COST-8054.
 
-These three gaps mean Prometheus still can't scrape ROS component
-metrics in a default-deny environment.
+### 2.3 ServiceMonitor gaps
 
-### 3.3 ServiceMonitor gaps
+Chart ServiceMonitors still unmatched:
 
-The chart creates per-component ServiceMonitors (one each for ros-api,
-ros-processor, ros-recommendation-poller, kruize, cost-management-api,
-and gateway). Each targets a specific component label and metrics port.
+| Target | Chart | Operator |
+|--------|-------|----------|
+| `rbac-api` | port `http`, `/metrics` | none. `RBACAPIService` is `http` only; `RBACAPINetworkPolicy` has no monitoring peer |
+| `ros-api` | port `metrics`, `/metrics` | not in `AppServiceMonitor` (Cost-core SM is API / Masu / Ingress) |
+| `ros-processor` / `ros-recommendation-poller` | port `metrics`, `/metrics` | none (no Services) |
+| `kruize` / `ros-optimization` | port `http`, `/q/metrics` | builder matches chart; not applied until COST-8054. `KruizeNetworkPolicy` has no monitoring peer (chart same), so apply-only will not scrape under default-deny |
 
-The operator's `AppServiceMonitor` does not include `rbac-api`,
-`ros-processor`, `ros-recommendation-poller`, or `gateway` (Envoy admin
-`/stats/prometheus` endpoint). Additionally, the operator selects port
-`"metrics"` but most Services expose port `"http"` — see
-[code-review-fixmes.md](code-review-fixmes.md) #10.
+Cost-core scrape that **does** work: Koku API, Masu, Ingress (`AppServiceMonitor`
+port `metrics`), Gateway (Envoy admin `/stats/prometheus`), Celery workers,
+operator. Those are not listed as gaps.
 
----
-
-## 4. Env Var Differences
-
-### 4.1 Koku env var gaps — **FIXED**
-
-The Helm chart sets these env vars with defaults. The operator **now sets** them in `KokuCommonEnv()`:
-
-| Env Var | Chart Default | Operator | Status |
-|---------|---------------|----------|--------|
-| `ENHANCED_ORG_ADMIN` | `"False"` | **set** (`"False"`) | **fixed** |
-| `DEVELOPMENT` | `"False"` | **set** (`"False"`) | **fixed** |
-| `KOKU_ENABLE_SENTRY` | `"False"` | **set** (`"False"`) | **fixed** |
-| `INITIAL_INGEST_NUM_MONTHS` | `"2"` | **set** (`"2"`) | **fixed** |
-| `INITIAL_INGEST_OVERRIDE` | `"False"` | **set** (`"False"`) | **fixed** |
-| `CACHED_VIEWS_DISABLED` | `"False"` | **set** (`"False"`) | **fixed** |
-| `NOTIFICATION_CHECK_TIME` | `"24"` | **set** (`"24"`) | **fixed** |
-| `RBAC_CACHE_TIMEOUT` | `"300"` | **set** (`"300"`) | **fixed** |
-| `CACHE_TIMEOUT` | `"3600"` | **set** (`"3600"`) | **fixed** |
-| `TAG_ENABLED_LIMIT` | `"200"` | **set** (`"200"`) | **fixed** |
-| `USE_READREPLICA` | `"False"` | **set** (`"False"`) | **fixed** |
-
-### 4.2 Logging env vars — **FIXED**
-
-Shared logging defaults live in `KokuCommonEnv()`; `KOKU_LOG_LEVEL` is set per workload, not in the shared env:
-- Shared defaults: `GUNICORN_LOG_LEVEL=INFO`, `DJANGO_LOG_LEVEL=INFO`, `DJANGO_LOG_FORMATTER=simple`, `DJANGO_LOG_HANDLERS=console`
-- Per-workload `KOKU_LOG_LEVEL`: API/Listener/Celery=INFO, Masu=DEBUG (matches chart)
-
-### 4.3 `POLLING_TIMER` env var — **FIXED**
-
-The operator now sets `POLLING_TIMER=300` (5min), matching the chart's deployed `values.yaml` value (`costManagement.celery.pollingTimer: 300`). The template fallback default `86400` is not used.
-
-### 4.4 RBAC env vars: `ROLE_CREATE_ALLOW_LIST`
-
-The chart exposes `rbac.roleCreateAllowList`. The operator doesn't expose or set this.
+`MonitoringConfig` is still only `Enabled *bool`; scrape interval is hardcoded
+`30s` (chart has `monitoring.scrapeInterval`).
 
 ---
 
-## 5. Good Deviations (Operator is Better)
+## 3. Env var differences
 
-### 5.1 PrometheusRules with 5 alert rules
+### 3.1 RBAC `ROLE_CREATE_ALLOW_LIST`
 
-The operator creates a `PrometheusRule` with:
-- `CostManagementMigrationFailed` — critical, fires on failed migration jobs
-- `CostManagementDegraded` — critical, fires when Degraded condition is true for 5m
-- `CostManagementSchemaOutOfDate` — warning, fires when SchemaUpToDate is false for 15m
-- `CostManagementAPIDown` — critical, fires when koku-api metrics are unreachable for 5m
-- `CostManagementNotProgressing` — warning, fires when Available is false for 30m
+The chart exposes `rbac.roleCreateAllowList` (default `""`). The operator
+neither exposes nor sets this.
 
-The chart has none of these.
-
-### 5.2 Auto-discovery phase
-
-The operator auto-detects cluster domain, default StorageClass, and S3
-endpoint + credentials (from OBC/NooBaa). The chart relies on the install
-script passing these as `--set` overrides.
-
-### 5.3 Phased reconciliation with readiness gates
-
-The operator won't deploy services until the database is ready, won't
-start workers until the API is healthy. The chart deploys everything at
-once and relies on init containers for ordering.
-
-### 5.4 Comprehensive RBAC migration + seeding Job
-
-The operator's RBAC migration Job does Django migrations, built-in seeds,
-Cost Management permission/role seeding, admin_default group creation,
-bootstrap_tenants, and platform_default cleanup — a superset of the chart.
-
-### 5.5 Image-tag-based migration re-run
-
-The operator annotates migration Jobs with the image tag and re-creates
-on image change for automatic upgrade migrations. The chart relies on
-Helm pre-upgrade hooks.
-
-### 5.6 Drift correction every 5 minutes
-
-The operator re-applies desired state on a 5-minute interval, reverting
-manual edits. Helm only applies on install/upgrade.
-
-### 5.7 Auto-generated secrets with secure random passwords
-
-The operator generates DB credentials, Django secret key, and storage
-credentials with 32-character random passwords. The chart relies on the
-install script.
-
-### 5.8 Additional NetworkPolicies
-
-The operator creates Masu, Cache, and Database NetworkPolicies not
-present in the chart. The Masu policy restricts access to monitoring
-only (no other pod should call Masu over HTTP); the Cache and Database
-policies restrict access to the bundled infrastructure. The operator's
-Koku API NetworkPolicy also adds a monitoring peer absent from the
-chart's `cost-api-access`.
+Empty default matches SaaS: REST custom-role create is blocked unless a
+caller sets `ROLE_CREATE_ALLOW_LIST=cost-management`. Unset on the operator
+is equivalent to the chart default. Only needed if product wants REST-created
+custom roles.
 
 ---
 
-## 6. Neutral Deviations
+## 4. Remaining fixes (priority order)
 
-### 6.1 Envoy routing config: largely equivalent
-
-Both define the same 5 Envoy route entries with matching timeouts.
-
-| Route prefix | Cluster | Chart timeout | Operator timeout |
-|---|---|---|---|
-| `/api/cost-management/v1/recommendations/openshift` | ros-api-backend | 30s | 30s |
-| `/api/rbac/` | rbac-api-backend | 30s | 30s |
-| `/api/cost-management/` | koku-api-backend | 60s | 60s |
-| `/api/ingress/ready` | ingress-backend | 10s | 10s |
-| `/api/ingress/` | ingress-backend | 180s | 180s |
-
-### 6.2 Route path: both use `/api`
-
-Both the operator and chart create the gateway Route with `spec.path: /api`.
-The UI has its own separate Route.
-
-### 6.3 Two separate Routes (API + UI) vs one
-
-Both create two Routes: one for the API gateway (edge TLS) and one for
-the UI (passthrough TLS to oauth2-proxy). Architecturally sound.
-
-### 6.4 Labels
-
-Operator uses `app.kubernetes.io/{name,instance,component,managed-by}`.
-Chart uses Helm-standard labels. Both are valid.
-
-### 6.5 Gateway Route timeout annotation **FIXED**
-
-The operator now sets `haproxy.router.openshift.io/timeout: "180s"` as a
-default annotation on the gateway Route (matches Helm chart and Envoy config).
-User overrides via `spec.gatewayRoute.annotations` still take precedence.
-
----
-
-## 7. Remaining Fixes (Priority Order)
-
-1. ~~**Set `ENHANCED_ORG_ADMIN=False`** in `KokuCommonEnv()` — critical for RBAC scoping~~ **DONE**
-2. ~~**Add Celery beat resources** (`koku.go`): set `{cpu: 50m, mem: 200Mi}` / `{cpu: 100m, mem: 400Mi}`~~ **DONE**
-3. ~~**Fix Masu Service port** (`koku.go`): expose port 8000 (http) + 9000 (metrics)~~ **DONE**
-4. **Add ROS Processor + Poller Services**: needed for Prometheus metrics scraping
-5. **Add ROS metrics-scraping NetworkPolicies**: ros-api-metrics, processor-metrics, poller-metrics (Gateway, Koku API, and Masu now covered)
-6. **Add RBAC + ROS components to ServiceMonitors**: rbac-api, ros-processor, ros-recommendation-poller, gateway still missing
-7. ~~**Set default Route timeout annotation** to 180s in GatewayAPIRoute~~ **DONE**
-8. ~~**Add remaining env var defaults**: `INITIAL_INGEST_NUM_MONTHS`, logging vars in `KokuCommonEnv()`~~ **DONE**
-9. **Expose `roleCreateAllowList`** in the RBAC CR section
+1. **Add RBAC ServiceMonitor + monitoring peer** on `RBACAPINetworkPolicy` (Cost-core leftover; chart scrapes `http` `/metrics`)
+2. **Add ROS Processor + Poller Services** (prerequisite for scrape; COST-8054)
+3. **Add processor-metrics and poller-metrics NetworkPolicies** (COST-8054)
+4. **Apply ROS API / processor / poller / Kruize ServiceMonitors** when ROS is on (COST-8054; Kruize builder already uses `http` `/q/metrics`). Applying the Kruize SM still will not scrape in a default-deny namespace: `KruizeNetworkPolicy` has no monitoring peer (the chart has the same gap).
+5. **Expose `roleCreateAllowList`** in the RBAC CR section if REST custom roles are required

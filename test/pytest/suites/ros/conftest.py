@@ -7,6 +7,11 @@ import pytest
 from utils import get_pod_by_label, get_secret_value, get_route_url, run_oc_command
 
 
+@pytest.fixture(autouse=True)
+def _skip_ros_suite_when_disabled(require_ros_enabled) -> None:
+    """Skip ROS suite tests when spec.ros.enabled is false (Cost-only beta)."""
+
+
 @pytest.fixture(scope="module")
 def kruize_pod(cluster_config) -> str:
     """Get Kruize pod name."""

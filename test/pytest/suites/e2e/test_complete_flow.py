@@ -1357,6 +1357,7 @@ class TestCompleteDataFlow:
 
     def test_09_recommendations_accessible_via_api(
         self,
+        require_ros_enabled,
         gateway_url: str,
         keycloak_config,
         cluster_config,
