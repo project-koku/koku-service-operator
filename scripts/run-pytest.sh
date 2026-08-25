@@ -20,7 +20,7 @@
 #   --ros               Run ROS/Kruize recommendation tests
 #   --e2e               Run end-to-end tests
 #   --ui                Run UI tests only (Playwright browser automation)
-#   --no-ui             Exclude UI tests from the run
+#   --no-ui             Exclude UI, Helm, ROS, and performance tests
 #   --performance       Run performance tests (FLPATH-4036)
 #   --perf-ingestion    Run ingestion throughput tests only
 #   --perf-api          Run API latency tests only
@@ -51,7 +51,7 @@
 #
 # Examples:
 #   ./run-pytest.sh                         # Run all tests (including UI)
-#   ./run-pytest.sh --no-ui                 # Run all tests except UI
+#   ./run-pytest.sh --no-ui                 # Run all tests except UI, Helm, ROS, and performance
 #   ./run-pytest.sh --smoke                 # Run smoke tests only
 #   ./run-pytest.sh --helm                  # Run Helm suite only
 #   ./run-pytest.sh --auth --ros            # Run auth and ROS suites
@@ -151,7 +151,7 @@ show_help() {
     echo "  --perf-stress-recovery Run stress backlog recovery only (PERF-STR-002)"
     echo ""
     echo "UI Tests:"
-    echo "  UI tests are included by default. Use --no-ui to exclude them."
+    echo "  UI tests are included by default. Use --no-ui to exclude UI, Helm, ROS, and performance."
     echo "  Use --ui to run ONLY UI tests."
     exit 0
 }
@@ -525,8 +525,8 @@ main() {
             pytest_args+=("-m" "($marker_expr) and not performance")
         fi
     elif [[ "$exclude_ui" == "true" ]]; then
-        # Exclude UI tests and performance tests when --no-ui is specified
-        pytest_args+=("-m" "not ui and not performance and not helm")
+        # Exclude UI, Helm, ROS (beta), and performance when --no-ui is specified
+        pytest_args+=("-m" "not ui and not performance and not helm and not ros")
     else
         # Default: run all tests EXCEPT performance tests
         # Performance tests must be explicitly requested via --performance flags
