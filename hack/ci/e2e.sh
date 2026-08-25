@@ -5,9 +5,12 @@
 # (scripts/install-cmsc.sh is the chart installer — never use it here).
 #
 # Usage (from operator repo root, operator already installed):
-#   NAMESPACE=cost-onprem CR_NAME=cost-onprem INFRA_NAMESPACE=cost-onprem-infra \
-#     CHART_ROOT=/path/to/cost-onprem-chart ./hack/ci/e2e.sh
+#   KUBE_CONTEXT=<context> NAMESPACE=cost-onprem CR_NAME=cost-onprem \
+#     INFRA_NAMESPACE=cost-onprem-infra CHART_ROOT=/path/to/cost-onprem-chart ./hack/ci/e2e.sh
 #
+# KUBE_CONTEXT is required unless KUBECONFIG points at a single-context kubeconfig.
+# The script pins an isolated KUBECONFIG (exported to child scripts) so kubectl/oc
+# cannot drift to another cluster mid-run.
 # Prow sets ARTIFACT_DIR. Locally, JUnit is still written under test/pytest/reports/.
 # Artifact dumps are redacted and never include Secret/ConfigMap payloads.
 #
@@ -38,11 +41,98 @@ if [[ -z "$KUBECTL" ]]; then
   fi
 fi
 
+KUBECTL_COMPAT_DIR=""
 if ! command -v kubectl >/dev/null 2>&1 && command -v oc >/dev/null 2>&1; then
-  mkdir -p /tmp/bin
-  ln -sf "$(command -v oc)" /tmp/bin/kubectl
-  export PATH="/tmp/bin:${PATH}"
+  KUBECTL_COMPAT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/koku-kubectl-compat.XXXXXX")"
+  ln -sf "$(command -v oc)" "${KUBECTL_COMPAT_DIR}/kubectl"
+  export PATH="${KUBECTL_COMPAT_DIR}:${PATH}"
 fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: python3 is required for artifact redaction and Secret handling" >&2
+  exit 1
+fi
+
+KUBECONFIG_ISOLATED_DIR=""
+
+# Resolve KUBE_CONTEXT from a single-context kubeconfig when unset.
+resolve_kube_context_from_kubeconfig() {
+  local kcf count ctx contexts
+  if [[ -z "${KUBECONFIG:-}" ]]; then
+    return 1
+  fi
+  if [[ "$KUBECONFIG" == *:* ]]; then
+    echo "error: KUBE_CONTEXT is required when KUBECONFIG lists multiple files" >&2
+    exit 1
+  fi
+  kcf="$KUBECONFIG"
+  if [[ ! -f "$kcf" ]]; then
+    return 1
+  fi
+  contexts="$("$KUBECTL" --kubeconfig="$kcf" config get-contexts -o name 2>/dev/null || true)"
+  count="$(printf '%s\n' "$contexts" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [[ "$count" != "1" ]]; then
+    echo "error: KUBE_CONTEXT is required (kubeconfig ${kcf} has ${count} contexts)" >&2
+    exit 1
+  fi
+  ctx="$(printf '%s\n' "$contexts" | sed '/^$/d' | head -1)"
+  ctx="${ctx#\*}"
+  if [[ -z "$ctx" ]]; then
+    return 1
+  fi
+  KUBE_CONTEXT="$ctx"
+  export KUBE_CONTEXT
+}
+
+# Require an explicit target context and pin an isolated kubeconfig before writes.
+pin_kube_context() {
+  local orig_kubeconfig current server err
+  if [[ -z "${KUBE_CONTEXT:-}" ]]; then
+    resolve_kube_context_from_kubeconfig || {
+      echo "error: KUBE_CONTEXT is required (set explicitly or provide a single-context KUBECONFIG)" >&2
+      exit 1
+    }
+  fi
+  if ! "$KUBECTL" config get-contexts "$KUBE_CONTEXT" >/dev/null 2>&1; then
+    echo "error: kube context '${KUBE_CONTEXT}' not found" >&2
+    "$KUBECTL" config get-contexts -o name >&2 || true
+    exit 1
+  fi
+
+  orig_kubeconfig="${KUBECONFIG:-}"
+  KUBECONFIG_ISOLATED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/koku-e2e-kubeconfig.XXXXXX")"
+  KUBECONFIG="${KUBECONFIG_ISOLATED_DIR}/config"
+  if [[ -n "$orig_kubeconfig" ]]; then
+    KUBECONFIG="$orig_kubeconfig" "$KUBECTL" config view --flatten --context="$KUBE_CONTEXT" >"$KUBECONFIG"
+  else
+    "$KUBECTL" config view --flatten --context="$KUBE_CONTEXT" >"$KUBECONFIG"
+  fi
+  export KUBECONFIG
+
+  "$KUBECTL" config use-context "$KUBE_CONTEXT" >/dev/null
+
+  current="$("$KUBECTL" config current-context 2>/dev/null || true)"
+  if [[ "$current" != "$KUBE_CONTEXT" ]]; then
+    echo "error: pinned kubeconfig current-context is '${current:-<unset>}', expected '${KUBE_CONTEXT}'" >&2
+    exit 1
+  fi
+
+  server="$("$KUBECTL" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
+  if [[ -z "$server" ]]; then
+    echo "error: cannot resolve API server for context '${KUBE_CONTEXT}'" >&2
+    exit 1
+  fi
+
+  err="$(mktemp)"
+  if ! "$KUBECTL" whoami >/dev/null 2>"$err"; then
+    echo "error: kube API is not reachable for context '${KUBE_CONTEXT}' (${server})" >&2
+    sed 's/^/  /' "$err" >&2
+    rm -f "$err"
+    exit 1
+  fi
+  rm -f "$err"
+  export KUBE_CONTEXT
+}
 
 resolve_chart_root() {
   local script="scripts/deploy-rhbk.sh"
@@ -89,10 +179,6 @@ ensure_chart_root() {
 # Redact credential-shaped strings on stdin. Used for anything that may land in
 # ARTIFACT_DIR or the Prow build log (CMSC status, events, operator logs, JUnit).
 redact_filter() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    cat
-    return 0
-  fi
   python3 -c "$(cat <<'PY'
 import re
 import sys
@@ -133,10 +219,6 @@ PY
 
 # kubectl -o json → drop managedFields / last-applied-configuration, then redact.
 sanitize_k8s_json() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    redact_filter
-    return 0
-  fi
   python3 -c "$(cat <<'PY'
 import json
 import sys
@@ -202,15 +284,33 @@ copy_junit() {
   fi
 }
 
+# Read KAFKA_BOOTSTRAP_SERVERS from deploy-kafka handoff file without sourcing.
+read_kafka_bootstrap_env_file() {
+  local file="$1"
+  local line value
+  [[ -f "$file" && -r "$file" ]] || return 1
+  line="$(
+    grep -E '^[[:space:]]*export[[:space:]]+KAFKA_BOOTSTRAP_SERVERS=' "$file" 2>/dev/null | tail -1
+  )" || return 1
+  if [[ "$line" =~ ^[[:space:]]*export[[:space:]]+KAFKA_BOOTSTRAP_SERVERS=\"([^\"]+)\"[[:space:]]*$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ ^[[:space:]]*export[[:space:]]+KAFKA_BOOTSTRAP_SERVERS=([^[:space:]#\"]+)[[:space:]]*$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  if [[ "$value" =~ ^[a-zA-Z0-9._:-]+(,[a-zA-Z0-9._:-]+)*$ ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  return 1
+}
+
 # Copy a Secret under a new name without kubectl apply. Client-side apply
 # writes the full object (including data) into last-applied-configuration.
 copy_secret() {
   local src="$1" dst="$2" ns="$3"
   local verb=create
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "error: python3 is required to copy Secret ${src} → ${dst}" >&2
-    exit 1
-  fi
   if "$KUBECTL" -n "$ns" get secret "$dst" >/dev/null 2>&1; then
     verb=replace
   fi
@@ -238,6 +338,8 @@ json.dump(obj, sys.stdout)
 ' "$dst" | "$KUBECTL" "$verb" -f -
 }
 
+pin_kube_context
+
 if ! "$KUBECTL" get crd costmanagementserviceconfigs.service.costmanagement.openshift.io >/dev/null 2>&1; then
   echo "error: CMSC CRD not found. Install the operator first" >&2
   echo "  (Prow e2e 'install' step, or IMG=… ./hack/deploy-incluster.sh ${NAMESPACE})." >&2
@@ -253,15 +355,25 @@ echo "CR name:      $CR_NAME"
 echo "Infra NS:     $INFRA_NAMESPACE"
 echo "Operator NS:  $OPERATOR_NAMESPACE"
 echo "CHART_ROOT:   ${CHART_ROOT:-<unset>}"
-echo "Cluster:      $($KUBECTL config current-context 2>/dev/null || echo unknown)"
+echo "Context:      ${KUBE_CONTEXT} ($("$KUBECTL" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo unknown))"
 echo ""
 
-trap dump EXIT
+on_exit() {
+  dump
+  if [[ -n "${KUBECTL_COMPAT_DIR:-}" ]]; then
+    rm -rf "$KUBECTL_COMPAT_DIR"
+  fi
+  if [[ -n "${KUBECONFIG_ISOLATED_DIR:-}" ]]; then
+    rm -rf "$KUBECONFIG_ISOLATED_DIR"
+  fi
+}
+trap on_exit EXIT
 
 "$KUBECTL" create namespace "${NAMESPACE}" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
 echo "[1/4] BYOI dependencies..."
-NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" INFRA_NAMESPACE="$INFRA_NAMESPACE" \
+KUBE_CONTEXT="$KUBE_CONTEXT" KUBECTL="$KUBECTL" \
+  NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" INFRA_NAMESPACE="$INFRA_NAMESPACE" \
   KAFKA_NAMESPACE="$KAFKA_NAMESPACE" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
   CHART_ROOT="${CHART_ROOT:-}" \
   ./hack/deploy-byoi.sh
@@ -275,11 +387,10 @@ DOMAIN="$("$KUBECTL" get ingress.config.openshift.io cluster -o jsonpath='{.spec
 BOOTSTRAP="cost-onprem-kafka-kafka-bootstrap.${KAFKA_NAMESPACE}.svc.cluster.local:9092"
 if [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
   BOOTSTRAP="$KAFKA_BOOTSTRAP_SERVERS"
-elif [[ -f /tmp/kafka-bootstrap-servers.env ]]; then
-  # shellcheck disable=SC1091
-  source /tmp/kafka-bootstrap-servers.env 2>/dev/null || true
-  if [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" && "${KAFKA_BOOTSTRAP_SERVERS}" == *"${KAFKA_NAMESPACE}"* ]]; then
-    BOOTSTRAP="$KAFKA_BOOTSTRAP_SERVERS"
+else
+  parsed="$(read_kafka_bootstrap_env_file /tmp/kafka-bootstrap-servers.env 2>/dev/null || true)"
+  if [[ -n "$parsed" && "$parsed" == *"${KAFKA_NAMESPACE}"* ]]; then
+    BOOTSTRAP="$parsed"
   fi
 fi
 
@@ -329,7 +440,7 @@ if [[ "$SKIP_PYTEST" == "1" ]]; then
 fi
 
 echo "[4/4] pytest --no-venv --no-ui..."
-export NAMESPACE HELM_RELEASE_NAME="${CR_NAME}" KEYCLOAK_NAMESPACE
+export NAMESPACE HELM_RELEASE_NAME="${CR_NAME}" KEYCLOAK_NAMESPACE KUBE_CONTEXT KUBECTL
 set +e
 ./scripts/run-pytest.sh --no-venv --no-ui
 pytest_rc=$?

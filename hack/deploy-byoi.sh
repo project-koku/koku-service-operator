@@ -45,6 +45,14 @@ if ! command -v "$KUBECTL" >/dev/null 2>&1; then
   fi
 fi
 
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  current="$("$KUBECTL" config current-context 2>/dev/null || true)"
+  if [[ "$current" != "$KUBE_CONTEXT" ]]; then
+    echo "error: current-context is '${current:-<unset>}', expected '${KUBE_CONTEXT}'" >&2
+    exit 1
+  fi
+fi
+
 if [[ -z "$STORAGE_CLASS" ]]; then
   STORAGE_CLASS="$("$KUBECTL" get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null | awk '{print $1}')"
   STORAGE_CLASS="${STORAGE_CLASS:-gp3-csi}"
@@ -64,7 +72,11 @@ echo "Kafka NS:           $KAFKA_NAMESPACE"
 echo "Keycloak NS:        $KEYCLOAK_NAMESPACE"
 echo "StorageClass:       $STORAGE_CLASS"
 echo "UI base URL:        ${UI_BASE_URL:-<unset>}"
-echo "Cluster:            $($KUBECTL config current-context 2>/dev/null || echo unknown)"
+if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  echo "Context:            ${KUBE_CONTEXT} ($("$KUBECTL" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo unknown))"
+else
+  echo "Cluster:            $($KUBECTL config current-context 2>/dev/null || echo unknown)"
+fi
 echo ""
 
 need_ns() {
@@ -85,7 +97,8 @@ trap cleanup EXIT
 # -----------------------------------------------------------------------------
 if [[ "$SKIP_KAFKA" != "1" ]]; then
   echo "[A1] Kafka (AMQ Streams) in namespace ${KAFKA_NAMESPACE}..."
-  STORAGE_CLASS="$STORAGE_CLASS" LOG_LEVEL="$LOG_LEVEL" \
+  KUBE_CONTEXT="${KUBE_CONTEXT:-}" KUBECTL="$KUBECTL" \
+    STORAGE_CLASS="$STORAGE_CLASS" LOG_LEVEL="$LOG_LEVEL" \
     KAFKA_NAMESPACE="$KAFKA_NAMESPACE" \
     ./config/samples/byoi/deploy-kafka.sh
 else
@@ -100,8 +113,8 @@ if [[ "$SKIP_INFRA" != "1" ]]; then
   need_ns "$INFRA_NAMESPACE"
 
   # Official postgres/MinIO images need anyuid on OpenShift.
-  if command -v oc >/dev/null 2>&1; then
-    oc adm policy add-scc-to-user anyuid -z byoi-infra -n "$INFRA_NAMESPACE" 2>/dev/null || true
+  if [[ "$KUBECTL" == "oc" ]] || [[ "$(basename "$KUBECTL")" == "oc" ]]; then
+    "$KUBECTL" adm policy add-scc-to-user anyuid -z byoi-infra -n "$INFRA_NAMESPACE" 2>/dev/null || true
   fi
 
   TMP_INFRA="$(mktemp -d)"
@@ -138,6 +151,8 @@ if [[ "$SKIP_KEYCLOAK" != "1" ]]; then
     export COST_MGMT_RELEASE_NAME="$CR_NAME"
     export STORAGE_CLASS="$STORAGE_CLASS"
     export LOG_LEVEL="$LOG_LEVEL"
+    export KUBECTL
+    export KUBE_CONTEXT="${KUBE_CONTEXT:-}"
     if [[ -n "$UI_BASE_URL" ]]; then
       export COST_MGMT_UI_BASE_URL="$UI_BASE_URL"
     fi
@@ -153,7 +168,8 @@ fi
 if [[ "$SKIP_OAUTH_MIRROR" != "1" ]]; then
   echo "[A4] Mirror UI OAuth client Secret into ${NAMESPACE}..."
   need_ns "$NAMESPACE"
-  NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" \
+  KUBE_CONTEXT="${KUBE_CONTEXT:-}" KUBECTL="$KUBECTL" \
+    NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" \
     KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
     ./config/samples/byoi/mirror-ui-oauth-secret.sh --force
 else
