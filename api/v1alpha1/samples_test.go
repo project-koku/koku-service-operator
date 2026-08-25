@@ -48,10 +48,10 @@ func TestSampleCRs_DefaultAndProductionOauthAndEnvoyImages(t *testing.T) {
 			cfg := loadSampleCR(t, name)
 			oauth := cfg.Spec.UI.OAuthProxy.Image.Repository
 			envoy := cfg.Spec.Auth.Envoy.Image.Repository
-			if !strings.Contains(oauth, redhatRegistry) {
+			if !strings.HasPrefix(oauth, redhatRegistry+"/") {
 				t.Errorf("oauth2-proxy repository = %q, want %s", oauth, redhatRegistry)
 			}
-			if !strings.Contains(envoy, redhatRegistry) {
+			if !strings.HasPrefix(envoy, redhatRegistry+"/") {
 				t.Errorf("envoy repository = %q, want %s", envoy, redhatRegistry)
 			}
 		})

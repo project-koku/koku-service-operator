@@ -85,7 +85,7 @@ var _ = Describe("CostManagementServiceConfig Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("ImageRequired"))
+			Expect(err.Error()).To(ContainSubstring("spec.database.image"))
 		})
 	})
 })

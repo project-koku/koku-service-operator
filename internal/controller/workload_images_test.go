@@ -53,10 +53,7 @@ func TestReconcile_MissingImagesDegrades(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: testCRName, Namespace: testNamespace},
 	})
 	if err == nil {
-		t.Fatal("expected ImageRequired error for empty spec.*.image")
-	}
-	if !strings.Contains(err.Error(), "ImageRequired") {
-		t.Errorf("error = %v, want ImageRequired", err)
+		t.Fatal("expected error for empty spec.*.image")
 	}
 	if !strings.Contains(err.Error(), "spec.database.image") {
 		t.Errorf("error = %v, want spec.database.image", err)
@@ -73,8 +70,11 @@ func TestReconcile_MissingImagesDegrades(t *testing.T) {
 	if deg == nil || deg.Status != metav1.ConditionTrue {
 		t.Fatalf("Degraded = %+v, want True", deg)
 	}
-	if !strings.Contains(deg.Message, "ImageRequired") {
-		t.Errorf("Degraded message = %q, want ImageRequired", deg.Message)
+	if deg.Reason != reasonImageNotSet {
+		t.Errorf("Degraded.Reason = %q, want %s", deg.Reason, reasonImageNotSet)
+	}
+	if !strings.Contains(deg.Message, "spec.database.image") {
+		t.Errorf("Degraded message = %q, want spec.database.image", deg.Message)
 	}
 }
 

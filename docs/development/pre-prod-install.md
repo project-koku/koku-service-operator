@@ -217,7 +217,7 @@ kubectl apply -f config/samples/byoi/app/costmanagementserviceconfig.yaml
 
 Required image fields (`repository` and `tag`). The operator does **not**
 default workload images; omit a required field and reconcile sets
-`Degraded=True` with an `ImageRequired` error:
+`Degraded=True` with reason `ImageNotSet`:
 
 | Spec path | Purpose |
 |-----------|---------|

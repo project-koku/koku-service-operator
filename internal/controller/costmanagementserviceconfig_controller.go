@@ -59,6 +59,8 @@ const (
 	reasonKokuAvailable          = "KokuAvailable"
 	reasonDeploymentNotReady     = "DeploymentNotReady"
 	reasonDeploymentReady        = "DeploymentReady"
+	reasonReconcileError         = "ReconcileError"
+	reasonImageNotSet            = "ImageNotSet"
 	msgWaitingForRBACAPI         = "waiting for RBAC API"
 	msgWaitingForRBACWorker      = "waiting for RBAC worker"
 	msgWaitingForKokuAPI         = "waiting for Koku API"
@@ -265,11 +267,12 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		applyPhaseError(cfg, err)
 		// For any error (structured or plain), ensure Degraded is visible in status.
 		// Without this, plain fmt.Errorf from phases left Degraded unset.
+		reason := degradedReason(err)
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue,
-			"ReconcileError", err.Error())
+			reason, err.Error())
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseDegraded)
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
+		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, reason, "%v", err)
 		return ctrl.Result{RequeueAfter: requeueSlow}, err
 	}
 	if !result.IsZero() {
@@ -307,7 +310,23 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkloadImages(_ contex
 	if len(missing) == 0 {
 		return Result{}, nil
 	}
-	return Result{}, fmt.Errorf("ImageRequired: set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", "))
+	return Result{}, &imageNotSetError{
+		msg: fmt.Sprintf("set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", ")),
+	}
+}
+
+// imageNotSetError is a user-config error: required spec.*.image is empty.
+// Degraded reason ImageNotSet (not ReconcileError) so alerts can match it.
+type imageNotSetError struct{ msg string }
+
+func (e *imageNotSetError) Error() string { return e.msg }
+
+func degradedReason(err error) string {
+	var ins *imageNotSetError
+	if stderrors.As(err, &ins) {
+		return reasonImageNotSet
+	}
+	return reasonReconcileError
 }
 
 // -----------------------------------------------------------------------------
