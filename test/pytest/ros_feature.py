@@ -68,6 +68,10 @@ def detect_ros_enabled(
 ) -> bool:
     """Detect ROS enablement from CMSC spec/condition or ros-api workload."""
     env_override = os.environ.get("ROS_ENABLED")
+    env_enabled = parse_ros_enabled_env(env_override)
+    if env_enabled is not None:
+        return env_enabled
+
     cmsc_name = os.environ.get("CMSC_NAME", cr_name or helm_release_name)
 
     cmsc_found = False
