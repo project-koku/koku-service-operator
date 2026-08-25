@@ -9,20 +9,10 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// Used when spec.database.image is empty. SCL/RHEL layout
-// (POSTGRESQL_ADMIN_PASSWORD, /var/lib/pgsql/data); docker.io/library/postgres
-// is not compatible with DatabaseStatefulSet.
-const defaultDatabaseImage = "quay.io/sclorg/postgresql-16-c10s:c10s"
-
-func databaseImage(spec costv1alpha1.ImageSpec) string {
-	image := spec.Repository + ":" + spec.Tag
-	if image == ":" {
-		return defaultDatabaseImage
-	}
-	return image
-}
-
 // DatabaseStatefulSet builds the PostgreSQL StatefulSet.
+// Image comes from spec.database.image (required when deploy is true).
+// The container contract is SCL/RHEL (POSTGRESQL_ADMIN_PASSWORD,
+// /var/lib/pgsql/data); docker.io/library/postgres is not compatible.
 func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.StatefulSet {
 	name := NameDatabase(cfg)
 	selLabels := SelectorLabels(cfg, "database")
@@ -30,7 +20,7 @@ func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 	dbSecret := NameDBCredentials(cfg)
 
 	dbSpec := cfg.Spec.Database
-	image := databaseImage(dbSpec.Image)
+	image, _ := ImageRef(dbSpec.Image)
 
 	storageSize := dbSpec.Storage.Size
 	if storageSize.IsZero() {

@@ -47,13 +47,12 @@ func TestUIDeploymentServiceAccount(t *testing.T) {
 	}
 }
 
-func TestUIDeployment_DefaultOAuthProxyImageWhenUnset(t *testing.T) {
+func TestUIDeployment_EmptyOAuthProxyImageHasNoFallback(t *testing.T) {
 	cfg := uiTestCfg()
 	cfg.Spec.UI.OAuthProxy.Image = costv1alpha1.ImageSpec{}
 	proxy := containerByName(t, UIDeployment(cfg).Spec.Template.Spec.Containers, "oauth-proxy")
-	const want = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
-	if proxy.Image != want {
-		t.Errorf("default oauth2-proxy image = %q, want %q", proxy.Image, want)
+	if proxy.Image != "" {
+		t.Errorf("empty oauth2-proxy image = %q, want empty (no catalog default)", proxy.Image)
 	}
 }
 

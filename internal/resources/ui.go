@@ -17,9 +17,6 @@ import (
 const (
 	uiProxyPort = int32(8443)
 	uiAppPort   = int32(8080)
-
-	defaultOAuthProxyImage = "quay.io/oauth2-proxy/oauth2-proxy"
-	defaultOAuthProxyTag   = "v7.6.0"
 )
 
 // NameUINginxConfigMap returns the nginx ConfigMap name for the UI.
@@ -164,20 +161,6 @@ func uiProfileResources(profile costv1alpha1.Profile) corev1.ResourceRequirement
 	}
 }
 
-// oauthProxyImage returns spec.ui.oauthProxy.image, or defaultOAuthProxyImage
-// when repository/tag are empty.
-func oauthProxyImage(spec costv1alpha1.OAuthProxySpec) string {
-	repo := spec.Image.Repository
-	tag := spec.Image.Tag
-	if repo == "" {
-		repo = defaultOAuthProxyImage
-	}
-	if tag == "" {
-		tag = defaultOAuthProxyTag
-	}
-	return repo + ":" + tag
-}
-
 // UIDeployment builds the UI Deployment with the oauth2-proxy sidecar and nginx app.
 func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.UI
@@ -194,8 +177,8 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 	backendLogoutURL := issuerURL + "/protocol/openid-connect/logout?id_token_hint={id_token}"
 	upstream := fmt.Sprintf("http://localhost:%d", uiAppPort)
 
-	proxyImage := oauthProxyImage(spec.OAuthProxy)
-	appImage := spec.App.Image.Repository + ":" + spec.App.Image.Tag
+	proxyImage, _ := ImageRef(spec.OAuthProxy.Image)
+	appImage, _ := ImageRef(spec.App.Image)
 
 	proxyResources := spec.OAuthProxy.Resources
 	if len(proxyResources.Requests) == 0 && len(proxyResources.Limits) == 0 {

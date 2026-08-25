@@ -65,11 +65,11 @@ func TestCacheDeployment_Defaults(t *testing.T) {
 	}
 }
 
-func TestCacheDeployment_DefaultImageWhenUnset(t *testing.T) {
+func TestCacheDeployment_EmptyImageHasNoFallback(t *testing.T) {
 	cfg := testCfg()
 	d := CacheDeployment(cfg)
-	if got := d.Spec.Template.Spec.Containers[0].Image; got != defaultCacheImage {
-		t.Errorf("default image = %q", got)
+	if got := d.Spec.Template.Spec.Containers[0].Image; got != "" {
+		t.Errorf("empty cache image = %q, want empty (no catalog default)", got)
 	}
 }
 

@@ -6,12 +6,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestDatabaseStatefulSet_DefaultImageAndSCLContract(t *testing.T) {
+func TestDatabaseStatefulSet_SCLContract(t *testing.T) {
 	cfg := testCfg()
+	cfg.Spec.Database.Image.Repository = "quay.io/sclorg/postgresql-16-c10s"
+	cfg.Spec.Database.Image.Tag = "c10s"
 	sts := DatabaseStatefulSet(cfg)
 	c := sts.Spec.Template.Spec.Containers[0]
-	if c.Image != defaultDatabaseImage {
-		t.Errorf("default image = %q, want %q", c.Image, defaultDatabaseImage)
+	if c.Image != "quay.io/sclorg/postgresql-16-c10s:c10s" {
+		t.Errorf("image = %q", c.Image)
 	}
 
 	foundAdmin := false

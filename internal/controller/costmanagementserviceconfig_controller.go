@@ -230,14 +230,15 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 }
 
 // reconcile drives the ordered, staged rollout:
-//  0. Discovery (cluster domain, StorageClass, S3)
-//  1. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
-//  2. Infrastructure (PostgreSQL, Valkey)
-//  3. Validation (TCP/HTTP probes for external deps, Secret key checks)
-//  4. DB migration gate (Koku → ROS → RBAC)
-//  5. Core services (Koku API, Masu, Listener)
-//  6. Workers (Celery, ROS, Kruize)
-//  7. Edge (Envoy gateway, UI, Route)
+//  0. Workload images (spec.*.image required; no operator catalog default)
+//  1. Discovery (cluster domain, StorageClass, S3)
+//  2. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
+//  3. Infrastructure (PostgreSQL, Valkey)
+//  4. Validation (TCP/HTTP probes for external deps, Secret key checks)
+//  5. DB migration gate (Koku → ROS → RBAC)
+//  6. Core services (Koku API, Masu, Listener)
+//  7. Workers (Celery, ROS, Kruize)
+//  8. Edge (Envoy gateway, UI, Route)
 func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (ctrl.Result, error) {
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
@@ -247,6 +248,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
 	result, err := runPhases([]PhaseFn{
+		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
 		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
 		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
 		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
@@ -294,6 +296,18 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// -----------------------------------------------------------------------------
+// Stage 0 — Workload images
+// -----------------------------------------------------------------------------
+
+func (r *CostManagementServiceConfigReconciler) reconcileWorkloadImages(_ context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	missing := resources.MissingWorkloadImages(cfg)
+	if len(missing) == 0 {
+		return Result{}, nil
+	}
+	return Result{}, fmt.Errorf("ImageRequired: set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", "))
 }
 
 // -----------------------------------------------------------------------------

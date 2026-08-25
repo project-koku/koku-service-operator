@@ -9,19 +9,8 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// Used when spec.cache.image is empty. Matches CacheDeployment
-// (valkey-server, valkey-cli, /data, fsGroup 1000).
-const defaultCacheImage = "quay.io/sclorg/valkey-8-c10s:c10s"
-
-func cacheImage(spec costv1alpha1.ImageSpec) string {
-	image := spec.Repository + ":" + spec.Tag
-	if image == ":" {
-		return defaultCacheImage
-	}
-	return image
-}
-
 // CacheDeployment builds the bundled Valkey Deployment (dev/CI only).
+// Image comes from spec.cache.image (required when deploy is true).
 //
 // The server runs with --protected-mode no and no --requirepass / TLS flags.
 // This is intentional: the bundled cache is not for production (BYOI model).
@@ -35,7 +24,7 @@ func CacheDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	allLabels := Labels(cfg, "cache")
 
 	c := cfg.Spec.Cache
-	image := cacheImage(c.Image)
+	image, _ := ImageRef(c.Image)
 
 	port := c.Port
 	if port == 0 {

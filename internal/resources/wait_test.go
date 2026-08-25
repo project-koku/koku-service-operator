@@ -5,11 +5,13 @@ import (
 	"testing"
 )
 
-func TestWaitForPostgres_DefaultImageWhenUnset(t *testing.T) {
+func TestWaitForPostgres_UsesDatabaseImage(t *testing.T) {
 	cfg := testCfg()
+	cfg.Spec.Database.Image.Repository = "quay.io/sclorg/postgresql-16-c10s"
+	cfg.Spec.Database.Image.Tag = "c10s"
 	c := waitForPostgres(cfg, "db.svc", "5432")
-	if c.Image != defaultDatabaseImage {
-		t.Errorf("bundled wait-for-postgres image = %q, want %q", c.Image, defaultDatabaseImage)
+	if c.Image != "quay.io/sclorg/postgresql-16-c10s:c10s" {
+		t.Errorf("bundled wait-for-postgres image = %q", c.Image)
 	}
 	if c.Name != "wait-for-postgres" {
 		t.Errorf("Name = %q", c.Name)

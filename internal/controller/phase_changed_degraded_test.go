@@ -75,6 +75,7 @@ func TestReconcile_EmitsPhaseChangedOnValidationDegraded(t *testing.T) {
 			Phase: costv1alpha1.PhaseReady,
 		},
 	}
+	pinTestImages(cfg)
 	controllerutil.AddFinalizer(cfg, finalizerName)
 
 	s3 := &corev1.Secret{

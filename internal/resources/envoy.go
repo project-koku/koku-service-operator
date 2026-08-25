@@ -22,9 +22,6 @@ const (
 
 	defaultKeycloakURL   = "https://keycloak.keycloak.svc.cluster.local"
 	defaultKeycloakRealm = "kubernetes"
-	// Empty spec.auth.envoy.image uses upstream Envoy 1.32 (same line as OSSM 2.6).
-	defaultEnvoyImage = "docker.io/envoyproxy/envoy"
-	defaultEnvoyTag   = "v1.32.13"
 )
 
 // KeycloakURL returns the Keycloak base URL from the CR (or the chart default).
@@ -149,15 +146,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	sel := SelectorLabels(cfg, envoyComponent)
 	all := Labels(cfg, envoyComponent)
 
-	repo := cfg.Spec.Auth.Envoy.Image.Repository
-	tag := cfg.Spec.Auth.Envoy.Image.Tag
-	if repo == "" {
-		repo = defaultEnvoyImage
-	}
-	if tag == "" {
-		tag = defaultEnvoyTag
-	}
-	image := repo + ":" + tag
+	image, _ := ImageRef(cfg.Spec.Auth.Envoy.Image)
 
 	replicas := cfg.Spec.Auth.Envoy.Replicas
 	if replicas == 0 {
