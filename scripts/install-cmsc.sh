@@ -1127,7 +1127,7 @@ deploy_helm_chart() {
     local crd_name="costmanagementserviceconfigs.service.costmanagement.openshift.io"
     local sample="${project_root}/config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
 
-    local operator_ns="koku-service-operator-system"
+    local operator_ns="${NAMESPACE:-cost-onprem}"
     local pull_img="${IMG:-image-registry.openshift-image-registry.svc:5000/${operator_ns}/koku-service-operator:latest}"
     local registry_host
     registry_host="$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || true)"

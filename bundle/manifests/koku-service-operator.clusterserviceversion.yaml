@@ -156,7 +156,21 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-08-21T19:45:45Z"
+    createdAt: "2026-08-25T19:22:07Z"
+    operatorframework.io/suggested-namespace: cost-onprem
+    operatorframework.io/suggested-namespace-template: |-
+      {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+          "name": "cost-onprem",
+          "labels": {
+            "pod-security.kubernetes.io/enforce": "restricted",
+            "pod-security.kubernetes.io/audit": "restricted",
+            "pod-security.kubernetes.io/warn": "restricted"
+          }
+        }
+      }
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1
@@ -227,126 +241,6 @@ spec:
           - secrets
           verbs:
           - get
-        - apiGroups:
-          - authentication.k8s.io
-          resources:
-          - tokenreviews
-          verbs:
-          - create
-        - apiGroups:
-          - authorization.k8s.io
-          resources:
-          - subjectaccessreviews
-          verbs:
-          - create
-        serviceAccountName: koku-service-operator-controller-manager
-      deployments:
-      - label:
-          app.kubernetes.io/managed-by: kustomize
-          app.kubernetes.io/name: koku-service-operator
-          control-plane: controller-manager
-        name: koku-service-operator-controller-manager
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app.kubernetes.io/name: koku-service-operator
-              control-plane: controller-manager
-          strategy: {}
-          template:
-            metadata:
-              annotations:
-                kubectl.kubernetes.io/default-container: manager
-              labels:
-                app.kubernetes.io/name: koku-service-operator
-                control-plane: controller-manager
-            spec:
-              containers:
-              - args:
-                - --metrics-bind-address=:8443
-                - --leader-elect
-                - --health-probe-bind-address=:8081
-                - --operator-image=quay.io/project-koku/koku-service-operator:v0.0.1
-                command:
-                - /manager
-                image: quay.io/project-koku/koku-service-operator:v0.0.1
-                livenessProbe:
-                  httpGet:
-                    path: /healthz
-                    port: 8081
-                  initialDelaySeconds: 15
-                  periodSeconds: 20
-                name: manager
-                ports:
-                - containerPort: 9443
-                  name: webhook-server
-                  protocol: TCP
-                readinessProbe:
-                  httpGet:
-                    path: /readyz
-                    port: 8081
-                  initialDelaySeconds: 5
-                  periodSeconds: 10
-                resources:
-                  limits:
-                    cpu: 500m
-                    memory: 128Mi
-                  requests:
-                    cpu: 10m
-                    memory: 64Mi
-                securityContext:
-                  allowPrivilegeEscalation: false
-                  capabilities:
-                    drop:
-                    - ALL
-                volumeMounts:
-                - mountPath: /tmp/k8s-webhook-server/serving-certs
-                  name: cert
-                  readOnly: true
-              securityContext:
-                runAsNonRoot: true
-                seccompProfile:
-                  type: RuntimeDefault
-              serviceAccountName: koku-service-operator-controller-manager
-              terminationGracePeriodSeconds: 10
-              volumes:
-              - name: cert
-                secret:
-                  defaultMode: 420
-                  secretName: webhook-server-cert
-      permissions:
-      - rules:
-        - apiGroups:
-          - ""
-          resources:
-          - configmaps
-          verbs:
-          - get
-          - list
-          - watch
-          - create
-          - update
-          - patch
-          - delete
-        - apiGroups:
-          - coordination.k8s.io
-          resources:
-          - leases
-          verbs:
-          - get
-          - list
-          - watch
-          - create
-          - update
-          - patch
-          - delete
-        - apiGroups:
-          - ""
-          resources:
-          - events
-          verbs:
-          - create
-          - patch
         - apiGroups:
           - ""
           resources:
@@ -493,6 +387,126 @@ spec:
           - get
           - patch
           - update
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: koku-service-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: koku-service-operator
+          control-plane: controller-manager
+        name: koku-service-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: koku-service-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: koku-service-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                - --operator-image=quay.io/project-koku/koku-service-operator:v0.0.1
+                command:
+                - /manager
+                image: quay.io/project-koku/koku-service-operator:v0.0.1
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                ports:
+                - containerPort: 9443
+                  name: webhook-server
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                volumeMounts:
+                - mountPath: /tmp/k8s-webhook-server/serving-certs
+                  name: cert
+                  readOnly: true
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: koku-service-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+              volumes:
+              - name: cert
+                secret:
+                  defaultMode: 420
+                  secretName: webhook-server-cert
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
         serviceAccountName: koku-service-operator-controller-manager
     strategy: deployment
   installModes:

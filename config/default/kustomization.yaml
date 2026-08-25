@@ -1,10 +1,10 @@
 # Adds namespace to all resources.
 #
-# OwnNamespace: the operator watches/manages only this namespace. The
-# CostManagementServiceConfig CR must live here (or change this value when
-# packaging so install NS == CR NS). BYOI infra may still live elsewhere.
-# See docs/development/ownnamespace.md.
-namespace: koku-service-operator-system
+# Suggested operator install NS (CSV operatorframework.io/suggested-namespace).
+# AllNamespaces: the manager watches CMSC in every namespace; this value is
+# only where `make deploy` / Kind e2e put the operator pod. BYOI infra may
+# live elsewhere and is connected via CR fields. See docs/development/allnamespaces.md.
+namespace: cost-onprem
 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named

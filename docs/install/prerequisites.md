@@ -21,7 +21,7 @@ Companion guides: [quickstart](quickstart.md), [production](production.md),
 | Kafka (AMQ Streams recommended) | You | TCP probe; Listener consumes `platform.upload.announce` |
 | S3-compatible object storage | You | Validates `access-key` / `secret-key`; does **not** create buckets |
 | OIDC (Keycloak / RHBK) | You | JWKS probe; Envoy + UI oauth2-proxy |
-| This operator | You, in the CR namespace | Deploys Cost Management application services |
+| This operator | You | Deploys Cost Management application services (AllNamespaces) |
 
 `spec.database.deploy: true` and `spec.cache.deploy: true` are for local
 development and CI only. Do not use them in production. Kafka is never bundled.
@@ -36,9 +36,9 @@ development and CI only. Do not use them in production. Kafka is never bundled.
   Postgres/Valkey (dev). Production BYOI does not need it for Cost Management
   itself
 
-Install the operator into the **same namespace** as the CR. Runtime is
-OwnNamespace even though a published OperatorHub catalog is not available yet.
-See [quickstart.md](quickstart.md#install-the-operator).
+This operator is installed via OLM (CatalogSource on OLMv0 / ClusterExtension
+on OLMv1). Runtime is AllNamespaces even though a published OperatorHub catalog
+is not available yet. See [quickstart.md](quickstart.md#install-the-operator).
 
 ## PostgreSQL
 

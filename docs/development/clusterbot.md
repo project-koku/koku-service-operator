@@ -1,8 +1,9 @@
 # Cluster Bot day-one
 
 Short path to get a `CostManagementServiceConfig` reconciling on a **Cluster Bot**
-(or any remote OpenShift) lab cluster. OwnNamespace: operator install namespace
-**equals** CR namespace.
+(or any remote OpenShift) lab cluster. AllNamespaces: the operator watches
+CMSC in every namespace. Suggested install NS is `cost-onprem`. BYOI infra
+may live elsewhere.
 
 **Beta:** ROS/Kruize are off by default (`spec.ros.enabled` defaults to `false`).
 Day-one success does not require ROS images or migrate Jobs.
@@ -55,7 +56,7 @@ oc -n "$NAMESPACE" logs -f deploy/koku-service-operator
 ```bash
 export NAMESPACE=cost-byoi INFRA_NAMESPACE=cost-byoi-infra
 
-# 1) CRDs + OwnNamespace RBAC
+# 1) CRDs + AllNamespaces RBAC
 ./hack/deploy-dev.sh "$NAMESPACE"   # alias: ./hack/deploy-crc.sh
 
 # 2) BYOI infra (Postgres, Valkey, MinIO) + lightweight Redpanda
@@ -134,7 +135,7 @@ NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make
 
 | Script | Role |
 |--------|------|
-| `hack/deploy-dev.sh` | CRDs + OwnNamespace RBAC (+ `deploy-crc.sh` alias) |
+| `hack/deploy-dev.sh` | CRDs + AllNamespaces RBAC (+ `deploy-crc.sh` alias) |
 | `hack/clusterbot-smoke.sh` | Redpanda BYOI infra + secrets + smoke CR |
 | `hack/deploy-incluster.sh` | In-cluster manager + webhook TLS mount |
 | `hack/deploy-byoi.sh` | Full lab deps (AMQ Streams + Keycloak) |

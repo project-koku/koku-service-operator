@@ -183,9 +183,10 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host (OwnNamespace).
+run: manifests generate fmt vet ## Run a controller from your host (pins cache via NAMESPACE).
 	@if [ -z "$${NAMESPACE}" ]; then \
-		echo "NAMESPACE is required for out-of-cluster runs (OwnNamespace)."; \
+		echo "NAMESPACE is required for out-of-cluster runs (pins the informer cache)."; \
+		echo "In-cluster / OLM AllNamespaces watches every namespace; laptop make run does not."; \
 		echo "Example: NAMESPACE=cost-onprem make run"; \
 		exit 1; \
 	fi

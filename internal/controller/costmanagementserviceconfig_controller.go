@@ -74,8 +74,8 @@ const (
 type CostManagementServiceConfigReconciler struct {
 	client.Client
 	// APIReader is an uncached client for cross-namespace reads (e.g. NooBaa
-	// admin Secret, typically in openshift-storage) that are outside
-	// Cache.DefaultNamespaces.
+	// admin Secret, typically in openshift-storage) that may sit outside a
+	// pinned WATCH_NAMESPACE cache.
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder

@@ -9,8 +9,9 @@ object storage, and OIDC.
 `spec.ros.enabled: false` (the CRD default). These guides describe that
 Cost-only path.
 
-There is no OperatorHub catalog yet. Install the operator into the **same
-namespace** as the CR (OwnNamespace). See [quickstart.md](quickstart.md#install-the-operator).
+There is no OperatorHub catalog yet. The CSV advertises **AllNamespaces**
+(suggested install NS `cost-onprem`). OwnNamespace is not supported. See
+[quickstart.md](quickstart.md#install-the-operator).
 
 | Guide | Use when |
 |-------|----------|

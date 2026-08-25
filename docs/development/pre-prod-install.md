@@ -8,9 +8,10 @@ Customer install/config (prerequisites, Secret keys, quickstart, production, CMM
 [docs/install/](../install/README.md).
 
 This is **not** an OLM Catalog / production packaging guide (COST-7695). It uses
-the OwnNamespace model: **operator install namespace == CR namespace**. BYOI
-infra may live elsewhere and is referenced only via CR connection fields.
-See [ownnamespace.md](ownnamespace.md).
+the AllNamespaces model: the operator watches every namespace. Suggested
+install NS is `cost-onprem`. BYOI infra may live elsewhere and is referenced
+only via CR connection fields.
+See [allnamespaces.md](allnamespaces.md).
 
 For a shorter **Cluster Bot day-one** path (Redpanda, no AMQ Streams / Keycloak),
 see [clusterbot.md](clusterbot.md).
@@ -156,7 +157,7 @@ export IMG=quay.io/<your-org>/koku-service-operator:preprod
 docker buildx build --platform linux/amd64 -t "$IMG" --push .
 ```
 
-### B2. Install CRDs, OwnNamespace RBAC, and run the operator in-cluster
+### B2. Install CRDs, AllNamespaces RBAC, and run the operator in-cluster
 
 `make run` / out-of-cluster controllers **cannot** resolve `*.svc.cluster.local`
 BYOI hosts from a laptop. Use the in-cluster helper (binds `default` SA in
@@ -169,12 +170,14 @@ IMG="$IMG" ./hack/deploy-incluster.sh "$NAMESPACE"
 That script:
 
 1. Applies CRDs + `manager-role` / `manager-cluster-role` via `deploy-dev.sh`
-2. Creates RoleBinding + ClusterRoleBinding for `$NAMESPACE:default`
+2. Creates ClusterRoleBindings for `$NAMESPACE:default` (`manager-role` and
+   `manager-cluster-role`)
 3. Creates a lab-only TLS Secret (`koku-webhook-server-cert`) and mounts it at
    `/tmp/k8s-webhook-server/serving-certs` (required — the manager registers
    webhooks and CrashLoops without `tls.crt` / `tls.key`)
-4. Deploys `koku-service-operator` in `$NAMESPACE` with `NAMESPACE` from the pod
-   and `--operator-image=$IMG` (required for wait-for init containers)
+4. Deploys `koku-service-operator` in `$NAMESPACE` with `--operator-image=$IMG`
+   (required for wait-for init containers). Does not set `WATCH_NAMESPACE` or
+   pin `NAMESPACE` — the in-cluster manager watches every namespace.
 
 This path does **not** install `ValidatingWebhookConfiguration` /
 `MutatingWebhookConfiguration` (OLM + cert-manager do that for packaged
@@ -295,6 +298,6 @@ curl -skI "https://$(oc -n "$NAMESPACE" get route "${CR_NAME}-ui" -o jsonpath='{
 
 ## Related docs
 
-- [ownnamespace.md](ownnamespace.md) — install/watch model and RBAC shape
+- [allnamespaces.md](allnamespaces.md) — AllNamespaces install/watch model and RBAC shape
 - [crc-testing.md](crc-testing.md) — local CRC / out-of-cluster `make run`
 - [config/samples/byoi/README.md](../../config/samples/byoi/README.md) — fixture details, monitoring, teardown

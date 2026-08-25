@@ -75,7 +75,9 @@ make bundle-run BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION}"
 
 What this does: unpacks the bundle image, creates temporary OLM catalog
 wiring, Subscribes to package `koku-service-operator` (channel `beta`), and
-lets OLM install the CSV (CRD, RBAC, controller Deployment).
+lets OLM install the CSV (CRD, RBAC, controller Deployment). The CSV is
+**AllNamespaces** only — `operator-sdk run bundle` and CatalogSource do not
+need OwnNamespace. Suggested operator NS is `cost-onprem`.
 
 ### Verify operator install
 

@@ -47,10 +47,10 @@ oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
 # Alias (same script): ./hack/deploy-crc.sh cost-onprem
 ```
 
-This script installs the CRD and OwnNamespace RBAC: `manager-role` via a
-**RoleBinding** in the target namespace, plus `manager-cluster-role` via a
-**ClusterRoleBinding** (StorageClass/Ingress discovery, ConsoleLink, Kruize,
-narrow NooBaa `noobaa-admin` Secret get). Run it once per CRC restart.
+This script installs the CRD and AllNamespaces RBAC: `manager-role` via a
+**ClusterRoleBinding**, plus `manager-cluster-role` via a ClusterRoleBinding
+(StorageClass/Ingress discovery, ConsoleLink, Kruize, narrow NooBaa
+`noobaa-admin` Secret get). Run it once per CRC restart.
 
 Alternatively, do it manually:
 
@@ -59,10 +59,9 @@ oc new-project cost-onprem
 make install   # regenerates manifests and applies CRDs via config/crd kustomize
 oc apply -f config/rbac/role.yaml
 oc apply -f config/rbac/cluster_access_role.yaml
-oc create rolebinding koku-operator-dev \
+oc create clusterrolebinding koku-operator-dev \
   --clusterrole=manager-role \
-  --serviceaccount=cost-onprem:default \
-  -n cost-onprem
+  --serviceaccount=cost-onprem:default
 oc create clusterrolebinding koku-operator-dev-cluster \
   --clusterrole=manager-cluster-role \
   --serviceaccount=cost-onprem:default
@@ -71,8 +70,8 @@ oc adm policy add-scc-to-user anyuid -z default -n cost-onprem
 
 ## Run the operator
 
-OwnNamespace requires a watch namespace. Prefer `NAMESPACE=… IMG=… make run`
-(`make run` passes `--dev` and `--operator-image=$(IMG)`):
+Laptop `make run` pins the informer cache with `NAMESPACE`. Prefer
+`NAMESPACE=… IMG=… make run` (`make run` passes `--dev` and `--operator-image=$(IMG)`):
 
 ```bash
 NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make run
@@ -87,8 +86,9 @@ NAMESPACE=cost-onprem go run ./cmd/main.go --dev \
 laptop). `--operator-image` is **required** for wait-for init containers.
 
 The operator reads `~/.kube/config` (set by `eval "$(crc oc-env)"`) and
-restricts its informer cache to the `cost-onprem` namespace. See
-[ownnamespace.md](ownnamespace.md).
+restricts its informer cache to the `cost-onprem` namespace (`NAMESPACE`).
+In-cluster OLM installs watch every namespace. See
+[allnamespaces.md](allnamespaces.md).
 
 **Cluster Bot / remote OpenShift:** do not use `make run` with BYOI
 `*.svc.cluster.local` hosts — use [clusterbot.md](clusterbot.md) /

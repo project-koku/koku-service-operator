@@ -5,6 +5,9 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: koku-service-operator
     app.kubernetes.io/managed-by: kustomize
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
   name: system
 ---
 apiVersion: apps/v1
