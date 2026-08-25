@@ -1,0 +1,27 @@
+# Gitleaks config for koku-service-operator.
+# Allowlist known non-production BYOI fixture credentials and doc examples.
+# Real secrets must never be added here — fix the leak instead.
+
+title = "koku-service-operator"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Dev-only BYOI fixtures (fixed lab credentials — not for production)"
+paths = [
+  '''(^|/)config/samples/byoi/''',
+  '''(^|/)docs/jira/''',
+]
+
+# Explicit fixture credential strings (also referenced outside byoi YAML).
+regexes = [
+  '''byoi-postgres-password''',
+  '''byoi-koku-password''',
+  '''byoi-ros-password''',
+  '''byoi-kruize-password''',
+  '''byoi-rbac-password''',
+  '''byoi-valkey-password''',
+  '''byoi-minio-access''',
+  '''byoi-minio-secret-key''',
+]

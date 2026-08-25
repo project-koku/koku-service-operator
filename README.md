@@ -11,6 +11,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 
 | Document | Description |
 |----------|-------------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR naming with Jira (`COST-####`) |
 | [docs/install/](docs/install/) | **Install and configure** (prerequisites, quickstart, production, CMMO) |
 | [docs/development/clusterbot.md](docs/development/clusterbot.md) | Cluster Bot day-one: Redpanda BYOI → in-cluster operator |
 | [docs/development/pre-prod-install.md](docs/development/pre-prod-install.md) | Pre-prod BYOI → operator → UI install walkthrough |

@@ -1,0 +1,96 @@
+name: Gitleaks
+
+# Full-history secret scan. Uses a checksum-verified release binary (not the
+# commercial gitleaks-action wrapper). Known BYOI fixtures are allowlisted in
+# .gitleaks.toml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 3" # weekly Wednesday 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  # Flip to "true" to publish findings to GitHub code scanning (Security tab).
+  UPLOAD_SARIF: "false"
+
+jobs:
+  scan:
+    name: Scan for secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # used only when UPLOAD_SARIF is true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (pinned, checksum-verified)
+        run: |
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+
+      - name: Run gitleaks
+        id: gitleaks
+        run: |
+          # --exit-code 2: leaks found. Scan errors stay 1. Continue only for 0 or 2
+          # so the SARIF is available for upload / the fail-on-leaks step.
+          code=0
+          ./gitleaks detect \
+            --config .gitleaks.toml \
+            --source . \
+            --report-format sarif \
+            --report-path results.sarif \
+            --redact \
+            --exit-code 2 || code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then
+            echo "::error::gitleaks failed with exit code $code (scan error, not leak findings)"
+            exit "$code"
+          fi
+
+      # Do not use always(): a scan error still writes a partial SARIF that
+      # would overwrite a complete code-scanning result set.
+      - name: Upload SARIF
+        if: >-
+          env.UPLOAD_SARIF == 'true'
+          && (steps.gitleaks.outputs.exit_code == '0'
+              || steps.gitleaks.outputs.exit_code == '2')
+          && hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: results.sarif
+          category: gitleaks
+
+      - name: Fail if leaks found
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "::error::gitleaks did not write results.sarif"
+            exit 1
+          fi
+          count=$(jq '.runs[0].results | length' results.sarif)
+          if [ "$count" -gt 0 ]; then
+            echo "::error::gitleaks detected $count potential secret(s) not covered by .gitleaks.toml"
+            exit 1
+          fi
+          echo "No uncategorized secrets detected."

@@ -112,6 +112,18 @@ Full analysis in [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md).
 
 ## PR review checklist
 
+### Jira branch and PR naming
+
+When opening or updating a PR for a Jira ticket:
+
+| Item | Format |
+|------|--------|
+| Branch | `cost-####-short-kebab-slug` |
+| PR title | `[COST-####] Short English description` |
+
+Put the Jira key at the **start** of the title, not at the end. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ### Coverage analysis
 
 Before submitting or updating any PR, run coverage on the packages touched
