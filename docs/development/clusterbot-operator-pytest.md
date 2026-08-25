@@ -359,6 +359,11 @@ of unrelated bugs:
 | **E2E pipeline** | manifest/masu timeout after upload | Cluster-bot processing slow or backlog |
 | **infra migration log** | missing string `Migrations completed successfully` | Brittle log assertion vs current koku wording |
 | **tagging skips** | no tags in DB | Expected without full ingestion |
+| **ROS recommendations API** | 404 on `/recommendations/openshift` | Expected when `spec.ros.enabled: false` (beta default). Pytest skips `suites/ros/` and E2E `test_09` when ROS is off — not product failures |
+
+**ROS API coverage:** Beta cluster-bot runs use `ros.enabled: false` on the CMSC
+sample. Recommendations API tests require `spec.ros.enabled: true` plus ROS/Kruize
+images and reconciliation — out of G0 beta scope.
 
 ## Optional — UI login (`Phase=Ready`)
 
