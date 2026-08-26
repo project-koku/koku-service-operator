@@ -295,9 +295,24 @@ curl -skI "https://$(oc -n "$NAMESPACE" get route "${CR_NAME}-ui" -o jsonpath='{
 | ImagePullBackOff on amd64 node | arm64-only image | Rebuild with `--platform linux/amd64` |
 | StorageClass list/watch forbidden | Stale cluster role | Re-apply `config/rbac/cluster_access_role.yaml` (`get;list;watch`) |
 | CrashLoop: `open …/serving-certs/tls.crt: no such file` | Webhook server has no TLS mount | Re-run `./hack/deploy-incluster.sh` (creates/mounts `koku-webhook-server-cert`), or mount a Secret with `tls.crt`/`tls.key` at `/tmp/k8s-webhook-server/serving-certs` |
+| Namespace stuck `Terminating` after `oc delete ns` | Operator died before the CR finalizer ran | [uninstall.md](../install/uninstall.md#if-the-namespace-is-already-terminating) |
+
+## Tear down
+
+Delete the CR first while the operator is still running. `hack/demo-preprod.sh --reset` already does this (and strips the finalizer if the operator is gone). Manual order and recovery: [uninstall.md](../install/uninstall.md).
+
+```bash
+oc -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s
+if oc -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+  echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
+  exit 1
+fi
+oc delete ns "$NAMESPACE" "$INFRA_NAMESPACE" --ignore-not-found
+```
 
 ## Related docs
 
 - [allnamespaces.md](allnamespaces.md) — AllNamespaces install/watch model and RBAC shape
 - [crc-testing.md](crc-testing.md) — local CRC / out-of-cluster `make run`
+- [uninstall.md](../install/uninstall.md) — CR-first uninstall and stuck-namespace recovery
 - [config/samples/byoi/README.md](../../config/samples/byoi/README.md) — fixture details, monitoring, teardown

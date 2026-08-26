@@ -174,3 +174,4 @@ ConsoleLink when the UI Route exists.
 
 - Size and TLS: [production.md](production.md)
 - Point Cost Management Metrics Operator at this instance: [cmmo.md](cmmo.md)
+- Tear down: [uninstall.md](uninstall.md) — delete the CR **before** the namespace or the operator

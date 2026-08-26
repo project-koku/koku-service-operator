@@ -403,8 +403,17 @@ TTL ~2h, single worker overload. **Fix:** MCE, ≥2 workers, run infra first.
 
 ## Tear down
 
+Delete the CR **first** and wait until it is gone. The operator lives in
+`cost-onprem`; deleting the namespace first leaves the CR finalizer stuck.
+Full order and recovery: [uninstall.md](../install/uninstall.md).
+
 ```bash
-oc delete cmsc -n cost-onprem --all --ignore-not-found
+# Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
+oc delete cmsc -n cost-onprem --all --timeout=180s --ignore-not-found
+if oc get cmsc -n cost-onprem --no-headers 2>/dev/null | grep -q .; then
+  echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
+  exit 1
+fi
 oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 ```
 
