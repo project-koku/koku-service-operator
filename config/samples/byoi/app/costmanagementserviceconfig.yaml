@@ -37,14 +37,15 @@ spec:
     port: 9000
     useSSL: false
     secretName: "byoi-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"
 
   costManagement:
-    storage:
-      bucketName: "koku-bucket"
-      rosBucketName: "ros-data"
     api:
       image:
         # amd64 — suitable for clusterbot / typical OpenShift nodes
