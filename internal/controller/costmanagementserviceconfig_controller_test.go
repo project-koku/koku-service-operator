@@ -52,7 +52,13 @@ var _ = Describe("CostManagementServiceConfig Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: costv1alpha1.CostManagementServiceConfigSpec{
+						Auth: costv1alpha1.AuthConfig{
+							Keycloak: costv1alpha1.KeycloakSpec{
+								URL: "https://keycloak.keycloak.svc.cluster.local",
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

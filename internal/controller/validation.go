@@ -165,6 +165,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 // readiness and invalid custom CA configuration in status.
 func (r *CostManagementServiceConfigReconciler) validateOIDC(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) {
 	if strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL) == "" {
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+			"OIDCConfigMissing", "spec.auth.keycloak.url is required to validate the external identity provider")
 		return
 	}
 

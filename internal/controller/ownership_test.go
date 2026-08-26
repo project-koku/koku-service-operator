@@ -43,6 +43,13 @@ func minimalCR(name, ns string) *costv1alpha1.CostManagementServiceConfig {
 			Namespace: ns,
 			UID:       "test-uid-1234",
 		},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Auth: costv1alpha1.AuthConfig{
+				Keycloak: costv1alpha1.KeycloakSpec{
+					URL: "https://keycloak.keycloak.svc.cluster.local",
+				},
+			},
+		},
 	}
 }
 

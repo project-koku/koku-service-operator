@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -107,6 +108,22 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("ingress", "resources"), spec.Ingress.Resources)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("ui", "oauthProxy", "resources"), spec.UI.OAuthProxy.Resources)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("ui", "app", "resources"), spec.UI.App.Resources)...)
+
+	keycloakURLPath := specPath.Child("auth", "keycloak", "url")
+	keycloakURL := strings.TrimSpace(spec.Auth.Keycloak.URL)
+	switch {
+	case keycloakURL == "":
+		allErrs = append(allErrs, field.Required(keycloakURLPath, "is required"))
+	case !strings.HasPrefix(keycloakURL, "http://") && !strings.HasPrefix(keycloakURL, "https://"):
+		allErrs = append(allErrs, field.Invalid(keycloakURLPath, spec.Auth.Keycloak.URL, "must use http or https"))
+	}
+
+	if spec.RBAC.KeycloakSync.Enabled && spec.RBAC.KeycloakSync.ClientSecretRef.Name == "" {
+		allErrs = append(allErrs, field.Required(
+			specPath.Child("rbac", "keycloakSync", "clientSecretRef", "name"),
+			"is required when rbac.keycloakSync.enabled is true",
+		))
+	}
 
 	if len(allErrs) == 0 {
 		return nil

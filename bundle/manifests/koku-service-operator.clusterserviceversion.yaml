@@ -21,12 +21,7 @@ metadata:
                 "replicas": 2
               },
               "keycloak": {
-                "audiences": [
-                  "cost-management-operator",
-                  "cost-management-ui"
-                ],
-                "realm": "kubernetes",
-                "url": "https://keycloak.keycloak.svc.cluster.local"
+                "url": ""
               }
             },
             "cache": {
@@ -156,7 +151,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-08-21T19:45:45Z"
+    createdAt: "2026-08-26T00:09:18Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1
