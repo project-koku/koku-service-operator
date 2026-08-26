@@ -1649,7 +1649,6 @@ spec:
               kafka:
                 properties:
                   bootstrapServers:
-                    default: cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
                     description: Bootstrap servers for the Kafka cluster.
                     type: string
                   sasl:

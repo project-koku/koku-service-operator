@@ -118,25 +118,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	}
 
 	// --- Kafka (always external; non-blocking) ---
-	if bs := strings.TrimSpace(cfg.Spec.Kafka.BootstrapServers); bs != "" {
-		if err := kafkaTCPProbe(bs, validationTimeout); err != nil {
-			r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionFalse,
-				"KafkaUnreachable", err.Error())
-		} else {
-			if cfg.Spec.Kafka.SASL.ExistingSecret != "" {
-				if _, err := r.getSecret(ctx, cfg.Namespace, cfg.Spec.Kafka.SASL.ExistingSecret, []string{"username", "password"}); err != nil { //nolint:goconst // Secret key names are clearer as literals
-					r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionFalse,
-						"KafkaSASLSecretInvalid", err.Error())
-				} else {
-					r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionTrue,
-						"KafkaReachable", bs)
-				}
-			} else {
-				r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionTrue,
-					"KafkaReachable", bs)
-			}
-		}
-	}
+	r.validateKafka(ctx, cfg)
 
 	// --- S3 / ObjectStorage (non-blocking) ---
 	// G2: Secret exists with access-key / secret-key.

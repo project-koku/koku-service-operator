@@ -199,7 +199,6 @@ type CachePersistenceSpec struct {
 
 type KafkaConfig struct {
 	// Bootstrap servers for the Kafka cluster.
-	// +kubebuilder:default:="cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
 	BootstrapServers string `json:"bootstrapServers"`
 	// +kubebuilder:default:=PLAINTEXT
 	// +kubebuilder:validation:Enum=PLAINTEXT;SSL;SASL_PLAINTEXT;SASL_SSL
