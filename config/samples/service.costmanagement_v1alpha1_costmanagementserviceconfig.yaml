@@ -9,23 +9,22 @@ spec:
     storageClass: ""  # empty = use cluster default; set to ocs-storagecluster-ceph-rbd on ODF clusters
 
   database:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/postgresql-16
-      tag: "10.1"
-    storage:
-      size: 30Gi
+    deploy: false
+    host: ""
+    port: 5432
+    sslMode: "require"
+    secretName: ""
 
   cache:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/valkey-8
-      tag: "10.1"
-    persistence:
-      size: 5Gi
+    deploy: false
+    host: ""
+    port: 6379
+    auth:
+      enabled: true
+      secretName: ""
 
   kafka:
-    bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    bootstrapServers: ""
 
   ingress:
     image:
@@ -33,9 +32,14 @@ spec:
       tag: "master"
 
   objectStorage:
-    endpoint: "s3.openshift-storage.svc.cluster.local"
+    endpoint: ""
     port: 443
     useSSL: true
+    secretName: ""
+    buckets:
+      koku: ""
+      ingress: ""
+      ros: ""
 
   costManagement:
     api:
@@ -100,16 +104,13 @@ spec:
         tag: "2.6"
       replicas: 2
     keycloak:
-      # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
-      # hostname, tokens use that URL as iss — set issuerURL to match.
-      # Matches envoy.go defaultKeycloakURL. For CRC + RHBK/BYOI, override to
-      # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
-      url: "https://keycloak.keycloak.svc.cluster.local"
+      # Required: URL the operator-managed gateway should use to reach your
+      # external Keycloak/RHBK identity provider for JWKS discovery.
+      # Prefer a cluster-reachable Service URL when available.
+      url: ""
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
-      realm: kubernetes
-      audiences:
-        - "cost-management-operator"
-        - "cost-management-ui"
+      # tls:
+      #   caCertSecretName: "keycloak-ca"
 
   ui:
     replicaCount: 1

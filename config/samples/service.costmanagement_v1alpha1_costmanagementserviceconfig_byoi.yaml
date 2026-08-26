@@ -79,6 +79,10 @@ spec:
     port: 443
     useSSL: true
     secretName: "my-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"

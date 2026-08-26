@@ -47,7 +47,7 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 
 		EnvVal("S3_ENDPOINT", S3Endpoint(cfg)),
 		EnvVal("REQUESTED_BUCKET", S3Bucket(cfg)),
-		EnvVal("REQUESTED_ROS_BUCKET", cfg.Spec.CostManagement.Storage.ROSBucketName),
+		EnvVal("REQUESTED_ROS_BUCKET", S3ROSBucket(cfg)),
 		EnvVal("AWS_CA_BUNDLE", "/etc/pki/ca-trust/combined/ca-bundle.crt"),
 		EnvVal("REQUESTS_CA_BUNDLE", "/etc/pki/ca-trust/combined/ca-bundle.crt"),
 		// Koku EnvConfigurator reads S3_ACCESS_KEY / S3_SECRET into settings.S3_*

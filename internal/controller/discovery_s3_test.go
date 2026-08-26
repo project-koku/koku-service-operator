@@ -92,12 +92,10 @@ func TestResolveS3_UserProvided(t *testing.T) {
 				Port:       9000,
 				UseSSL:     boolPtr(false),
 				SecretName: "byoi-s3-credentials",
-				S3:         costv1alpha1.S3Options{Region: defaultS3Region},
-			},
-			CostManagement: costv1alpha1.CostManagementConfig{
-				Storage: costv1alpha1.CostManagementStorageSpec{
-					BucketName: "koku-bucket",
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{
+					Koku: "koku-bucket",
 				},
+				S3: costv1alpha1.S3Options{Region: defaultS3Region},
 			},
 		},
 	}
@@ -191,7 +189,7 @@ func TestResolveS3_NooBaa(t *testing.T) {
 		t.Errorf("access-key: got %q", sec.Data["access-key"])
 	}
 	if got.Bucket != "" {
-		t.Errorf("Bucket: got %q, want empty (spec bucketName unset)", got.Bucket)
+		t.Errorf("Bucket: got %q, want empty (spec objectStorage.buckets.koku unset)", got.Bucket)
 	}
 }
 
@@ -536,9 +534,9 @@ func TestResolveS3_NooBaaCopiesSpecBucket(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
-			CostManagement: costv1alpha1.CostManagementConfig{
-				Storage: costv1alpha1.CostManagementStorageSpec{
-					BucketName: "from-spec",
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{
+					Koku: "from-spec",
 				},
 			},
 		},

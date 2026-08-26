@@ -70,7 +70,7 @@ func userProvidedS3(cfg *costv1alpha1.CostManagementServiceConfig) *costv1alpha1
 		Endpoint:   resources.S3Endpoint(cfg),
 		SecretName: cfg.Spec.ObjectStorage.SecretName,
 		Region:     s3Region(cfg),
-		Bucket:     cfg.Spec.CostManagement.Storage.BucketName,
+		Bucket:     cfg.Spec.ObjectStorage.Buckets.Koku,
 	}
 }
 
@@ -212,7 +212,7 @@ func (r *CostManagementServiceConfigReconciler) discoverNooBaa(ctx context.Conte
 		Endpoint:   noobaaEndpoint(cfg),
 		SecretName: destName,
 		Region:     s3Region(cfg),
-		Bucket:     cfg.Spec.CostManagement.Storage.BucketName,
+		Bucket:     cfg.Spec.ObjectStorage.Buckets.Koku,
 	}, nil
 }
 

@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
+	kafka "github.com/segmentio/kafka-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,6 +70,53 @@ func TestKafkaTCPProbe(t *testing.T) {
 				t.Errorf("kafkaTCPProbe(%q): got err=%v, wantErr=%v", tc.servers, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestRequiredKafkaTopics(t *testing.T) {
+	t.Run("cost only", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{}
+		if got, want := requiredKafkaTopics(cfg), []string{"platform.upload.announce"}; !slices.Equal(got, want) {
+			t.Fatalf("requiredKafkaTopics() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("ros enabled", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{}
+		cfg.Spec.ROS.Enabled = truePtr()
+		want := []string{
+			"platform.upload.announce",
+			"hccm.ros.events",
+			"rosocp.kruize.recommendations",
+			"platform.sources.event-stream",
+		}
+		if got := requiredKafkaTopics(cfg); !slices.Equal(got, want) {
+			t.Fatalf("requiredKafkaTopics() = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestTopicMissingFromPartitions(t *testing.T) {
+	partitions := []kafka.Partition{
+		{Topic: "platform.upload.announce"},
+		{Topic: "platform.upload.announce"},
+	}
+	if topicMissingFromPartitions(partitions, "platform.upload.announce") {
+		t.Fatal("expected topic to be found in partition metadata")
+	}
+	if !topicMissingFromPartitions(partitions, "missing-topic") {
+		t.Fatal("expected missing topic to be reported")
+	}
+}
+
+func TestKafkaAuthErrorWrapsUnderlyingError(t *testing.T) {
+	base := errors.New("auth failed")
+	err := &kafkaAuthError{err: base}
+	if err.Error() != "auth failed" {
+		t.Fatalf("Error() = %q, want %q", err.Error(), "auth failed")
+	}
+	if !errors.Is(err, base) {
+		t.Fatal("expected errors.Is to match wrapped auth error")
 	}
 }
 
@@ -248,6 +298,10 @@ func TestReconcileValidation_BundledInfra(t *testing.T) {
 	if !result.IsZero() {
 		t.Errorf("expected zero result (no external deps to probe), got %+v", result)
 	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaBootstrapMissing" {
+		t.Errorf("expected KafkaReady=False KafkaBootstrapMissing, got %+v", kCond)
+	}
 }
 
 func TestReconcileValidation_ExternalDBReachable(t *testing.T) {
@@ -323,6 +377,36 @@ func TestReconcileValidation_ExternalDBUnreachable(t *testing.T) {
 	}
 }
 
+func TestReconcileValidation_DefaultBYOIDatabaseReachabilityWhenDeployUnset(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Host: localHost,
+				Port: int32(addr.Port),
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
+		},
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("expected zero result (default BYOI DB reachable), got %+v", result)
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionTrue || dbCond.Reason != "DatabaseReachable" {
+		t.Fatalf("expected DatabaseReady=True DatabaseReachable, got %+v", dbCond)
+	}
+}
+
 func TestReconcileValidation_ExternalCacheUnreachable_SetsAvailableDegraded(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
@@ -370,6 +454,17 @@ func TestReconcileValidation_ExternalCacheUnreachable_SetsAvailableDegraded(t *t
 
 func TestReconcileValidation_KafkaReachable(t *testing.T) {
 	ln := listenLocalTCP(t)
+	origProbe := kafkaMetadataProbe
+	kafkaMetadataProbe = func(_ context.Context, bootstrapServers string, _ *kafka.Dialer, topics []string) error {
+		if bootstrapServers != ln.Addr().String() {
+			t.Fatalf("bootstrapServers = %q, want %q", bootstrapServers, ln.Addr().String())
+		}
+		if want := []string{"platform.upload.announce"}; !slices.Equal(topics, want) {
+			t.Fatalf("probe topics = %v, want %v", topics, want)
+		}
+		return nil
+	}
+	t.Cleanup(func() { kafkaMetadataProbe = origProbe })
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
@@ -416,6 +511,165 @@ func TestReconcileValidation_KafkaUnreachableNonBlocking(t *testing.T) {
 	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
 	if kCond == nil || kCond.Status != metav1.ConditionFalse {
 		t.Errorf("expected KafkaReady=False, got %+v", kCond)
+	}
+}
+
+func TestReconcileValidation_MissingKeycloakURLSetsAuthConditionFalse(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("missing auth config must not block the pipeline, got %+v", result)
+	}
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	if found == nil || found.Status != metav1.ConditionFalse || found.Reason != "OIDCConfigMissing" {
+		t.Fatalf("AuthenticationReady=%+v, want False/OIDCConfigMissing", found)
+	}
+}
+
+func TestReconcileValidation_KafkaTopicMissingNonBlocking(t *testing.T) {
+	ln := listenLocalTCP(t)
+
+	origProbe := kafkaMetadataProbe
+	kafkaMetadataProbe = func(_ context.Context, _ string, _ *kafka.Dialer, topics []string) error {
+		want := []string{"platform.upload.announce"}
+		if !slices.Equal(topics, want) {
+			t.Fatalf("probe topics = %v, want %v", topics, want)
+		}
+		return &missingKafkaTopicsError{topics: []string{"platform.upload.announce"}}
+	}
+	t.Cleanup(func() { kafkaMetadataProbe = origProbe })
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: truePtr()},
+			Cache:    costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka:    costv1alpha1.KafkaConfig{BootstrapServers: ln.Addr().String()},
+		},
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("Kafka topic mismatch should not block pipeline, got result %+v", result)
+	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaTopicMissing" {
+		t.Errorf("expected KafkaReady=False KafkaTopicMissing, got %+v", kCond)
+	}
+}
+
+func TestReconcileValidation_KafkaUnknownTopicIsTopicMissing(t *testing.T) {
+	ln := listenLocalTCP(t)
+
+	origProbe := kafkaMetadataProbe
+	kafkaMetadataProbe = func(_ context.Context, _ string, _ *kafka.Dialer, topics []string) error {
+		want := []string{"platform.upload.announce"}
+		if !slices.Equal(topics, want) {
+			t.Fatalf("probe topics = %v, want %v", topics, want)
+		}
+		return kafka.UnknownTopicOrPartition
+	}
+	t.Cleanup(func() { kafkaMetadataProbe = origProbe })
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: truePtr()},
+			Cache:    costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka:    costv1alpha1.KafkaConfig{BootstrapServers: ln.Addr().String()},
+		},
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("unknown topic should not block pipeline, got result %+v", result)
+	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaTopicMissing" {
+		t.Errorf("expected KafkaReady=False KafkaTopicMissing, got %+v", kCond)
+	}
+}
+
+func TestReconcileValidation_KafkaSASLSecretInvalid(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: truePtr()},
+			Cache:    costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{
+				BootstrapServers: "kafka.example.com:9092",
+				SASL: costv1alpha1.KafkaSASLSpec{
+					Mechanism:      "SCRAM-SHA-512",
+					ExistingSecret: "missing-kafka-secret",
+				},
+			},
+		},
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("invalid SASL secret should not block pipeline, got result %+v", result)
+	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaSASLSecretInvalid" {
+		t.Errorf("expected KafkaReady=False KafkaSASLSecretInvalid, got %+v", kCond)
+	}
+}
+
+func TestReconcileValidation_KafkaTLSCACertInvalid(t *testing.T) {
+	badCASecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-kafka-ca", Namespace: testNamespace},
+		Data: map[string][]byte{
+			caCertKey: []byte("not-a-pem"),
+		},
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: truePtr()},
+			Cache:    costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{
+				BootstrapServers: "kafka.example.com:9093",
+				SecurityProtocol: "SSL",
+				TLS: costv1alpha1.KafkaTLSSpec{
+					Enabled:      true,
+					CACertSecret: "bad-kafka-ca",
+				},
+			},
+		},
+	}
+
+	r := newValidationReconciler(t, badCASecret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("invalid Kafka CA should not block pipeline, got result %+v", result)
+	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaTLSCACertInvalid" {
+		t.Errorf("expected KafkaReady=False KafkaTLSCACertInvalid, got %+v", kCond)
 	}
 }
 

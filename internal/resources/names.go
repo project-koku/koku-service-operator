@@ -111,7 +111,7 @@ func DNS1123Label(s string) string {
 
 // DatabaseHost returns the hostname of the database that all services should connect to.
 func DatabaseHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		return NameDatabase(cfg)
 	}
 	return cfg.Spec.Database.Host
@@ -127,7 +127,7 @@ func cachePortStr(cfg *costv1alpha1.CostManagementServiceConfig) string {
 
 // CacheHost returns the hostname of the Valkey/Redis instance.
 func CacheHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		return NameValkey(cfg)
 	}
 	return cfg.Spec.Cache.Host
@@ -191,23 +191,33 @@ func S3EndpointFromSpec(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	} else if port == 0 {
 		port = 80
 	}
-	host := s.Endpoint
+	host := strings.TrimSpace(s.Endpoint)
 	if host == "" {
-		host = "s3.openshift-storage.svc.cluster.local"
+		return ""
 	}
 	return scheme + "://" + host + ":" + int32String(port)
 }
 
-// S3Bucket returns the object-store bucket name for Koku REQUESTED_BUCKET.
+// S3Bucket returns the primary object-store bucket for Koku REQUESTED_BUCKET.
 // A non-empty status.discoveredConfig.s3.bucket is preferred over
-// spec.costManagement.storage.bucketName, including when the user supplied a Secret.
+// spec.objectStorage.buckets.koku, including when the user supplied a Secret.
 func S3Bucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if cfg.Status.DiscoveredConfig != nil &&
 		cfg.Status.DiscoveredConfig.S3 != nil &&
 		cfg.Status.DiscoveredConfig.S3.Bucket != "" {
 		return cfg.Status.DiscoveredConfig.S3.Bucket
 	}
-	return cfg.Spec.CostManagement.Storage.BucketName
+	return cfg.Spec.ObjectStorage.Buckets.Koku
+}
+
+// S3IngressBucket returns the upload bucket used by the ingress pod.
+func S3IngressBucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Spec.ObjectStorage.Buckets.Ingress
+}
+
+// S3ROSBucket returns the object-store bucket used by ROS.
+func S3ROSBucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Spec.ObjectStorage.Buckets.ROS
 }
 
 func int32String(n int32) string {

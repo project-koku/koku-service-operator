@@ -176,14 +176,20 @@ spec:
                         type: object
                       url:
                         description: |-
-                          Full URL of the Keycloak instance used for JWKS fetch (and issuer when
-                          issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
-                          can reach JWKS without depending on the OpenShift router.
+                          Full URL of the external Keycloak/RHBK identity provider used for JWKS
+                          fetch (and issuer when issuerURL is unset). Prefer an in-cluster http(s)
+                          Service URL so Envoy can reach JWKS without depending on the OpenShift
+                          router.
                           Example: http://keycloak-service.keycloak.svc.cluster.local:8080
                         pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
                     type: object
                     x-kubernetes-validations:
+                    - message: url is required
+                      rule: has(self.url) && size(self.url) > 0
+                    - message: url must use http or https when set
+                      rule: '!has(self.url) || size(self.url) == 0 || self.url.startsWith(''http://'')
+                        || self.url.startsWith(''https://'')'
                     - message: issuerURL must use https when set
                       rule: '!has(self.issuerURL) || size(self.issuerURL) == 0 ||
                         self.issuerURL.startsWith(''https://'')'
@@ -202,7 +208,7 @@ spec:
                         type: string
                     type: object
                   deploy:
-                    default: true
+                    default: false
                     description: |-
                       Deploy the bundled Valkey instance (dev/CI only — not for production).
                       Set false to connect to an external Redis/Valkey endpoint.
@@ -1338,26 +1344,11 @@ spec:
                           name derived from the CR is used.
                         type: string
                     type: object
-                  storage:
-                    properties:
-                      bucketName:
-                        default: koku-bucket
-                        description: |-
-                          Bucket name for Cost Management object storage (Koku REQUESTED_BUCKET).
-                          The bucket must already exist; the operator will not create it.
-                        type: string
-                      rosBucketName:
-                        default: ros-data
-                        description: |-
-                          ROS object-storage bucket. Required when ros.enabled is true.
-                          The bucket must already exist; the operator will not create it.
-                        type: string
-                    type: object
                 type: object
               database:
                 properties:
                   deploy:
-                    default: true
+                    default: false
                     description: |-
                       Deploy the bundled PostgreSQL StatefulSet (dev/CI only — not for production).
                       Set false to connect to an external database.
@@ -1633,14 +1624,6 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
-                  stagingBucket:
-                    description: |-
-                      Staging bucket name for uploads.
-                      When empty, the operator uses the same bucket as Koku REQUESTED_BUCKET
-                      (status.discoveredConfig.s3.bucket, else spec.costManagement.storage.bucketName),
-                      then "koku-bucket".
-                      The bucket must already exist; the operator will not create it.
-                    type: string
                   validTypes:
                     default: hccm
                     description: Comma-separated list of valid upload content types.
@@ -1649,7 +1632,6 @@ spec:
               kafka:
                 properties:
                   bootstrapServers:
-                    default: cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
                     description: Bootstrap servers for the Kafka cluster.
                     type: string
                   sasl:
@@ -1849,6 +1831,24 @@ spec:
                 type: object
               objectStorage:
                 properties:
+                  buckets:
+                    description: |-
+                      Buckets used by operator-managed workloads against the external object
+                      storage service. The operator validates and consumes these buckets but
+                      does not create them.
+                    properties:
+                      ingress:
+                        description: Upload bucket used by the operator-managed ingress
+                          pod.
+                        type: string
+                      koku:
+                        description: Primary Cost Management bucket (Koku REQUESTED_BUCKET).
+                        type: string
+                      ros:
+                        description: ROS object-storage bucket. Required when ros.enabled
+                          is true.
+                        type: string
+                    type: object
                   caCertSecretName:
                     description: |-
                       CACertSecretName names a Secret with key ca.crt containing the CA
@@ -1856,7 +1856,6 @@ spec:
                       S3 endpoints (MinIO, Ceph RGW, NooBaa HTTPS) using private CAs.
                     type: string
                   endpoint:
-                    default: s3.openshift-storage.svc.cluster.local
                     description: |-
                       S3 endpoint hostname (without protocol or port).
                       Auto-detected by the Discovery phase (OBC → NooBaa → user-provided).

@@ -54,7 +54,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 
 	// --- External DB ---
 	// Bundled DB is already gated in reconcileInfrastructure; probe only when external.
-	if !costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if !costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		host := resources.DatabaseHost(cfg)
 		port := cfg.Spec.Database.Port
 		if port == 0 {
@@ -87,7 +87,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	}
 
 	// --- External Cache ---
-	if !costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if !costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		host := resources.CacheHost(cfg)
 		port := cfg.Spec.Cache.Port
 		if port == 0 {
@@ -118,25 +118,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	}
 
 	// --- Kafka (always external; non-blocking) ---
-	if bs := strings.TrimSpace(cfg.Spec.Kafka.BootstrapServers); bs != "" {
-		if err := kafkaTCPProbe(bs, validationTimeout); err != nil {
-			r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionFalse,
-				"KafkaUnreachable", err.Error())
-		} else {
-			if cfg.Spec.Kafka.SASL.ExistingSecret != "" {
-				if _, err := r.getSecret(ctx, cfg.Namespace, cfg.Spec.Kafka.SASL.ExistingSecret, []string{"username", "password"}); err != nil { //nolint:goconst // Secret key names are clearer as literals
-					r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionFalse,
-						"KafkaSASLSecretInvalid", err.Error())
-				} else {
-					r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionTrue,
-						"KafkaReachable", bs)
-				}
-			} else {
-				r.setCondition(cfg, costv1alpha1.ConditionKafkaReady, metav1.ConditionTrue,
-					"KafkaReachable", bs)
-			}
-		}
-	}
+	r.validateKafka(ctx, cfg)
 
 	// --- S3 / ObjectStorage (non-blocking) ---
 	// G2: Secret exists with access-key / secret-key.
@@ -165,6 +147,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 // readiness and invalid custom CA configuration in status.
 func (r *CostManagementServiceConfigReconciler) validateOIDC(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) {
 	if strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL) == "" {
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+			"OIDCConfigMissing", "spec.auth.keycloak.url is required to validate the external identity provider")
 		return
 	}
 
