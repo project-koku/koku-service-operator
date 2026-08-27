@@ -12,7 +12,6 @@
 #   ./run-pytest.sh [OPTIONS] [PYTEST_ARGS...]
 #
 # Suite Options (run specific test suites):
-#   --helm              Run Helm chart validation tests
 #   --auth              Run JWT authentication tests
 #   --infrastructure    Run infrastructure health tests (DB, S3, Kafka)
 #   --cost-management   Run Cost Management (Koku) pipeline tests
@@ -20,7 +19,7 @@
 #   --ros               Run ROS/Kruize recommendation tests
 #   --e2e               Run end-to-end tests
 #   --ui                Run UI tests only (Playwright browser automation)
-#   --no-ui             Exclude UI, Helm, ROS, and performance tests
+#   --no-ui             Exclude UI and performance (CI; ROS follows ros.enabled)
 #   --performance       Run performance tests (FLPATH-4036)
 #   --perf-ingestion    Run ingestion throughput tests only
 #   --perf-api          Run API latency tests only
@@ -35,7 +34,7 @@
 #   --perf-stress-recovery Run stress backlog recovery only (PERF-STR-002)
 #
 # Filter Options:
-#   --smoke             Run only smoke tests (quick validation)
+#   --smoke             Smoke tests excluding ui and performance (ROS follows ros.enabled)
 #   --slow              Include slow tests (processing, recommendations)
 #
 # Setup Options:
@@ -45,15 +44,15 @@
 #
 # Environment Variables:
 #   NAMESPACE              Target namespace (default: cost-onprem)
-#   HELM_RELEASE_NAME      Helm release name (default: cost-onprem)
+#   HELM_RELEASE_NAME      CMSC name / resource prefix (default: cost-onprem)
 #   KEYCLOAK_NAMESPACE     Keycloak namespace (default: keycloak)
 #   PYTHON                 Python interpreter (default: python3)
 #
 # Examples:
 #   ./run-pytest.sh                         # Run all tests (including UI)
-#   ./run-pytest.sh --no-ui                 # Run all tests except UI, Helm, ROS, and performance
-#   ./run-pytest.sh --smoke                 # Run smoke tests only
-#   ./run-pytest.sh --helm                  # Run Helm suite only
+#   ./run-pytest.sh --no-ui                 # CI: no UI/performance; ROS skipped unless enabled
+#   ./run-pytest.sh --smoke                 # Smoke (excludes ui/performance)
+#   ./run-pytest.sh --no-ui -m smoke        # Same marker as Prow e2e-pytest smoke step
 #   ./run-pytest.sh --auth --ros            # Run auth and ROS suites
 #   ./run-pytest.sh --e2e --smoke           # Run E2E smoke tests
 #   ./run-pytest.sh --e2e                   # Run full E2E flow
@@ -61,12 +60,11 @@
 #   ./run-pytest.sh --performance           # Run all performance tests
 #   ./run-pytest.sh --perf-api              # Run API latency tests only
 #   ./run-pytest.sh -k "test_jwt"           # Run tests matching pattern
-#   ./run-pytest.sh suites/helm/            # Run specific suite directory
 #   ./run-pytest.sh -m "smoke and auth"     # Custom marker expression
 #
 # Performance Testing (FLPATH-4036):
 #   Performance tests are ALWAYS excluded by default to prevent them from
-#   running in CI chart test pipelines. Use --performance or --perf-* flags
+#   running in CI. Use --performance or --perf-* flags
 #   to run them explicitly.
 #
 #   Environment variables for performance tests:
@@ -85,6 +83,8 @@ unset REQUESTS_CA_BUNDLE SSL_CERT_FILE 2>/dev/null || true
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/pytest_markexpr.sh"
 TESTS_DIR="${PROJECT_ROOT}/test/pytest"
 VENV_DIR="${TESTS_DIR}/.venv"
 REPORTS_DIR="${TESTS_DIR}/reports"
@@ -121,7 +121,6 @@ show_help() {
     sed -n '/^# Usage:/,/^set -e$/p' "$0" | grep '^#' | sed 's/^# \?//'
     echo ""
     echo "Available Test Suites:"
-    echo "  helm              Helm chart lint, template, deployment health"
     echo "  auth              Keycloak, JWT ingress/backend authentication"
     echo "  infrastructure    Database, S3, Kafka health checks"
     echo "  cost-management   Upload, Koku processing pipeline"
@@ -151,7 +150,8 @@ show_help() {
     echo "  --perf-stress-recovery Run stress backlog recovery only (PERF-STR-002)"
     echo ""
     echo "UI Tests:"
-    echo "  UI tests are included by default. Use --no-ui to exclude UI, Helm, ROS, and performance."
+    echo "  UI tests are included by default. Use --no-ui to exclude UI and performance (CI)."
+    echo "  ROS/Kruize tests skip when spec.ros.enabled is false; they run when it is true."
     echo "  Use --ui to run ONLY UI tests."
     exit 0
 }
@@ -245,7 +245,7 @@ run_pytest() {
 
     log_info "Running pytest..."
     log_info "  Namespace: ${NAMESPACE:-cost-onprem}"
-    log_info "  Helm Release: ${HELM_RELEASE_NAME:-cost-onprem}"
+    log_info "  HELM_RELEASE_NAME: ${HELM_RELEASE_NAME:-cost-onprem}"
     log_info "  Keycloak Namespace: ${KEYCLOAK_NAMESPACE:-keycloak}"
     echo ""
 
@@ -308,6 +308,7 @@ run_pytest() {
 main() {
     local pytest_markers=()
     local pytest_extra_args=()
+    local extra_m=""
     local include_ui=true   # UI tests included by default
     local exclude_ui=false  # Flag to explicitly exclude UI
     local ui_only=false     # Flag for running only UI tests
@@ -460,7 +461,11 @@ main() {
                 elif [[ "$2" == "ui" ]]; then
                     ui_only=true
                 fi
-                pytest_extra_args+=("$1" "$2")
+                if [[ -n "${extra_m}" ]]; then
+                    extra_m="(${extra_m}) and ($2)"
+                else
+                    extra_m="$2"
+                fi
                 shift 2
                 ;;
             *)
@@ -500,38 +505,30 @@ main() {
     local is_perf_test=false
     local perf_reports_dir=""
 
-    # Handle marker filtering
-    # Performance tests are ALWAYS excluded unless explicitly requested via --performance flags
-    # This prevents long-running perf tests from running during normal chart test CI
+    # Handle marker filtering. Always emit a single -m (pytest keeps only the last).
+    local compose_args=()
+    local _m
     if [[ "$ui_only" == "true" ]]; then
-        # Run only UI tests
-        pytest_args+=("-m" "ui")
-    elif [[ ${#pytest_markers[@]} -gt 0 ]]; then
-        local marker_expr=""
-        for _m in "${pytest_markers[@]}"; do
-            if [[ -n "$marker_expr" ]]; then
-                marker_expr="($marker_expr) or ($_m)"
-            else
-                marker_expr="$_m"
-            fi
-        done
-        # Check if this is a performance test request
-        if [[ "$marker_expr" == *"performance"* ]]; then
-            # Performance tests - use marker as-is
-            pytest_args+=("-m" "$marker_expr")
-            is_perf_test=true
-        else
-            # Non-performance tests - exclude performance marker
-            pytest_args+=("-m" "($marker_expr) and not performance")
-        fi
-    elif [[ "$exclude_ui" == "true" ]]; then
-        # Exclude UI, Helm, ROS (beta), and performance when --no-ui is specified
-        pytest_args+=("-m" "not ui and not performance and not helm and not ros")
-    else
-        # Default: run all tests EXCEPT performance tests
-        # Performance tests must be explicitly requested via --performance flags
-        pytest_args+=("-m" "not performance and not helm")
+        compose_args+=(--ui-only)
     fi
+    if [[ "$exclude_ui" == "true" ]]; then
+        compose_args+=(--no-ui)
+    fi
+    for _m in "${pytest_markers[@]+"${pytest_markers[@]}"}"; do
+        compose_args+=(--positive "$_m")
+        if [[ "$_m" == *performance* ]]; then
+            compose_args+=(--perf)
+            is_perf_test=true
+        fi
+        case "$_m" in
+            helm) compose_args+=(--helm) ;;
+            ros) compose_args+=(--ros) ;;
+        esac
+    done
+    if [[ -n "$extra_m" ]]; then
+        compose_args+=(--extra-m "$extra_m")
+    fi
+    pytest_args+=("-m" "$(compose_pytest_markexpr "${compose_args[@]+"${compose_args[@]}"}")")
 
     # For performance tests with unified output structure, redirect reports to PERF_OUTPUT_DIR
     if [[ "$is_perf_test" == "true" ]] && [[ -n "${PERF_OUTPUT_DIR:-}" ]] && [[ -n "${TEST_RUN_ID:-}" ]]; then

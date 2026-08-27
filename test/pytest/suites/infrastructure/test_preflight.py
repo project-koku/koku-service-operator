@@ -23,7 +23,7 @@ class TestPodHealth:
     def test_database_pod_exists(self, cluster_config, database_deployed):
         """Verify database pod exists (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed by chart (BYOI mode)")
+            pytest.skip("Database not deployed (BYOI)")
         assert check_pod_exists(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"
@@ -32,7 +32,7 @@ class TestPodHealth:
     def test_database_pod_ready(self, cluster_config, database_deployed):
         """Verify database pod is ready (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed by chart (BYOI mode)")
+            pytest.skip("Database not deployed (BYOI)")
         assert check_pod_ready(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"

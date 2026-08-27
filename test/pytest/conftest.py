@@ -1,5 +1,5 @@
 """
-Pytest fixtures and configuration for cost-onprem-chart tests.
+Pytest fixtures and configuration for Cost Management operator tests.
 
 This is the root conftest.py that provides shared fixtures used across all test suites.
 Suite-specific fixtures are defined in each suite's conftest.py.
@@ -184,7 +184,7 @@ def ros_enabled(cluster_config: ClusterConfig) -> bool:
 
 @pytest.fixture(scope="session")
 def require_ros_enabled(ros_enabled: bool) -> None:
-    """Skip the test when ROS is disabled (Cost-only beta default)."""
+    """Skip the test when spec.ros.enabled is false."""
     if not ros_enabled:
         pytest.skip(ROS_DISABLED_SKIP_REASON)
 
