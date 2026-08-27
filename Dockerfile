@@ -1,9 +1,8 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1787080706 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.7-1787774815 AS builder
+
 ARG TARGETOS
 ARG TARGETARCH
-
-ENV GOTOOLCHAIN=auto
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
