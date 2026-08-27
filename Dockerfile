@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wa
 # Runtime is UBI Micro: Red Hat-signed RHEL content, no package manager, no shell.
 # Smaller TCB than ubi-minimal; same errata/scan stream as OpenShift.
 # Defaults to root user.
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1786321990
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1787778798
 WORKDIR /
 COPY --from=builder /workspace/manager /manager
 COPY --from=builder /workspace/wait-for /wait-for
