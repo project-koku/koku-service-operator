@@ -4,6 +4,9 @@ End-to-end path for a **pre-prod / lab** OpenShift cluster: optional fixture
 dependencies (BYOI), then the mandatory operator + `CostManagementServiceConfig`,
 ending at a working Cost Management UI login.
 
+Customer install/config (prerequisites, Secret keys, quickstart, production, CMMO):
+[docs/install/](../install/README.md).
+
 This is **not** an OLM Catalog / production packaging guide (COST-7695). It uses
 the OwnNamespace model: **operator install namespace == CR namespace**. BYOI
 infra may live elsewhere and is referenced only via CR connection fields.
@@ -212,16 +215,23 @@ Then apply the CR (edit hosts / domain / Keycloak issuer to match Part A):
 kubectl apply -f config/samples/byoi/app/costmanagementserviceconfig.yaml
 ```
 
-Required image fields (empty `repository`/`tag` → `InvalidImageName` / image `:`):
+Required image fields (`repository` and `tag`). The operator does **not**
+default workload images; omit a required field and reconcile sets
+`Degraded=True` with reason `ImageNotSet`:
 
 | Spec path | Purpose |
 |-----------|---------|
-| `costManagement.api/masu.image` | Koku |
+| `database.image` | Bundled Postgres (`deploy: true` only) |
+| `cache.image` | Bundled Valkey (`deploy: true` only) |
+| `costManagement.api.image` | Koku (`masu.image` may inherit this) |
 | `rbac.image` | Insights RBAC |
 | `auth.envoy.image` | Gateway |
 | `ingress.image` | Upload handler |
 | `ui.app.image` | UI |
 | `ui.oauthProxy.image` | oauth2-proxy sidecar |
+| `ros.image` / `kruize.image` | Required only when `ros.enabled: true` |
+
+Pin product or community images on the CR (see `config/samples`).
 
 **CRD default and samples:** `spec.ros.enabled` defaults to **`false`** (beta is
 Cost-only — no ROS/Kruize). Samples set `enabled: false` explicitly. That skips
@@ -282,9 +292,24 @@ curl -skI "https://$(oc -n "$NAMESPACE" get route "${CR_NAME}-ui" -o jsonpath='{
 | ImagePullBackOff on amd64 node | arm64-only image | Rebuild with `--platform linux/amd64` |
 | StorageClass list/watch forbidden | Stale cluster role | Re-apply `config/rbac/cluster_access_role.yaml` (`get;list;watch`) |
 | CrashLoop: `open …/serving-certs/tls.crt: no such file` | Webhook server has no TLS mount | Re-run `./hack/deploy-incluster.sh` (creates/mounts `koku-webhook-server-cert`), or mount a Secret with `tls.crt`/`tls.key` at `/tmp/k8s-webhook-server/serving-certs` |
+| Namespace stuck `Terminating` after `oc delete ns` | Operator died before the CR finalizer ran | [uninstall.md](../install/uninstall.md#if-the-namespace-is-already-terminating) |
+
+## Tear down
+
+Delete the CR first while the operator is still running. `hack/demo-preprod.sh --reset` already does this (and strips the finalizer if the operator is gone). Manual order and recovery: [uninstall.md](../install/uninstall.md).
+
+```bash
+oc -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s
+if oc -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+  echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
+  exit 1
+fi
+oc delete ns "$NAMESPACE" "$INFRA_NAMESPACE" --ignore-not-found
+```
 
 ## Related docs
 
 - [ownnamespace.md](ownnamespace.md) — install/watch model and RBAC shape
 - [crc-testing.md](crc-testing.md) — local CRC / out-of-cluster `make run`
+- [uninstall.md](../install/uninstall.md) — CR-first uninstall and stuck-namespace recovery
 - [config/samples/byoi/README.md](../../config/samples/byoi/README.md) — fixture details, monitoring, teardown

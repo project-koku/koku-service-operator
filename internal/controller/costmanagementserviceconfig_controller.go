@@ -59,6 +59,8 @@ const (
 	reasonKokuAvailable          = "KokuAvailable"
 	reasonDeploymentNotReady     = "DeploymentNotReady"
 	reasonDeploymentReady        = "DeploymentReady"
+	reasonReconcileError         = "ReconcileError"
+	reasonImageNotSet            = "ImageNotSet"
 	msgWaitingForRBACAPI         = "waiting for RBAC API"
 	msgWaitingForRBACWorker      = "waiting for RBAC worker"
 	msgWaitingForKokuAPI         = "waiting for Koku API"
@@ -230,14 +232,15 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 }
 
 // reconcile drives the ordered, staged rollout:
-//  0. Discovery (cluster domain, StorageClass, S3)
-//  1. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
-//  2. Infrastructure (PostgreSQL, Valkey)
-//  3. Validation (TCP/HTTP probes for external deps, Secret key checks)
-//  4. DB migration gate (Koku → ROS → RBAC)
-//  5. Core services (Koku API, Masu, Listener)
-//  6. Workers (Celery, ROS, Kruize)
-//  7. Edge (Envoy gateway, UI, Route)
+//  0. Workload images (spec.*.image required; no operator catalog default)
+//  1. Discovery (cluster domain, StorageClass, S3)
+//  2. Shared configuration (ConfigMaps, Secrets, ServiceAccount)
+//  3. Infrastructure (PostgreSQL, Valkey)
+//  4. Validation (TCP/HTTP probes for external deps, Secret key checks)
+//  5. DB migration gate (Koku → ROS → RBAC)
+//  6. Core services (Koku API, Masu, Listener)
+//  7. Workers (Celery, ROS, Kruize)
+//  8. Edge (Envoy gateway, UI, Route)
 func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (ctrl.Result, error) {
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
@@ -247,6 +250,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
 	result, err := runPhases([]PhaseFn{
+		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
 		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
 		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
 		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
@@ -263,11 +267,12 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		applyPhaseError(cfg, err)
 		// For any error (structured or plain), ensure Degraded is visible in status.
 		// Without this, plain fmt.Errorf from phases left Degraded unset.
+		reason := degradedReason(err)
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue,
-			"ReconcileError", err.Error())
+			reason, err.Error())
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseDegraded)
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "ReconcileError", "%v", err)
+		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, reason, "%v", err)
 		return ctrl.Result{RequeueAfter: requeueSlow}, err
 	}
 	if !result.IsZero() {
@@ -294,6 +299,34 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// -----------------------------------------------------------------------------
+// Stage 0 — Workload images
+// -----------------------------------------------------------------------------
+
+func (r *CostManagementServiceConfigReconciler) reconcileWorkloadImages(_ context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	missing := resources.MissingWorkloadImages(cfg)
+	if len(missing) == 0 {
+		return Result{}, nil
+	}
+	return Result{}, &imageNotSetError{
+		msg: fmt.Sprintf("set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", ")),
+	}
+}
+
+// imageNotSetError is a user-config error: required spec.*.image is empty.
+// Degraded reason ImageNotSet (not ReconcileError) so alerts can match it.
+type imageNotSetError struct{ msg string }
+
+func (e *imageNotSetError) Error() string { return e.msg }
+
+func degradedReason(err error) string {
+	var ins *imageNotSetError
+	if stderrors.As(err, &ins) {
+		return reasonImageNotSet
+	}
+	return reasonReconcileError
 }
 
 // -----------------------------------------------------------------------------
@@ -423,6 +456,18 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 // Each Job must complete before the next is created. Previously-succeeded
 // Jobs are not re-created unless the image-tag annotation changed.
 func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
+	if msg := migrationImageError(cfg); msg != "" {
+		// Config error: Stop without requeue. Clear Available/Progressing so a
+		// prior Ready pass cannot leave Available=True while Phase is Degraded.
+		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse, "ImageNotSet", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, "ImageNotSet", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ImageNotSet", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "ImageNotSet", msg)
+		cfg.Status.Phase = costv1alpha1.PhaseDegraded
+		r.Recorder.Event(cfg, corev1.EventTypeWarning, "ImageNotSet", msg)
+		return Result{Stop: true}, nil
+	}
+
 	type migStep struct {
 		name     string
 		imageTag string
@@ -436,8 +481,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 			build:    func() *batchv1.Job { return resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag) },
 		},
 	}
-	// ROS schema migrate only when ROS is enabled — otherwise the Job uses an
-	// empty image tag (image ":") and fails DeadlineExceeded.
+	// ROS schema migrate only when ROS is enabled.
 	if costv1alpha1.ROSEnabled(cfg) {
 		steps = append(steps, migStep{
 			name:     resources.NameROSMigration(cfg),
@@ -479,6 +523,25 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	return Result{}, nil
 }
 
+// migrationImageError returns a human-readable error when a required workload
+// image is missing. Koku migrations use spec.costManagement.api.image (the same
+// image as API/Masu/listener). Empty images must fail closed rather than
+// creating Jobs with ":" or a hardcoded :latest tag.
+func migrationImageError(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if _, ok := resources.KokuImage(cfg); !ok {
+		return "spec.costManagement.api.image.repository and tag are required (Koku migration must use the same image as the API)"
+	}
+	if costv1alpha1.ROSEnabled(cfg) {
+		if _, ok := resources.ImageRef(cfg.Spec.ROS.Image); !ok {
+			return "spec.ros.image.repository and tag are required when ROS is enabled"
+		}
+	}
+	if _, ok := resources.ImageRef(cfg.Spec.RBAC.Image); !ok {
+		return "spec.rbac.image.repository and tag are required"
+	}
+	return ""
+}
+
 // runMigrationStep manages a single migration Job: create if absent, detect
 // upgrades, poll completion, surface failures. Returns a non-zero Result when
 // the pipeline should pause (job still running or just failed).
@@ -500,6 +563,9 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 
 	if errors.IsNotFound(err) {
 		job := build()
+		if job == nil {
+			return Result{}, fmt.Errorf("create %s: image is unset", jobName)
+		}
 		setOwnerRef(cfg, job)
 		if createErr := r.Create(ctx, job); createErr != nil {
 			return Result{}, fmt.Errorf("create %s: %w", jobName, createErr)
@@ -528,7 +594,11 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 	}
 	if isJobFailed(existing) {
 		msg := fmt.Sprintf("%s exhausted retries — check pod logs", jobName)
+		// Failed migrate stops the pipeline; core services are not rolled.
+		// Clear Available/Progressing so a prior Ready pass cannot linger.
 		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse, "MigrationFailed", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, "MigrationFailed", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "MigrationFailed", msg)
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "MigrationFailed", msg)
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, true)
@@ -673,8 +743,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 	workers := resources.CeleryWorkerDeployments(cfg)
 	objs := make([]client.Object, 0, 1+len(workers))
 
-	// Celery beat + workers
+	// Celery beat + workers (+ aggregated metrics Service for WorkerProbeServer)
 	objs = append(objs, resources.CeleryBeatDeployment(cfg))
+	objs = append(objs, resources.CeleryWorkersService(cfg))
 	for _, d := range workers {
 		objs = append(objs, d)
 	}
@@ -855,6 +926,7 @@ func (r *CostManagementServiceConfigReconciler) applyNetworkPolicies(ctx context
 		resources.UINetworkPolicy(cfg),
 		resources.ListenerNetworkPolicy(cfg),
 		resources.MasuNetworkPolicy(cfg),
+		resources.CeleryWorkersNetworkPolicy(cfg),
 	}
 	if costv1alpha1.ROSEnabled(cfg) {
 		netpols = append(netpols,
@@ -950,7 +1022,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 // Stage 8 — Monitoring (PrometheusRules + App ServiceMonitor)
 // -----------------------------------------------------------------------------
 
-// reconcileMonitoring applies App/Gateway/Operator ServiceMonitors and
+// reconcileMonitoring applies App/Gateway/Operator/Celery ServiceMonitors and
 // PrometheusRules when spec.monitoring.enabled is true (the default). When
 // disabled, best-effort deletes those managed objects so Alerting/scrape
 // targets do not linger. Kruize ServiceMonitor is not applied here yet
@@ -963,6 +1035,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.
 		resources.AppServiceMonitor(cfg),
 		resources.GatewayServiceMonitor(cfg),
 		resources.OperatorServiceMonitor(cfg),
+		resources.CeleryServiceMonitor(cfg),
 		resources.PrometheusRules(cfg),
 	}
 

@@ -112,6 +112,11 @@ func TestKokuWorkloadsCarryS3CredentialEnv(t *testing.T) {
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				SecretName: "user-s3-creds",
 			},
+			CostManagement: costv1alpha1.CostManagementConfig{
+				API: costv1alpha1.KokuAPISpec{
+					Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
+				},
+			},
 		},
 	}
 	wantSecret := NameStorageSecret(cfg)
@@ -237,5 +242,129 @@ func TestKokuCommonEnvEnhancedOrgAdmin(t *testing.T) {
 	}
 	if got != "False" {
 		t.Errorf("ENHANCED_ORG_ADMIN = %q, want False", got)
+	}
+}
+
+func TestKokuCommonEnvSharedDefaults(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				S3: costv1alpha1.S3Options{
+					Region: "onprem",
+				},
+			},
+			CostManagement: costv1alpha1.CostManagementConfig{
+				ReportDownloadSchedule: "*/5 * * * *",
+			},
+		},
+	}
+	env := KokuCommonEnv(cfg)
+
+	byName := make(map[string]string, len(env))
+	for _, e := range env {
+		if _, dup := byName[e.Name]; dup {
+			t.Fatalf("duplicate env var %q", e.Name)
+		}
+		if e.Value != "" {
+			byName[e.Name] = e.Value
+		}
+	}
+
+	// Shared defaults from KokuCommonEnv (match chart defaults)
+	want := map[string]string{
+		"ONPREM":                    "True",
+		"DATABASE_SERVICE_NAME":     "database",
+		"DATABASE_ENGINE":           "postgresql",
+		"DATABASE_NAME":             "costonprem_koku",
+		"DATABASE_SERVICE_PORT":     "5432",
+		"REDIS_PORT":                "6379",
+		"S3_REGION":                 "onprem",
+		"AWS_CONFIG_FILE":           "/etc/aws/config",
+		"SCHEDULE_REPORT_CHECKS":    "True",
+		"REPORT_DOWNLOAD_SCHEDULE":  "*/5 * * * *",
+		"RETAIN_NUM_MONTHS":         "4",
+		"RBAC_SERVICE_HOST":         "cost-management-rbac-api",
+		"RBAC_SERVICE_PORT":         "8080",
+		"RBAC_SERVICE_PATH":         "/api/rbac/v1/access/",
+		"RBAC_SERVICE_PROTOCOL":     "http",
+		"ENHANCED_ORG_ADMIN":        "False",
+		"GUNICORN_LOG_LEVEL":        "INFO",
+		"DJANGO_LOG_LEVEL":          "INFO",
+		"DJANGO_LOG_FORMATTER":      "simple",
+		"DJANGO_LOG_HANDLERS":       "console",
+		"DEVELOPMENT":               "False",
+		"KOKU_ENABLE_SENTRY":        "False",
+		"CACHED_VIEWS_DISABLED":     "False",
+		"NOTIFICATION_CHECK_TIME":   "24",
+		"RBAC_CACHE_TIMEOUT":        "300",
+		"CACHE_TIMEOUT":             "3600",
+		"TAG_ENABLED_LIMIT":         "200",
+		"USE_READREPLICA":           "False",
+		"POLLING_TIMER":             "300",
+		"INITIAL_INGEST_NUM_MONTHS": "2",
+		"INITIAL_INGEST_OVERRIDE":   "False",
+		"CELERY_RESULT_EXPIRES":     "28800",
+	}
+
+	for name, wantVal := range want {
+		gotVal, ok := byName[name]
+		if !ok {
+			t.Errorf("missing shared env var %s", name)
+			continue
+		}
+		if gotVal != wantVal {
+			t.Errorf("%s: got %q, want %q", name, gotVal, wantVal)
+		}
+	}
+
+	// Verify KOKU_LOG_LEVEL is NOT in shared defaults (set per-workload)
+	if _, ok := byName["KOKU_LOG_LEVEL"]; ok {
+		t.Error("KOKU_LOG_LEVEL should not be in KokuCommonEnv shared defaults; set per-workload")
+	}
+}
+
+func TestWorkloadKokuLogLevelOverrides(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			CostManagement: costv1alpha1.CostManagementConfig{
+				API: costv1alpha1.KokuAPISpec{
+					Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
+				},
+			},
+		},
+	}
+
+	workloads := []struct {
+		name             string
+		containers       []corev1.Container
+		wantKokuLogLevel string
+	}{
+		{"koku-api", KokuAPIDeployment(cfg).Spec.Template.Spec.Containers, "INFO"},
+		{"masu", MasuDeployment(cfg).Spec.Template.Spec.Containers, "DEBUG"},
+		{"listener", ListenerDeployment(cfg).Spec.Template.Spec.Containers, "INFO"},
+		{"celery-beat", CeleryBeatDeployment(cfg).Spec.Template.Spec.Containers, "INFO"},
+		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: 1}).Spec.Template.Spec.Containers, "INFO"},
+		{"migration", MigrationJob(cfg, "latest").Spec.Template.Spec.Containers, "INFO"},
+	}
+
+	for _, wl := range workloads {
+		byName := make(map[string]string)
+		for _, c := range wl.containers {
+			for _, e := range c.Env {
+				if e.Value != "" {
+					byName[e.Name] = e.Value
+				}
+			}
+		}
+		got, ok := byName["KOKU_LOG_LEVEL"]
+		if !ok {
+			t.Errorf("%s: missing KOKU_LOG_LEVEL", wl.name)
+			continue
+		}
+		if got != wl.wantKokuLogLevel {
+			t.Errorf("%s: KOKU_LOG_LEVEL = %q, want %q", wl.name, got, wl.wantKokuLogLevel)
+		}
 	}
 }

@@ -529,6 +529,48 @@ deploy_kafka() {
     log_success "Kafka/AMQ Streams deployment completed"
 }
 
+# Copy S4/RGW credentials into the target namespace as cost-onprem-storage-credentials.
+# deploy-s4-test.sh creates s4-credentials; the operator/CMSC expect cost-onprem-storage-credentials.
+copy_s4_storage_credentials() {
+    local source_ns="$1"
+    local target_ns="$2"
+    local storage_secret="cost-onprem-storage-credentials"
+    local source_secret=""
+    local candidate
+
+    for candidate in s4-credentials "${storage_secret}"; do
+        if kubectl get secret "${candidate}" -n "${source_ns}" >/dev/null 2>&1; then
+            source_secret="${candidate}"
+            break
+        fi
+    done
+
+    if [[ -z "${source_secret}" ]]; then
+        log_error "No S4 storage secret (s4-credentials or ${storage_secret}) in ${source_ns}"
+        return 1
+    fi
+
+    local access_key
+    local secret_key
+    access_key=$(kubectl get secret "${source_secret}" -n "${source_ns}" -o jsonpath='{.data.access-key}' | base64 -d)
+    secret_key=$(kubectl get secret "${source_secret}" -n "${source_ns}" -o jsonpath='{.data.secret-key}' | base64 -d)
+
+    if [[ -z "${access_key}" || -z "${secret_key}" ]]; then
+        log_error "Secret ${source_ns}/${source_secret} is missing access-key or secret-key"
+        return 1
+    fi
+
+    if ! kubectl create secret generic "${storage_secret}" \
+        --namespace="${target_ns}" \
+        --from-literal=access-key="${access_key}" \
+        --from-literal=secret-key="${secret_key}" \
+        --dry-run=client -o yaml | kubectl apply -f -; then
+        log_error "Failed to apply ${storage_secret} in ${target_ns}"
+        return 1
+    fi
+    log_success "Storage credentials copied from ${source_ns}/${source_secret} to ${target_ns}/${storage_secret}"
+}
+
 deploy_s4() {
     if [[ "${DEPLOY_S4}" != "true" ]]; then
         log_verbose "Skipping S4 deployment (--deploy-s4 not specified)"
@@ -564,27 +606,13 @@ deploy_s4() {
     export S3_PORT="7480"
     export S3_USE_SSL="false"
 
-    # Copy storage credentials from S4 namespace to chart namespace
-    # The install-helm-chart.sh script looks for credentials in the chart namespace
-    if [[ "${S4_NAMESPACE}" != "${NAMESPACE}" ]]; then
-        log_info "Copying storage credentials from ${S4_NAMESPACE} to ${NAMESPACE}..."
-        if kubectl get secret cost-onprem-storage-credentials -n "${S4_NAMESPACE}" >/dev/null 2>&1; then
-            # Extract credentials from S4 namespace
-            local access_key
-            local secret_key
-            access_key=$(kubectl get secret cost-onprem-storage-credentials -n "${S4_NAMESPACE}" -o jsonpath='{.data.access-key}' | base64 -d)
-            secret_key=$(kubectl get secret cost-onprem-storage-credentials -n "${S4_NAMESPACE}" -o jsonpath='{.data.secret-key}' | base64 -d)
-            
-            # Create secret in chart namespace
-            kubectl create secret generic cost-onprem-storage-credentials \
-                --namespace="${NAMESPACE}" \
-                --from-literal=access-key="${access_key}" \
-                --from-literal=secret-key="${secret_key}" \
-                --dry-run=client -o yaml | kubectl apply -f -
-            log_success "Storage credentials copied to ${NAMESPACE}"
-        else
-            log_warning "Storage credentials secret not found in ${S4_NAMESPACE}"
-        fi
+    # deploy-s4-test.sh creates s4-credentials; operator/CMSC expect cost-onprem-storage-credentials.
+    log_info "Syncing storage credentials from ${S4_NAMESPACE} to ${NAMESPACE}..."
+    if ! copy_s4_storage_credentials "${S4_NAMESPACE}" "${NAMESPACE}"; then
+        log_error "S4 credential sync failed — cannot continue with stale or missing storage credentials"
+        log_info "Check: kubectl get secret s4-credentials -n ${S4_NAMESPACE}"
+        log_info "Manual sync steps: docs/development/clusterbot-operator-pytest.md (S4 credential gap)"
+        exit 1
     fi
 
     log_success "S4 deployment completed"

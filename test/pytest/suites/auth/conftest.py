@@ -66,5 +66,6 @@ def non_admin_user_credentials():
 def http_session() -> requests.Session:
     """Shared requests session with SSL verification disabled."""
     session = requests.Session()
+    session.trust_env = False
     session.verify = False
     return session

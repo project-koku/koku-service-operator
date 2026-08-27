@@ -10,6 +10,7 @@ import (
 )
 
 // CacheDeployment builds the bundled Valkey Deployment (dev/CI only).
+// Image comes from spec.cache.image (required when deploy is true).
 //
 // The server runs with --protected-mode no and no --requirepass / TLS flags.
 // This is intentional: the bundled cache is not for production (BYOI model).
@@ -23,10 +24,7 @@ func CacheDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	allLabels := Labels(cfg, "cache")
 
 	c := cfg.Spec.Cache
-	image := c.Image.Repository + ":" + c.Image.Tag
-	if image == ":" {
-		image = "registry.redhat.io/rhel10/valkey-8:10.1"
-	}
+	image, _ := ImageRef(c.Image)
 
 	port := c.Port
 	if port == 0 {

@@ -394,6 +394,7 @@ def rbac_cluster_data(
     # to the same schema succeed. We retry with fresh JWT tokens.
     upload_url = f"{ingress_url}/v1/upload"
     upload_session = requests.Session()
+    upload_session.trust_env = False
     upload_session.verify = False
 
     max_upload_retries = 3

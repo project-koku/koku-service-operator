@@ -37,3 +37,23 @@ IMG=quay.io/<org>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-by
 Full walkthrough: [clusterbot.md](clusterbot.md). UI + Keycloak path: [pre-prod-install.md](pre-prod-install.md).
 
 `make deploy` still scaffolds into `koku-service-operator-system`. Under OwnNamespace the CR must live in that same namespace, or you must change the deploy namespace / use `deploy-incluster.sh`. Full OLM `installModes` (COST-7695) is out of scope here; this document is the intended runtime model.
+
+## Cluster Bot / pytest
+
+For lab clusters running the ported pytest suite (AMQ Streams + S4), use a **single**
+namespace end-to-end (operator + CR + pytest `NAMESPACE`). Prefer:
+
+```bash
+IMG=quay.io/<you>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-onprem
+```
+
+Do not split operator (`koku-service-operator-system`) and CR (`cost-onprem`) — the
+operator will not reconcile. See [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md).
+
+## Uninstall
+
+Because the manager and the CR share a namespace, delete the
+`CostManagementServiceConfig` and wait until it is gone **before** deleting
+the namespace or the operator Deployment. Otherwise the CR finalizer never
+runs and the namespace stays `Terminating` (ConsoleLink leak). Procedure and
+recovery: [uninstall.md](../install/uninstall.md).

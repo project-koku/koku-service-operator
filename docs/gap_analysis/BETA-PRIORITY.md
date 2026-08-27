@@ -131,7 +131,7 @@ UI already reads `spec.profile` when `spec.ui.*.resources` are unset ([#65](http
 | [COST-7693](https://redhat.atlassian.net/browse/COST-7693) | Upgrade/scaling/rollback | **P2** (basic image-tag migrate exists) |
 | [COST-7694](https://redhat.atlassian.net/browse/COST-7694) | Secret rotation annotation | **P2** (day-2); CA merge overlaps [7691 G3](COST-7691.md) **P1** |
 | [COST-7696](https://redhat.atlassian.net/browse/COST-7696)–[7699](https://redhat.atlassian.net/browse/COST-7699) | Bundle CI / E2E / OpenShift CI | **P2** for beta; **P1** if beta needs automated install proof |
-| [COST-7700](https://redhat.atlassian.net/browse/COST-7700) | Install/config guides | **P1** (beta customers need a BYOI quickstart with `ros.enabled: false`) |
+| [COST-7700](https://redhat.atlassian.net/browse/COST-7700) / [COST-8124](../jira/COST-8124.md) | Install/config guides | **P1** (beta BYOI quickstart with `ros.enabled: false`). GA remainder is [COST-8125](../jira/COST-8125.md). |
 
 Tickets marked ✅ in `tasks.md` that gap audits found incomplete: **7683, 7684, 7687, 7688, 7690, 7691, 7692** (docs drift — do not treat tracker checkmarks as beta-ready). COST-7689 readiness (G2) is closed; sizing moved to COST-8095.
 
@@ -161,7 +161,7 @@ Tickets marked ✅ in `tasks.md` that gap audits found incomplete: **7683, 7684,
 15. S3 connectivity probe (ListBuckets/HeadBucket) ([7684 G1](COST-7684.md)).
 16. NetworkPolicies for UI + Masu/Listener (start of [7691 G1](COST-7691.md); skip ROS and Kruize).
 17. App readiness timeout → Degraded for **core** Deployments only (COST-7686) — **closed** in PR #105 (Ingress/Envoy/UI still 30s; [follow-up #12](../review-follow-ups.md)).
-18. BYOI install/config quickstart: `ros.enabled: false`, ROS/Kruize unsupported in beta (COST-7700); remaining optionality → COST-8054.
+18. BYOI install/config quickstart: `ros.enabled: false`, ROS/Kruize unsupported in beta ([COST-8124](../jira/COST-8124.md) / COST-7700); remaining optionality → COST-8054. GA docs remainder → [COST-8125](../jira/COST-8125.md).
 19. Admission webhook scaffold for rules CEL cannot express ([7678 G1](COST-7678.md)).
 20. **Conditional `ros-*` Validation keys** when `ros.enabled=false` ([COST-8054](../jira/COST-8054.md)) — required for honest Cost-only BYOI secrets (otherwise customers must still provision unused ROS DB keys).
 

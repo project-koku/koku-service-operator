@@ -25,7 +25,7 @@
 #   (ros-* and kruize-* keys match the CRD credential list; unused while ros.enabled is false.)
 #
 #   kubectl create secret generic my-cache-credentials \
-#     --from-literal=password=<password>
+#     --from-literal=redis-password=<password>
 #
 #   kubectl create secret generic my-s3-credentials \
 #     --from-literal=access-key=<key> \
@@ -79,11 +79,11 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
 
   rbac:
     image:

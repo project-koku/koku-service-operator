@@ -49,12 +49,12 @@ spec:
       image:
         # amd64 — suitable for clusterbot / typical OpenShift nodes
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 1
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 1
     listener:
       replicas: 1

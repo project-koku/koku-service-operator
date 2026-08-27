@@ -136,6 +136,48 @@ func TestCeleryWorkerDeployments_SaaSQueuesDefaultZero(t *testing.T) {
 	}
 }
 
+func TestCeleryWorkerDeployment_MetricsOnlyWhenReplicasPositive(t *testing.T) {
+	cfg := celeryWorkerCfg()
+	active := CeleryWorkerDeployment(cfg, "download", costv1alpha1.CeleryWorkerSpec{Replicas: 1})
+	if active.Spec.Template.Labels[labelMetricsRole] != MetricsRoleCeleryWorker {
+		t.Fatalf("active worker missing metrics-role label")
+	}
+	if len(active.Spec.Template.Spec.Containers[0].Ports) != 1 ||
+		active.Spec.Template.Spec.Containers[0].Ports[0].Name != "metrics" ||
+		active.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort != 9000 {
+		t.Fatalf("active worker ports = %+v, want metrics/9000", active.Spec.Template.Spec.Containers[0].Ports)
+	}
+	// Selector must stay immutable / without scrape label.
+	if _, ok := active.Spec.Selector.MatchLabels[labelMetricsRole]; ok {
+		t.Fatal("metrics-role must not be on Deployment selector")
+	}
+
+	idle := CeleryWorkerDeployment(cfg, "hcs", costv1alpha1.CeleryWorkerSpec{Replicas: 0})
+	if idle.Spec.Template.Labels[labelMetricsRole] != "" {
+		t.Fatal("zero-replica worker must not carry metrics-role label")
+	}
+	if len(idle.Spec.Template.Spec.Containers[0].Ports) != 0 {
+		t.Fatalf("zero-replica worker ports = %+v, want none", idle.Spec.Template.Spec.Containers[0].Ports)
+	}
+}
+
+func TestCeleryWorkersService(t *testing.T) {
+	cfg := testCfg()
+	svc := CeleryWorkersService(cfg)
+	if svc.Name != NameCeleryWorkersService(cfg) {
+		t.Errorf("Name = %q", svc.Name)
+	}
+	if svc.Labels[labelComponent] != "celery-worker" {
+		t.Errorf("component label = %q", svc.Labels[labelComponent])
+	}
+	if svc.Spec.Selector[labelMetricsRole] != MetricsRoleCeleryWorker {
+		t.Errorf("selector metrics-role = %q", svc.Spec.Selector[labelMetricsRole])
+	}
+	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Name != "metrics" || svc.Spec.Ports[0].Port != 9000 {
+		t.Fatalf("ports = %+v", svc.Spec.Ports)
+	}
+}
+
 func TestCeleryWorkerDeployments_SaaSQueuesOptIn(t *testing.T) {
 	cfg := celeryWorkerCfg()
 	cfg.Spec.CostManagement.Celery.Workers.HCS.Replicas = 2

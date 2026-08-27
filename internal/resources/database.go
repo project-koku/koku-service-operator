@@ -10,6 +10,9 @@ import (
 )
 
 // DatabaseStatefulSet builds the PostgreSQL StatefulSet.
+// Image comes from spec.database.image (required when deploy is true).
+// The container contract is SCL/RHEL (POSTGRESQL_ADMIN_PASSWORD,
+// /var/lib/pgsql/data); docker.io/library/postgres is not compatible.
 func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.StatefulSet {
 	name := NameDatabase(cfg)
 	selLabels := SelectorLabels(cfg, "database")
@@ -17,10 +20,7 @@ func DatabaseStatefulSet(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 	dbSecret := NameDBCredentials(cfg)
 
 	dbSpec := cfg.Spec.Database
-	image := dbSpec.Image.Repository + ":" + dbSpec.Image.Tag
-	if image == ":" {
-		image = "registry.redhat.io/rhel10/postgresql-16:10.1"
-	}
+	image, _ := ImageRef(dbSpec.Image)
 
 	storageSize := dbSpec.Storage.Size
 	if storageSize.IsZero() {

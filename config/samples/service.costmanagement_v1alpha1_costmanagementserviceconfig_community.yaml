@@ -1,0 +1,134 @@
+# Public images for oauth2-proxy, Envoy, Postgres, and Valkey.
+# Same metadata.name as the default sample — apply this file instead of it.
+#
+# Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
+# POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.
+apiVersion: service.costmanagement.openshift.io/v1alpha1
+kind: CostManagementServiceConfig
+metadata:
+  name: cost-onprem
+  namespace: cost-onprem
+spec:
+  global:
+    clusterDomain: "apps.cluster.local"
+    storageClass: ""  # empty = use cluster default; set to ocs-storagecluster-ceph-rbd on ODF clusters
+
+  database:
+    deploy: true
+    image:
+      repository: quay.io/sclorg/postgresql-16-c10s
+      tag: "c10s"
+    storage:
+      size: 30Gi
+
+  cache:
+    deploy: true
+    image:
+      repository: quay.io/sclorg/valkey-8-c10s
+      tag: "c10s"
+    persistence:
+      size: 5Gi
+
+  kafka:
+    bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+  ingress:
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
+  objectStorage:
+    endpoint: "s3.openshift-storage.svc.cluster.local"
+    port: 443
+    useSSL: true
+
+  costManagement:
+    api:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+      replicas: 1
+    masu:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+      replicas: 1
+    listener:
+      replicas: 2
+    celery:
+      workers:
+        default:
+          replicas: 1
+        priority:
+          replicas: 1
+        summary:
+          replicas: 2
+        ocp:
+          replicas: 2
+        costModel:
+          replicas: 1
+
+  # Beta: ROS and Kruize are out of scope — omit or keep enabled: false (CRD default).
+  # Set enabled: true and fill ros.image / kruize.image only when opting in.
+  ros:
+    enabled: false
+    image:
+      repository: quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend
+      tag: "ae8c990"
+    processor:
+      replicas: 1
+
+  rbac:
+    image:
+      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      tag: "73870d8"
+    api:
+      replicas: 1
+    worker:
+      replicas: 1
+
+  # Only applied when ros.enabled: true
+  kruize:
+    replicas: 1
+    image:
+      repository: quay.io/redhat-services-prod/kruize-autotune-tenant/autotune
+      tag: "d1f0140"
+
+  # Envoy JWT gateway requires a reachable Keycloak/RHBK JWKS endpoint.
+  # Without it, gateway pods can become Ready while API calls return 401.
+  auth:
+    envoy:
+      image:
+        repository: docker.io/envoyproxy/envoy
+        tag: "v1.32.13"
+      replicas: 2
+    keycloak:
+      # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
+      # hostname, tokens use that URL as iss — set issuerURL to match.
+      # Matches envoy.go defaultKeycloakURL. For CRC + RHBK/BYOI, override to
+      # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
+      url: "https://keycloak.keycloak.svc.cluster.local"
+      # issuerURL: "https://keycloak-keycloak.apps.example.com"
+      realm: kubernetes
+      audiences:
+        - "cost-management-operator"
+        - "cost-management-ui"
+
+  ui:
+    replicaCount: 1
+    # User-provided OAuth client Secret (keys: client-id, client-secret).
+    # Default name: {metadata.name}-ui-oauth-client. Mirror from Keycloak with:
+    #   ./config/samples/byoi/mirror-ui-oauth-secret.sh
+    # oauthClientSecretRef:
+    #   name: cost-management-ui-oauth-client
+    oauthProxy:
+      image:
+        repository: quay.io/oauth2-proxy/oauth2-proxy
+        tag: "v7.6.0"
+    app:
+      image:
+        repository: quay.io/insights-onprem/koku-ui-onprem
+        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+
+  monitoring:
+    enabled: true

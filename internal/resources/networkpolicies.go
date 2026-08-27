@@ -150,12 +150,14 @@ func RBACAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 // ROS API
 // -----------------------------------------------------------------------------
 
-// ROSAPINetworkPolicy restricts ingress to the ROS API to the Envoy gateway only.
-// Without this, any pod in the namespace can reach ros-api:8000 directly,
-// bypassing the Envoy JWT authentication layer entirely.
+// ROSAPINetworkPolicy restricts REST access to the ROS API to the Envoy
+// gateway (JWT), and allows Prometheus to scrape the metrics port. Without
+// the gateway rule, any pod in the namespace can reach ros-api:8000 and
+// bypass Envoy authentication.
 func ROSAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
 	return netpol(cfg, cfg.Name+"-ros-api", "ros-api", []networkingv1.NetworkPolicyIngressRule{
 		podFrom(cfg, "gateway", rosAPIPort),
+		monitoringFrom(rosMetricPort),
 	})
 }
 
@@ -267,6 +269,30 @@ func MasuNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkin
 	return netpol(cfg, cfg.Name+"-masu", "cost-processor", []networkingv1.NetworkPolicyIngressRule{
 		monitoringFrom(masuMetricsPort),
 	})
+}
+
+// CeleryWorkersNetworkPolicy allows Prometheus to scrape WorkerProbeServer
+// /metrics on pods labeled metrics-role=celery-worker (replicas > 0 only).
+func CeleryWorkersNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfg.Name + "-celery-workers",
+			Namespace: cfg.Namespace,
+			Labels:    Labels(cfg, "celery-worker"),
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					labelApp:         cfg.Name,
+					labelInstance:    cfg.Name,
+					labelMetricsRole: MetricsRoleCeleryWorker,
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress:     []networkingv1.NetworkPolicyIngressRule{monitoringFrom(celeryWorkerMetricsPort)},
+		},
+	}
 }
 
 // KokuAPINetworkPolicy allows the gateway and internal services to reach the

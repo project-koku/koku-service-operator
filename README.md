@@ -11,6 +11,8 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 
 | Document | Description |
 |----------|-------------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR naming with Jira (`COST-####`) |
+| [docs/install/](docs/install/) | **Install and configure** (prerequisites, quickstart, production, CMMO) |
 | [docs/development/clusterbot.md](docs/development/clusterbot.md) | Cluster Bot day-one: Redpanda BYOI → in-cluster operator |
 | [docs/development/pre-prod-install.md](docs/development/pre-prod-install.md) | Pre-prod BYOI → operator → UI install walkthrough |
 | [docs/development/ownnamespace.md](docs/development/ownnamespace.md) | OwnNamespace install/watch model and RBAC shape |
@@ -23,6 +25,11 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | [docs/jira/](docs/jira/) | JIRA ticket source (COST-7678–7700) |
 
 ## Quick start
+
+Customer install (BYOI, `ros.enabled: false`): [docs/install/quickstart.md](docs/install/quickstart.md).
+Prerequisites and Secret keys: [docs/install/prerequisites.md](docs/install/prerequisites.md).
+
+Contributor local loop:
 
 ```bash
 make generate manifests    # regenerate CRD and deep-copy code

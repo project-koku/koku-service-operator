@@ -51,10 +51,10 @@ func (r *CostManagementServiceConfigReconciler) validateObjectStorage(ctx contex
 				"StorageCACertInvalid", err.Error())
 			return
 		}
-		caCertPool = x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caSecret.Data[caCertKey]) {
+		caCertPool, err = certPoolFromPEM(caSecret.Data[caCertKey])
+		if err != nil {
 			r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
-				"StorageCACertInvalid", fmt.Sprintf("secret %q key ca.crt contains no valid PEM certificates", caName))
+				"StorageCACertInvalid", fmt.Sprintf("secret %q key %q contains no valid PEM certificates", caName, caCertKey))
 			return
 		}
 	}

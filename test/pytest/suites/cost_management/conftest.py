@@ -320,6 +320,7 @@ def cost_validation_data(cluster_config, s3_config, keycloak_config, ingress_url
         
         # Create a session with SSL verification disabled
         session = requests.Session()
+        session.trust_env = False
         session.verify = False
         
         response = upload_with_retry(

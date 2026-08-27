@@ -47,6 +47,15 @@ func TestUIDeploymentServiceAccount(t *testing.T) {
 	}
 }
 
+func TestUIDeployment_EmptyOAuthProxyImageHasNoFallback(t *testing.T) {
+	cfg := uiTestCfg()
+	cfg.Spec.UI.OAuthProxy.Image = costv1alpha1.ImageSpec{}
+	proxy := containerByName(t, UIDeployment(cfg).Spec.Template.Spec.Containers, "oauth-proxy")
+	if proxy.Image != "" {
+		t.Errorf("empty oauth2-proxy image = %q, want empty (no catalog default)", proxy.Image)
+	}
+}
+
 func TestUIDeploymentOAuthProxySecurityContext(t *testing.T) {
 	dep := UIDeployment(uiTestCfg())
 	proxy := containerByName(t, dep.Spec.Template.Spec.Containers, "oauth-proxy")

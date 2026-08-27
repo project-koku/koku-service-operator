@@ -115,6 +115,12 @@ def internal_identity_header(cluster_config: ClusterConfig, org_id: str) -> str:
 
 
 @pytest.fixture
+def rh_identity_header(org_id: str) -> str:
+    """Admin X-Rh-Identity header for pod_session (aligned with e2e/sources suites)."""
+    return create_rh_identity_header(org_id)
+
+
+@pytest.fixture
 def pod_session(
     test_runner_pod: str,
     cluster_config: ClusterConfig,

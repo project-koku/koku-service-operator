@@ -21,6 +21,7 @@ import requests
 import urllib3
 
 
+from ros_feature import detect_ros_enabled, ROS_DISABLED_SKIP_REASON
 from utils import (
     check_pod_exists,
     exec_in_pod,
@@ -169,6 +170,23 @@ def cluster_config() -> ClusterConfig:
         keycloak_namespace=os.environ.get("KEYCLOAK_NAMESPACE", "keycloak"),
         platform=os.environ.get("PLATFORM", "openshift"),
     )
+
+
+@pytest.fixture(scope="session")
+def ros_enabled(cluster_config: ClusterConfig) -> bool:
+    """Whether ROS/Kruize are enabled for the target stack (CMSC spec or workload)."""
+    return detect_ros_enabled(
+        namespace=cluster_config.namespace,
+        cr_name=cluster_config.helm_release_name,
+        helm_release_name=cluster_config.helm_release_name,
+    )
+
+
+@pytest.fixture(scope="session")
+def require_ros_enabled(ros_enabled: bool) -> None:
+    """Skip the test when ROS is disabled (Cost-only beta default)."""
+    if not ros_enabled:
+        pytest.skip(ROS_DISABLED_SKIP_REASON)
 
 
 @pytest.fixture(scope="session")
@@ -334,6 +352,7 @@ def create_authenticated_session(
     session.headers["Authorization"] = f"Bearer {token.access_token}"
     if content_type:
         session.headers["Content-Type"] = content_type
+    session.trust_env = False
     session.verify = False
     return session
 
@@ -1272,6 +1291,7 @@ def test_csv_data() -> str:
 def http_session() -> requests.Session:
     """Create a requests session with SSL verification disabled."""
     session = requests.Session()
+    session.trust_env = False
     session.verify = False
     return session
 
@@ -1297,6 +1317,7 @@ def authenticated_session(user_jwt_token: JWTToken) -> requests.Session:
     session.headers.update({
         "Authorization": f"Bearer {user_jwt_token.access_token}",
     })
+    session.trust_env = False
     session.verify = False
     return session
 

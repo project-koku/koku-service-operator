@@ -327,6 +327,15 @@ func TestEnvoyResourceNames(t *testing.T) {
 	}
 }
 
+func TestEnvoyDeployment_EmptyImageHasNoFallback(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Envoy.Image = costv1alpha1.ImageSpec{}
+	d := EnvoyDeployment(cfg)
+	if got := d.Spec.Template.Spec.Containers[0].Image; got != "" {
+		t.Errorf("empty envoy image = %q, want empty (no catalog default)", got)
+	}
+}
+
 // TestEnvoyDeploymentHasConfigHash verifies that EnvoyDeployment includes a
 // content hash of the ConfigMap in the pod template annotations. Without this,
 // Envoy pods are never restarted when the ConfigMap changes (e.g., OIDC URL

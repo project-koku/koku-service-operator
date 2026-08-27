@@ -41,12 +41,12 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 1
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        tag: "768be82"
       replicas: 1
     listener:
       replicas: 2
@@ -93,6 +93,8 @@ spec:
   # Without it, gateway pods can become Ready while API calls return 401.
   auth:
     envoy:
+      # OSSM 2.6 is deprecated; do not change this tag without checking the
+      # operator Envoy bootstrap still matches.
       image:
         repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
         tag: "2.6"

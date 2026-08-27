@@ -127,7 +127,7 @@ func TestMigrationJobBuildsValidJob(t *testing.T) {
 	}
 }
 
-func TestMigrationJobImageFallback(t *testing.T) {
+func TestMigrationJobEmptyImageReturnsNil(t *testing.T) {
 	old := OperatorImage
 	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
 	defer func() { OperatorImage = old }()
@@ -135,10 +135,60 @@ func TestMigrationJobImageFallback(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
 	}
-	job := MigrationJob(cfg, "latest")
-	image := job.Spec.Template.Spec.Containers[0].Image
-	if image != "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:latest" {
-		t.Errorf("fallback image = %q", image)
+	if job := MigrationJob(cfg, "latest"); job != nil {
+		t.Errorf("empty API image must not build a Job, got image %q", job.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestMigrationJobPartialImageReturnsNil(t *testing.T) {
+	old := OperatorImage
+	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
+	defer func() { OperatorImage = old }()
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
+	}
+	cfg.Spec.CostManagement.API.Image.Repository = "quay.io/example/koku"
+	if job := MigrationJob(cfg, "v1"); job != nil {
+		t.Errorf("repository without tag must not build a Job, got image %q", job.Spec.Template.Spec.Containers[0].Image)
+	}
+
+	cfg.Spec.CostManagement.API.Image.Repository = ""
+	cfg.Spec.CostManagement.API.Image.Tag = "v1"
+	if job := MigrationJob(cfg, "v1"); job != nil {
+		t.Errorf("tag without repository must not build a Job, got image %q", job.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestKokuWorkloadsShareAPIImage(t *testing.T) {
+	old := OperatorImage
+	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
+	defer func() { OperatorImage = old }()
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
+	}
+	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{
+		Repository: "quay.io/example/koku",
+		Tag:        "abc123",
+	}
+
+	want, ok := KokuImage(cfg)
+	if !ok || want != "quay.io/example/koku:abc123" {
+		t.Fatalf("KokuImage = %q, ok=%v", want, ok)
+	}
+
+	got := map[string]string{
+		"api":       KokuAPIDeployment(cfg).Spec.Template.Spec.Containers[0].Image,
+		"masu":      MasuDeployment(cfg).Spec.Template.Spec.Containers[0].Image,
+		"listener":  ListenerDeployment(cfg).Spec.Template.Spec.Containers[0].Image,
+		"celery":    CeleryBeatDeployment(cfg).Spec.Template.Spec.Containers[0].Image,
+		"migration": MigrationJob(cfg, "abc123").Spec.Template.Spec.Containers[0].Image,
+	}
+	for name, image := range got {
+		if image != want {
+			t.Errorf("%s image = %q, want %q (must match API image)", name, image, want)
+		}
 	}
 }
 

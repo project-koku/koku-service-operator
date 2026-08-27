@@ -142,6 +142,43 @@ pytest tests/suites/cost_management/test_processing_state.py -v  # Processing st
 pytest tests/suites/e2e/test_scenarios.py -v -m scenario  # YAML-driven scenarios
 ```
 
+## Cluster Bot (operator path)
+
+To run this suite against an **operator-deployed** stack on a Cluster Bot / MCE lab
+(not the Helm chart), follow the full runbook:
+
+**[docs/development/clusterbot-operator-pytest.md](../../docs/development/clusterbot-operator-pytest.md)**
+
+Summary:
+
+```bash
+# 1. Infra: RHBK + Kafka + S4 (skip Helm/operator in this script)
+./scripts/deploy-test-cost-onprem.sh --namespace cost-onprem --deploy-s4 \
+  --skip-helm --skip-chart-tests --skip-tls
+
+# 2. Operator in-cluster (OwnNamespace: same NS as CR)
+export IMG=quay.io/<you>/koku-service-operator:<tag>
+./hack/deploy-incluster.sh cost-onprem
+
+# 3. Apply + patch CMSC (S4 endpoint, Keycloak, clusterDomain) — see runbook
+
+# 4. Pytest
+export NAMESPACE=cost-onprem HELM_RELEASE_NAME=cost-onprem KEYCLOAK_NAMESPACE=keycloak
+./scripts/run-pytest.sh --no-ui -v
+```
+
+**Do not** use `NAMESPACE=koku-service-operator-system` unless the CR also lives
+there. The default sample uses `cost-onprem`.
+
+### macOS notes
+
+- Use Homebrew bash for `deploy-test-cost-onprem.sh` if macOS `/bin/bash` is 3.2.
+- Homebrew Python may set `REQUESTS_CA_BUNDLE`, causing mass
+  `SSLCertVerificationError` even when tests set `verify=False`. Until the
+  `trust_env` fix lands, run: `unset REQUESTS_CA_BUNDLE SSL_CERT_FILE` before pytest.
+- UI tests: install Playwright browsers manually (`playwright install chromium`);
+  `--no-ui` skips `ui`, `performance`, and `helm` markers.
+
 ## Running Tests
 
 ### Using the Runner Script
