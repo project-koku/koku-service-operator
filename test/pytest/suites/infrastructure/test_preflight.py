@@ -92,7 +92,9 @@ class TestDatabaseConnectivity:
         
         assert result is not None and "1" in result, f"{db_name} database not found"
 
-    def test_kruize_database_exists(self, cluster_config, kruize_database_config):
+    def test_kruize_database_exists(
+        self, require_ros_enabled, cluster_config, kruize_database_config
+    ):
         """Verify Kruize database exists."""
         db_name = kruize_database_config.database
         cmd = [
