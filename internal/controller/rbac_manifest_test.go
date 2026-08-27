@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
@@ -64,13 +64,6 @@ func assertObjectBucketClaimGetList(t *testing.T, source string, rules []rbacv1.
 		wantGroup    = "objectbucket.io"
 		wantResource = "objectbucketclaims"
 	)
-	extraVerbs := map[string]struct{}{
-		"watch":  {},
-		"create": {},
-		"update": {},
-		"patch":  {},
-		"delete": {},
-	}
 
 	var found bool
 	for _, rule := range rules {
@@ -88,8 +81,7 @@ func assertObjectBucketClaimGetList(t *testing.T, source string, rules []rbacv1.
 				hasGet = true
 			case "list":
 				hasList = true
-			}
-			if _, extra := extraVerbs[v]; extra {
+			default:
 				t.Errorf("%s objectbucketclaims rule must not include verb %q: %+v", source, v, rule)
 			}
 		}
@@ -388,9 +380,20 @@ func TestCSV_AllNamespacesInstallMode(t *testing.T) {
 	if tmpl == "" {
 		t.Fatal("missing operatorframework.io/suggested-namespace-template")
 	}
-	for _, want := range []string{"cost-onprem", "pod-security.kubernetes.io/enforce", "restricted"} {
-		if !strings.Contains(tmpl, want) {
-			t.Errorf("suggested-namespace-template missing %q: %s", want, tmpl)
+	var ns corev1.Namespace
+	if err := yaml.Unmarshal([]byte(tmpl), &ns); err != nil {
+		t.Fatalf("suggested-namespace-template unmarshal: %v\n%s", err, tmpl)
+	}
+	if ns.Name != "cost-onprem" {
+		t.Errorf("suggested-namespace-template metadata.name: got %q, want cost-onprem", ns.Name)
+	}
+	for _, key := range []string{
+		"pod-security.kubernetes.io/enforce",
+		"pod-security.kubernetes.io/audit",
+		"pod-security.kubernetes.io/warn",
+	} {
+		if ns.Labels[key] != "restricted" {
+			t.Errorf("suggested-namespace-template label %s: got %q, want restricted", key, ns.Labels[key])
 		}
 	}
 }

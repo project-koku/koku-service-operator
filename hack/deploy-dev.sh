@@ -33,23 +33,56 @@ oc apply -n "$NS" -f config/rbac/leader_election_role.yaml
 # Namespaced kinds (Secrets, Jobs, CMSC, …) cluster-wide so a CMSC outside
 # this NS is still reconcilable. Drop leftover OwnNamespace RoleBinding.
 oc delete rolebinding koku-operator-dev -n "$NS" 2>/dev/null || true
-oc delete clusterrolebinding koku-operator-dev 2>/dev/null || true
-oc create clusterrolebinding koku-operator-dev \
-  --clusterrole=manager-role \
-  --serviceaccount="$NS:default" \
-  2>/dev/null || echo "  (clusterrolebinding koku-operator-dev already exists)"
+# Do not apply config/rbac/cluster_access_role_binding.yaml here — that
+# kustomize binding targets SA controller-manager in namespace "system".
+# Lab make run / deploy-incluster uses the default SA in $NS.
 
-oc create rolebinding koku-operator-dev-leader-election \
-  --role=leader-election-role \
-  --serviceaccount="$NS:default" \
-  -n "$NS" \
-  2>/dev/null || echo "  (rolebinding koku-operator-dev-leader-election already exists)"
+oc apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: koku-operator-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
+
+oc apply -n "$NS" -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: koku-operator-dev-leader-election
+  namespace: $NS
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
 
 # Cluster-scoped + NooBaa admin Secret get.
-oc create clusterrolebinding koku-operator-dev-cluster \
-  --clusterrole=manager-cluster-role \
-  --serviceaccount="$NS:default" \
-  2>/dev/null || echo "  (clusterrolebinding koku-operator-dev-cluster already exists)"
+oc apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: koku-operator-dev-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
 
 # Grant anyuid SCC so bundled PostgreSQL/Valkey pods can run with their
 # required UIDs (postgres=999, valkey=999). Skip if not on OpenShift.

@@ -23,7 +23,7 @@ The worked example uses the checked-in BYOI sample names. Override as needed
 
 | Variable | Sample default | Meaning |
 |----------|----------------|---------|
-| `NAMESPACE` | `cost-byoi` | CR **and** operator namespace |
+| `NAMESPACE` | `cost-byoi` | CR (operands) namespace. This walkthrough colocates the operator here as an example; AllNamespaces does not require it. Suggested operator install NS is `cost-onprem`. |
 | `CR_NAME` | `cost-management` | `CostManagementServiceConfig` metadata.name |
 | `INFRA_NAMESPACE` | `cost-byoi-infra` | Postgres, Valkey, MinIO (`./hack/deploy-byoi.sh`) |
 | `KAFKA_NAMESPACE` | `kafka` | AMQ Streams cluster |
