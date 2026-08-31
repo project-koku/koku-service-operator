@@ -1,3 +1,5 @@
+//go:build cluster_e2e
+
 /*
 Copyright 2026.
 
@@ -14,8 +16,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:build cluster_e2e
-
 package e2e
 
 import (
@@ -23,13 +23,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,11 +47,11 @@ const (
 	cmscPauseValue      = "true"
 
 	// requeueDrift in the reconciler is 5 minutes; add buffer for CI/lab jitter.
-	cmscDriftWait       = 6 * time.Minute
-	cmscMigrationWait   = 10 * time.Minute
+	cmscDriftWait         = 6 * time.Minute
+	cmscMigrationWait     = 10 * time.Minute
 	cmscMigrationDeadline = 10 * time.Minute // matches resources.MigrationDeadlineSeconds
-	cmscDependencyWait  = 3 * time.Minute
-	cmscPauseSettleWait = 2 * time.Minute
+	cmscDependencyWait    = 3 * time.Minute
+	cmscPauseSettleWait   = 2 * time.Minute
 
 	// Hostname with no endpoints — validation TCP probe fails quickly (BYOI path).
 	cmscUnreachableHost = "cmsc-e2e-dep-unreachable.invalid"
@@ -88,6 +88,7 @@ func initCMSCTestEnv() {
 	}
 
 	Expect(costv1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(batchv1.AddToScheme(scheme.Scheme)).To(Succeed())
 	cfg, err := clientcmdOrInClusterConfig()
 	Expect(err).NotTo(HaveOccurred(), "load kubeconfig for cluster e2e")
 
@@ -151,7 +152,7 @@ func updateCMSC(mut func(*costv1alpha1.CostManagementServiceConfig)) {
 	Expect(cmscK8s.Update(cmscCtx, cfg)).To(Succeed())
 }
 
-func waitCMSCConditionStatus(condType, status string, allowedReasons []string, timeout time.Duration) {
+func waitCMSCCondition(condType, status string, timeout time.Duration, allowedReasons ...string) {
 	Eventually(func(g Gomega) {
 		cond := findCMSCCondition(getCMSC(), condType)
 		g.Expect(cond).NotTo(BeNil(), "condition %s should exist", condType)
@@ -278,32 +279,20 @@ func findCMSCCondition(cfg *costv1alpha1.CostManagementServiceConfig, condType s
 	return apimeta.FindStatusCondition(cfg.Status.Conditions, condType)
 }
 
-func waitCMSCCondition(condType, status, reason string, timeout time.Duration) {
-	Eventually(func(g Gomega) {
-		cfg := getCMSC()
-		cond := findCMSCCondition(cfg, condType)
-		g.Expect(cond).NotTo(BeNil(), "condition %s should exist", condType)
-		g.Expect(string(cond.Status)).To(Equal(status), "condition %s status", condType)
-		if reason != "" {
-			g.Expect(cond.Reason).To(Equal(reason), "condition %s reason", condType)
-		}
-	}, timeout, 10*time.Second).Should(Succeed())
-}
-
 func waitCMSCHealthyGate() {
 	By("waiting for day-one CMSC gate (SchemaUpToDate=True, Available=True)")
-	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), "", cmscMigrationWait)
-	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), "", cmscMigrationWait)
+	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait)
+	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
 }
 
 func waitCMSCBlockingDependencyFailure(timeout time.Duration) {
-	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionFalse), "DependencyNotReady", timeout)
-	waitCMSCCondition(costv1alpha1.ConditionDegraded, string(metav1.ConditionTrue), "DependencyUnreachable", timeout)
+	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionFalse), timeout, "DependencyNotReady")
+	waitCMSCCondition(costv1alpha1.ConditionDegraded, string(metav1.ConditionTrue), timeout, "DependencyUnreachable")
 }
 
 func waitCMSCHealthyAfterDependencyRestore(timeout time.Duration) {
-	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), "", timeout)
-	waitCMSCCondition(costv1alpha1.ConditionDegraded, string(metav1.ConditionFalse), "", timeout)
+	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), timeout)
+	waitCMSCCondition(costv1alpha1.ConditionDegraded, string(metav1.ConditionFalse), timeout)
 }
 
 func ensureCMSCNotPaused() {
@@ -316,7 +305,7 @@ func ensureCMSCNotPaused() {
 	}
 	delete(cfg.Annotations, cmscPauseAnnotation)
 	Expect(cmscK8s.Update(cmscCtx, cfg)).To(Succeed())
-	waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionFalse), "Resumed", cmscDriftWait)
+	waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionFalse), cmscDriftWait, "Resumed")
 }
 
 func setCMSCPaused(paused bool) {
@@ -378,24 +367,89 @@ func deploymentContainerImage(name, container string) string {
 	return ""
 }
 
-func scaleStatefulSet(name string, replicas int32) {
-	sts := &appsv1.StatefulSet{}
-	err := cmscK8s.Get(cmscCtx, types.NamespacedName{Namespace: cmscNamespace, Name: name}, sts)
-	Expect(err).NotTo(HaveOccurred(), "get StatefulSet %s", name)
-	sts.Spec.Replicas = &replicas
-	Expect(cmscK8s.Update(cmscCtx, sts)).To(Succeed())
+func getMigrationJob(jobName string) (*batchv1.Job, error) {
+	job := &batchv1.Job{}
+	err := cmscK8s.Get(cmscCtx, types.NamespacedName{Namespace: cmscNamespace, Name: jobName}, job)
+	return job, err
 }
 
-func statefulSetReplicas(name string) int32 {
-	sts := &appsv1.StatefulSet{}
-	err := cmscK8s.Get(cmscCtx, types.NamespacedName{Namespace: cmscNamespace, Name: name}, sts)
-	Expect(err).NotTo(HaveOccurred())
-	if sts.Spec.Replicas == nil {
-		return 1
+func migrationJobActive(jobName string) bool {
+	job, err := getMigrationJob(jobName)
+	if err != nil {
+		return false
 	}
-	return *sts.Spec.Replicas
+	return job.Status.Active > 0
 }
 
+func migrationJobComplete(jobName string) bool {
+	job, err := getMigrationJob(jobName)
+	if err != nil {
+		return false
+	}
+	return job.Status.Succeeded > 0
+}
+
+func migrationJobFailed(jobName string) bool {
+	job, err := getMigrationJob(jobName)
+	if err != nil {
+		return false
+	}
+	return job.Status.Failed > 0
+}
+
+func migrationJobTerminal(jobName string) bool {
+	return migrationJobComplete(jobName) || migrationJobFailed(jobName)
+}
+
+func waitMigrationJobStarted(jobName string) {
+	Eventually(func(g Gomega) {
+		g.Expect(migrationJobActive(jobName) || migrationJobTerminal(jobName)).
+			To(BeTrue(), "expected migration Job %s to start", jobName)
+	}, cmscDependencyWait, 10*time.Second).Should(Succeed())
+}
+
+// assertRolloutBlockedDuringMigration waits for the migration Job to finish while
+// asserting the Deployment image stays on wantImage whenever the Job is active.
+func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage string) {
+	By("verifying Deployment does not roll while migration Job is active")
+	sawActive := false
+	Eventually(func(g Gomega) {
+		if migrationJobActive(jobName) {
+			sawActive = true
+			g.Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
+				"Deployment must not roll while migration Job %s is running", jobName)
+			cond := findCMSCCondition(getCMSC(), costv1alpha1.ConditionSchemaUpToDate)
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(cond.Reason).To(Equal("MigrationRunning"))
+		}
+		g.Expect(migrationJobTerminal(jobName)).To(BeTrue(),
+			"migration Job %s should reach a terminal state", jobName)
+	}, cmscMigrationWait+cmscMigrationDeadline, 2*time.Second).Should(Succeed())
+
+	if !sawActive {
+		Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
+			"Deployment must not roll before migration Job %s finishes", jobName)
+	}
+}
+
+func restoreKokuImageTag(repo, tag string) {
+	if tag == "" {
+		return
+	}
+	patchCMSCImageKoku(repo, tag)
+	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait)
+	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
+}
+
+func restoreRBACImageTag(repo, tag string) {
+	if tag == "" {
+		return
+	}
+	patchCMSCImageRBAC(repo, tag)
+	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait)
+	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
+}
 func patchCMSCImageKoku(repository, tag string) {
 	patch := fmt.Sprintf(
 		`{"spec":{"costManagement":{"api":{"image":{"repository":%q,"tag":%q}}}}}`,
@@ -406,7 +460,7 @@ func patchCMSCImageKoku(repository, tag string) {
 
 func patchCMSCImageRBAC(repository, tag string) {
 	patch := fmt.Sprintf(
-		`{"spec":{"rbac":{"image":{"repository":%q,"tag":%q}}}}}`,
+		`{"spec":{"rbac":{"image":{"repository":%q,"tag":%q}}}}`,
 		repository, tag,
 	)
 	patchCMSCJSON(patch)
@@ -420,88 +474,6 @@ func patchCMSCJSON(patch string) {
 		"-p", patch,
 	)
 	Expect(err).NotTo(HaveOccurred(), "patch CMSC: %s", patch)
-}
-
-func migrationJobActive(jobName string) bool {
-	out, err := cmscKubectl(
-		"get", "job", jobName,
-		"-n", cmscNamespace,
-		"-o", "jsonpath={.status.active}",
-	)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != "" && strings.TrimSpace(out) != "0"
-}
-
-func migrationJobComplete(jobName string) bool {
-	out, err := cmscKubectl(
-		"get", "job", jobName,
-		"-n", cmscNamespace,
-		"-o", "jsonpath={.status.succeeded}",
-	)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) == "1"
-}
-
-func migrationJobFailed(jobName string) bool {
-	out, err := cmscKubectl(
-		"get", "job", jobName,
-		"-n", cmscNamespace,
-		"-o", "jsonpath={.status.failed}",
-	)
-	if err != nil {
-		return false
-	}
-	n := strings.TrimSpace(out)
-	return n != "" && n != "0"
-}
-
-func migrationJobTerminal(jobName string) bool {
-	return migrationJobComplete(jobName) || migrationJobFailed(jobName)
-}
-
-func waitKokuMigrationJobStarted() {
-	Eventually(func(g Gomega) {
-		g.Expect(migrationJobActive(kokuMigrationJobName()) || migrationJobTerminal(kokuMigrationJobName())).
-			To(BeTrue(), "expected Koku migration Job to start")
-	}, cmscDependencyWait, 10*time.Second).Should(Succeed())
-}
-
-// assertRolloutBlockedDuringMigration polls until the migration Job finishes,
-// asserting the Deployment image stays on wantImage and SchemaUpToDate reports
-// MigrationRunning for every observed active interval.
-func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage string) {
-	By("verifying Deployment does not roll while migration Job is active")
-	deadline := time.Now().Add(cmscMigrationWait + cmscMigrationDeadline)
-	sawActive := false
-	for time.Now().Before(deadline) {
-		if migrationJobActive(jobName) {
-			sawActive = true
-			Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
-				"Deployment must not roll while migration Job %s is running", jobName)
-			waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionFalse), "MigrationRunning", cmscDependencyWait)
-		}
-		if migrationJobTerminal(jobName) {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-	if !sawActive {
-		Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
-			"Deployment must not roll before migration Job %s finishes", jobName)
-	}
-}
-
-func restoreKokuImageTag(repo, tag string) {
-	if tag == "" {
-		return
-	}
-	patchCMSCImageKoku(repo, tag)
-	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), "", cmscMigrationWait)
-	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), "", cmscMigrationWait)
 }
 
 func collectCMSCForensics() {

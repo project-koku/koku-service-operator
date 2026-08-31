@@ -1,3 +1,5 @@
+//go:build cluster_e2e
+
 /*
 Copyright 2026.
 
@@ -13,8 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-//go:build cluster_e2e
 
 package e2e
 
@@ -59,6 +59,6 @@ var _ = Describe("CMSC drift correction", Label("cmsc", "drift"), func() {
 			g.Expect(deploymentReplicas(depName)).To(Equal(desired))
 		}, cmscDriftWait, 15*time.Second).Should(Succeed())
 
-		waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), "", cmscMigrationWait)
+		waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
 	})
 })

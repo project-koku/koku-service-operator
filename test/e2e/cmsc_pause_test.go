@@ -1,3 +1,5 @@
+//go:build cluster_e2e
+
 /*
 Copyright 2026.
 
@@ -13,8 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-//go:build cluster_e2e
 
 package e2e
 
@@ -49,14 +49,15 @@ var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func(
 
 		By("setting pause annotation on CMSC")
 		setCMSCPaused(true)
-		waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionTrue), "AnnotationSet", cmscDependencyWait)
+		waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionTrue), cmscDependencyWait, "AnnotationSet")
 
 		By("scaling koku-api Deployment while paused")
 		scaleDeployment(depName, driftReplicas)
 
 		By("waiting less than drift window; manual scale should persist")
-		time.Sleep(cmscPauseSettleWait)
-		Expect(deploymentReplicas(depName)).To(Equal(driftReplicas), "paused operator must not revert drift yet")
+		Consistently(func(g Gomega) {
+			g.Expect(deploymentReplicas(depName)).To(Equal(driftReplicas))
+		}, cmscPauseSettleWait, 15*time.Second).Should(Succeed())
 
 		prog := findCMSCCondition(getCMSC(), costv1alpha1.ConditionProgressing)
 		Expect(prog).NotTo(BeNil())
@@ -74,13 +75,13 @@ var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func(
 
 		By("removing pause annotation")
 		setCMSCPaused(false)
-		waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionFalse), "Resumed", cmscDriftWait)
+		waitCMSCCondition(costv1alpha1.ConditionPaused, string(metav1.ConditionFalse), cmscDriftWait, "Resumed")
 
 		By("waiting for SSA drift correction (requeueDrift + buffer)")
 		Eventually(func(g Gomega) {
 			g.Expect(deploymentReplicas(depName)).To(Equal(desired))
 		}, cmscDriftWait, 15*time.Second).Should(Succeed())
 
-		waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), "", cmscMigrationWait)
+		waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
 	})
 })

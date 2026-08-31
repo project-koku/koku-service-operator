@@ -1,3 +1,5 @@
+//go:build cluster_e2e
+
 /*
 Copyright 2026.
 
@@ -13,8 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-//go:build cluster_e2e
 
 package e2e
 
@@ -43,19 +43,17 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 		restore := injectExternalDatabaseUnreachable()
 		defer func() {
 			restore()
-			waitCMSCConditionStatus(
-				costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionTrue),
-				[]string{"DatabaseAvailable", "DatabaseReachable", "ExternalDatabase"},
-				cmscMigrationWait,
+			waitCMSCCondition(
+				costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionTrue), cmscMigrationWait,
+				"DatabaseAvailable", "DatabaseReachable", "ExternalDatabase",
 			)
 			waitCMSCHealthyAfterDependencyRestore(cmscMigrationWait)
 		}()
 
 		By("pointing CMSC at unreachable external database (validation TCP probe)")
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionFalse),
-			[]string{"DatabaseUnreachable"},
-			cmscDependencyWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionFalse), cmscDependencyWait,
+			"DatabaseUnreachable",
 		)
 		waitCMSCBlockingDependencyFailure(cmscDependencyWait)
 	})
@@ -65,19 +63,17 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 		restore := injectExternalCacheUnreachable()
 		defer func() {
 			restore()
-			waitCMSCConditionStatus(
-				costv1alpha1.ConditionCacheReady, string(metav1.ConditionTrue),
-				[]string{"CacheAvailable", "CacheReachable", "ExternalCache"},
-				cmscMigrationWait,
+			waitCMSCCondition(
+				costv1alpha1.ConditionCacheReady, string(metav1.ConditionTrue), cmscMigrationWait,
+				"CacheAvailable", "CacheReachable", "ExternalCache",
 			)
 			waitCMSCHealthyAfterDependencyRestore(cmscMigrationWait)
 		}()
 
 		By("pointing CMSC at unreachable external cache (validation TCP probe)")
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionCacheReady, string(metav1.ConditionFalse),
-			[]string{"CacheUnreachable"},
-			cmscDependencyWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionCacheReady, string(metav1.ConditionFalse), cmscDependencyWait,
+			"CacheUnreachable",
 		)
 		waitCMSCBlockingDependencyFailure(cmscDependencyWait)
 	})
@@ -100,15 +96,13 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 		By("deleting PostgreSQL pod to simulate brief bundled outage")
 		deleteWorkloadPods("statefulset", stsName)
 
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionFalse),
-			[]string{"WaitingForDatabase"},
-			cmscDependencyWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionFalse), cmscDependencyWait,
+			"WaitingForDatabase",
 		)
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionTrue),
-			[]string{"DatabaseAvailable"},
-			cmscMigrationWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionTrue), cmscMigrationWait,
+			"DatabaseAvailable",
 		)
 	})
 
@@ -129,15 +123,13 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 		By("deleting Valkey pod to simulate brief bundled outage (" + kind + ")")
 		deleteWorkloadPods(kind, name)
 
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionCacheReady, string(metav1.ConditionFalse),
-			[]string{"WaitingForCache"},
-			cmscDependencyWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionCacheReady, string(metav1.ConditionFalse), cmscDependencyWait,
+			"WaitingForCache",
 		)
-		waitCMSCConditionStatus(
-			costv1alpha1.ConditionCacheReady, string(metav1.ConditionTrue),
-			[]string{"CacheAvailable"},
-			cmscMigrationWait,
+		waitCMSCCondition(
+			costv1alpha1.ConditionCacheReady, string(metav1.ConditionTrue), cmscMigrationWait,
+			"CacheAvailable",
 		)
 	})
 })
