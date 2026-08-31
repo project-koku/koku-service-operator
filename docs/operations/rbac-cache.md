@@ -49,7 +49,13 @@ script clears the Django cache and prints instructions to flush the external
 Redis/Valkey endpoint yourself:
 
 ```bash
-valkey-cli -h <host> -p <port> -a '<password>' FLUSHALL
+# Read password from the cache Secret — do not pass it via -a (exposes in shell history/ps)
+export REDISCLI_AUTH="$(
+  oc get secret <secret> -n <namespace> \
+    -o jsonpath='{.data.redis-password}' | base64 -d
+)"
+valkey-cli -h <host> -p <port> FLUSHALL
+unset REDISCLI_AUTH
 ```
 
 Use credentials from `spec.cache.auth.secretName` (key `redis-password`). Add

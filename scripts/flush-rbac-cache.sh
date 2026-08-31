@@ -137,11 +137,19 @@ flush_django_cache() {
         return 0
     fi
 
-    if ! "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${manage_py_cmd[@]}"; then
-        log_warn "manage.py not found on default PATH; retrying with /opt/rbac/rbac/manage.py"
-        "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${fallback_cmd[@]}"
+    if "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${manage_py_cmd[@]}"; then
+        log_success "insights-rbac Django cache cleared"
+        return 0
     fi
-    log_success "insights-rbac Django cache cleared"
+
+    log_warn "manage.py not found on default PATH; retrying with /opt/rbac/rbac/manage.py"
+    if "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${fallback_cmd[@]}"; then
+        log_success "insights-rbac Django cache cleared"
+        return 0
+    fi
+
+    log_error "Failed to clear insights-rbac Django cache"
+    return 1
 }
 
 flush_valkey_cache() {
@@ -169,8 +177,13 @@ flush_valkey_cache() {
     fi
 
     log_warn "valkey-cli failed; retrying with redis-cli FLUSHALL"
-    "$kubecli" exec -n "$NAMESPACE" "$valkey_pod" -- redis-cli FLUSHALL
-    log_success "Valkey cache flushed (redis-cli)"
+    if "$kubecli" exec -n "$NAMESPACE" "$valkey_pod" -- redis-cli FLUSHALL; then
+        log_success "Valkey cache flushed (redis-cli)"
+        return 0
+    fi
+
+    log_error "Failed to flush Valkey cache"
+    return 1
 }
 
 parse_args() {
