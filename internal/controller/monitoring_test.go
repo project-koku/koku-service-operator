@@ -119,13 +119,14 @@ func TestMonitoringAppliesServiceMonitorAndPrometheusRule(t *testing.T) {
 	if _, err := r.reconcileMonitoring(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileMonitoring: %v", err)
 	}
-	if len(patchKinds) != 5 ||
+	if len(patchKinds) != 6 ||
 		patchKinds[0] != "ServiceMonitor" ||
 		patchKinds[1] != "ServiceMonitor" ||
 		patchKinds[2] != "ServiceMonitor" ||
 		patchKinds[3] != "ServiceMonitor" ||
-		patchKinds[4] != "PrometheusRule" {
-		t.Errorf("expected App+Gateway+Operator+Celery ServiceMonitors then PrometheusRule, got %v", patchKinds)
+		patchKinds[4] != "ServiceMonitor" ||
+		patchKinds[5] != "PrometheusRule" {
+		t.Errorf("expected App+Gateway+Operator+Celery+RBAC ServiceMonitors then PrometheusRule, got %v", patchKinds)
 	}
 }
 
@@ -175,6 +176,8 @@ func TestMonitoringDisabledDeletesManagedResources(t *testing.T) {
 		testCRName + "-app-metrics":      false,
 		testCRName + "-gateway-metrics":  false,
 		testCRName + "-operator-metrics": false,
+		testCRName + "-celery-metrics":   false,
+		testCRName + "-rbac-metrics":     false,
 		testCRName + "-alerts":           false,
 		testCRName + "-kruize-metrics":   false, // not applied yet (COST-8054); cleanup on disable
 	}
