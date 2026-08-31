@@ -341,7 +341,7 @@ status:
     ui: { ready: true, replicas: "1/1" }
 
   discoveredConfig:
-    clusterDomain: "valid_lab_url"
+    clusterDomain: "{clusterDomain}"
     storageClass: "ocs-storagecluster-ceph-rbd"
     kafkaBootstrap: "cost-onprem-kafka-kafka-bootstrap.cost-onprem.svc.cluster.local:9092"
     oidcIssuerUrl: "https://keycloak-cost-onprem-auth.{clusterDomain}/realms/kubernetes"

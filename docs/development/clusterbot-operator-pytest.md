@@ -435,7 +435,7 @@ oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 After the stack reaches `SchemaUpToDate=True` and `Available=True`, you can run
 the reconciler-focused Go suite on the **same cluster and namespace** (`cost-onprem`):
 
-→ **[cmsc-e2e.md](cmsc-e2e.md)** — `make test-e2e-cmsc`, env vars, spec matrix, Prow notes
+→ **[cmsc-e2e.md](cmsc-e2e.md)** — prerequisites, env vars, and per-spec skip conditions
 
 This runbook covers **pytest** (application behavior, COST-7697). The Go suite
 covers **operator lifecycle** (pause, drift, dependencies, migration gating).

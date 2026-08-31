@@ -169,31 +169,9 @@ go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
 
 ## Prow integration (COST-7699)
 
-Today `e2e-pytest` in openshift/release runs: OLM install → `hack/ci/e2e.sh`
-(stack + pytest). The Go CMSC lifecycle suite is **not wired yet**; add a step
-after the stack is Ready (`SchemaUpToDate=True`, `Available=True`).
-
-Suggested presubmit step (after existing `stack` step):
-
-```bash
-set -euo pipefail
-export E2E_CLUSTER=1
-export NAMESPACE=cost-onprem
-export CMSC_NAME=cost-onprem
-export KUBECTL=oc
-export KUBE_CONTEXT="$(kubectl config current-context)"
-make test-e2e-cmsc
-```
-
-| Topic | Guidance |
-|-------|----------|
-| **Job order** | OLM install → BYOI/stack (`hack/ci/e2e.sh` with `SKIP_PYTEST=1`) → `make test-e2e-cmsc` → pytest (optional separate step) |
-| **Timeout** | Makefile allows `2h`; default suite ~15–25 min with 005b. Presubmit may use `-ginkgo.skip='OP-E2E-005b'` (~10 min saved) |
-| **Optional env** | `E2E_KOKU_UPGRADE_TAG` / `E2E_RBAC_UPGRADE_TAG` for rehearse or periodic jobs only |
-| **Artifacts** | On failure, tests emit forensics to stdout (CMSC YAML, events, operator logs). Capture step log; consider `oc get cmsc,events -n cost-onprem` in a trap |
-| **Not in Kind GHA** | `make test-e2e` (Kind manager smoke) stays separate; do not run CMSC suite there |
-
-Full env/per-spec matrix: sections above. Prow job owner: [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+Prow wiring is tracked in [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+After the stack is Ready (`SchemaUpToDate=True`, `Available=True`), run
+`make test-e2e-cmsc` with `E2E_CLUSTER=1` (see env vars above).
 
 ## Related
 

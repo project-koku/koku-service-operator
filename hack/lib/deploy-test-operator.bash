@@ -3,7 +3,7 @@
 
 dto_log_info() { echo -e "\033[0;34mℹ INFO:\033[0m $*"; }
 dto_log_success() { echo -e "\033[0;32m✅ SUCCESS:\033[0m $*"; }
-dto_log_warning() { echo -e "\033[1;33m⚠ WARNING:\033[0m $*"; }
+dto_log_warning() { echo -e "\033[1;33m⚠ WARNING:\033[0m $*" >&2; }
 dto_log_error() { echo -e "\033[0;31m❌ ERROR:\033[0m $*" >&2; }
 dto_log_step() { echo -e "\033[0;36m▶\033[0m $*"; }
 dto_log_verbose() {
@@ -44,9 +44,10 @@ dto_check_prerequisites() {
     return 0
   fi
   local missing=()
-  for tool in oc kubectl yq; do
-    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
-  done
+  if ! command -v oc >/dev/null 2>&1 && ! command -v kubectl >/dev/null 2>&1; then
+    missing+=("oc or kubectl")
+  fi
+  command -v yq >/dev/null 2>&1 || missing+=("yq")
   if [[ ${#missing[@]} -gt 0 ]]; then
     dto_log_error "missing required tools: ${missing[*]}"
     exit 1
@@ -180,10 +181,6 @@ dto_copy_s4_storage_credentials() {
 dto_deploy_s4() {
   if [[ "${DEPLOY_S4:-false}" != "true" ]]; then
     dto_log_verbose "skipping S4 (pass --deploy-s4 to enable)"
-    return 0
-  fi
-  if [[ "${SKIP_S4:-false}" == "true" ]]; then
-    dto_log_warning "skipping S4 (--skip-s4)"
     return 0
   fi
   dto_log_step "Deploying S4 storage stand-in (3/5)"
@@ -325,8 +322,6 @@ elif odf_ca_secret:
 open(path, "w").write(json.dumps({"spec": spec}))
 PY
   dto_kubectl patch cmsc "${CR_NAME}" -n "${NAMESPACE}" --type merge --patch-file "${patch_file}"
-  rm -f "${patch_file}"
-  trap - RETURN
   if [[ "${DEPLOY_S4:-false}" == "true" ]]; then
     dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (S4 + Keycloak)"
   elif [[ -n "${ODF_S3_CA_SECRET_NAME:-}" ]]; then
@@ -348,9 +343,9 @@ dto_wait_cmsc_day_one() {
   dto_log_step "Waiting for CMSC day-one success (${CMSC_READY_TIMEOUT})"
   dto_log_info "Expect SchemaUpToDate=True and Available=True (Phase may stay Progressing without UI OAuth)"
 
-  local deadline=$((SECONDS + $(dto_parse_duration_seconds "${CMSC_READY_TIMEOUT}")))
+  local deadline schema avail
+  deadline=$((SECONDS + $(dto_parse_duration_seconds "${CMSC_READY_TIMEOUT}")))
   while (( SECONDS < deadline )); do
-    local schema avail
     schema="$(dto_kubectl get cmsc "${CR_NAME}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.conditions[?(@.type=="SchemaUpToDate")].status}' 2>/dev/null || true)"
     avail="$(dto_kubectl get cmsc "${CR_NAME}" -n "${NAMESPACE}" \
@@ -377,6 +372,7 @@ dto_parse_duration_seconds() {
   elif [[ "$spec" =~ ^([0-9]+)s$ ]]; then
     echo "${BASH_REMATCH[1]}"
   else
+    dto_log_warning "unrecognized duration '${spec}', defaulting to 2700s (45m); supported: Nm, Ns"
     echo 2700
   fi
 }
@@ -389,10 +385,11 @@ dto_run_pytest() {
   fi
 
   local pytest_script="${ROOT}/scripts/run-pytest.sh"
-  if [[ ! -x "$pytest_script" ]]; then
+  if [[ ! -f "$pytest_script" ]]; then
     dto_log_error "pytest runner not found: ${pytest_script}"
     exit 1
   fi
+  chmod +x "$pytest_script"
 
   local -a pytest_args=()
   if [[ "${VERBOSE:-false}" == "true" ]]; then

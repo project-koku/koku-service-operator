@@ -65,6 +65,14 @@ assert_contains "$out" "OpenShift service CA" "dry-run would ensure service CA s
 source "${ROOT}/hack/lib/deploy-test-operator.bash"
 assert_eq "$(dto_parse_duration_seconds 45m)" "2700" "45m → seconds"
 assert_eq "$(dto_parse_duration_seconds 90s)" "90" "90s → seconds"
+warn_file="$(mktemp)"
+assert_eq "$(dto_parse_duration_seconds 1h 2>"$warn_file")" "2700" "1h → default seconds"
+assert_contains "$(cat "$warn_file")" "unrecognized" "1h emits duration warning"
+rm -f "$warn_file"
+warn_file="$(mktemp)"
+assert_eq "$(dto_parse_duration_seconds bogus 2>"$warn_file")" "2700" "bogus → default seconds"
+assert_contains "$(cat "$warn_file")" "unrecognized" "bogus emits duration warning"
+rm -f "$warn_file"
 
 # --- additive: must not invoke chart-only entrypoints ---
 lib="${ROOT}/hack/lib/deploy-test-operator.bash"
