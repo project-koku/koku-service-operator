@@ -341,10 +341,10 @@ status:
     ui: { ready: true, replicas: "1/1" }
 
   discoveredConfig:
-    clusterDomain: "apps.ocp-edge94.qe.lab.redhat.com"
+    clusterDomain: "valid_lab_url"
     storageClass: "ocs-storagecluster-ceph-rbd"
     kafkaBootstrap: "cost-onprem-kafka-kafka-bootstrap.cost-onprem.svc.cluster.local:9092"
-    oidcIssuerUrl: "https://keycloak-cost-onprem-auth.apps.ocp-edge94.qe.lab.redhat.com/realms/kubernetes"
+    oidcIssuerUrl: "https://keycloak-cost-onprem-auth.{clusterDomain}/realms/kubernetes"
 
   observedGeneration: 3
   version: "1.0.0"
