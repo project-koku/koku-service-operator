@@ -15,6 +15,7 @@ cluster-bot reproduction are tracked in
 | [ownnamespace.md](ownnamespace.md) | Why operator install NS must equal CR NS |
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
+| [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
 
 ## Goal
 
@@ -429,37 +430,19 @@ oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 | `make run` | **No** — BYOI hostnames not reachable from laptop |
 | `scripts/run-pytest.sh` | **Yes** — test orchestration |
 
-## Operator lifecycle Go e2e (COST-7698)
+## Related: operator lifecycle Go e2e (COST-7698)
 
-Reconciler scenarios live in `test/e2e/cmsc_*.go`. Full prerequisites, env vars,
-and per-spec skip conditions: **[cmsc-e2e.md](cmsc-e2e.md)**.
+After the stack reaches `SchemaUpToDate=True` and `Available=True`, you can run
+the reconciler-focused Go suite on the **same cluster and namespace** (`cost-onprem`):
 
-**Minimum to run:**
+→ **[cmsc-e2e.md](cmsc-e2e.md)** — `make test-e2e-cmsc`, env vars, spec matrix, Prow notes
 
-```bash
-export E2E_CLUSTER=1          # required
-export NAMESPACE=cost-onprem  # OwnNamespace == operator == CMSC
-export CMSC_NAME=cost-onprem
-# Stack must already have SchemaUpToDate=True and Available=True
-make test-e2e-cmsc
-```
-
-**Specs that need extra env (otherwise skipped):**
-
-| Spec | Variable |
-|------|----------|
-| OP-E2E-005 (Koku upgrade) | `E2E_KOKU_UPGRADE_TAG` — newer pullable koku tag |
-| OP-E2E-006 (RBAC upgrade) | `E2E_RBAC_UPGRADE_TAG` |
-| OP-E2E-007b / 008b (bundled pod loss) | `E2E_BUNDLED_INFRA_PROBE=1` |
-| OP-E2E-009 (secret rotation) | [COST-7694](https://redhat.atlassian.net/browse/COST-7694) — always skipped |
-
-**Runs by default without extra env:** pause, drift, dependency 007/008, downgrade
-005b (`E2E_KOKU_DOWNGRADE_TAG` defaults to `5432d06`; ~11 min).
-
-CI gate: **COST-7699** (`make test-e2e-cmsc` after BYOI + CMSC Ready on Prow).
+This runbook covers **pytest** (application behavior, COST-7697). The Go suite
+covers **operator lifecycle** (pause, drift, dependencies, migration gating).
 
 ## Related JIRA
 
 - [COST-8121](https://redhat.atlassian.net/browse/COST-8121) — reproduce and triage pytest on cluster-bot (active)
 - [COST-7697](https://redhat.atlassian.net/browse/COST-7697) — adapt pytest suite for operator (**Closed**)
+- [COST-7698](https://redhat.atlassian.net/browse/COST-7698) — operator lifecycle Go e2e ([cmsc-e2e.md](cmsc-e2e.md))
 - PR #56 — original pytest port (merged to `main`)

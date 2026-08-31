@@ -1,14 +1,17 @@
 # CMSC operator lifecycle e2e (COST-7698)
 
-Go e2e tests in `test/e2e/cmsc_*.go` exercise reconciler behavior on a **live,
-reconciled** `CostManagementServiceConfig` stack. They are **not** run in GitHub
-Actions Kind CI (`make test-e2e`); CI gate is deferred to
-[COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+Go e2e tests in `test/e2e/cmsc_*.go` exercise **operator reconciler behavior** on
+a live, reconciled `CostManagementServiceConfig` stack. They are **not**
+application-level tests — those live in the pytest suite
+([clusterbot-operator-pytest.md](clusterbot-operator-pytest.md), COST-7697).
+
+This suite is **not** run in GitHub Actions Kind CI (`make test-e2e`); the Prow
+gate is deferred to [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
 
 ## Quick start
 
 ```bash
-# 1. Deploy stack (see clusterbot-operator-pytest.md)
+# 1. Deploy stack (pick one lab path below)
 IMG=quay.io/.../koku-service-operator:<tag> ./hack/deploy-test-operator.sh --namespace cost-onprem --skip-test
 
 # 2. Confirm day-one gate
@@ -24,8 +27,18 @@ make test-e2e-cmsc
 
 Build tag: tests compile only with `-tags cluster_e2e` (the Makefile sets this).
 
-After `deploy-test-operator.sh --skip-test`, run the Go lifecycle suite with the
-commands above (pytest is separate; see [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md)).
+### Lab deploy paths
+
+Any path that leaves a reconciled CMSC in `cost-onprem` with
+`SchemaUpToDate=True` and `Available=True` is valid:
+
+| Path | When to use |
+|------|-------------|
+| [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) | Cluster Bot / MCE lab: infra + `hack/deploy-incluster.sh` + CMSC — then run **pytest** and/or this Go suite |
+| `hack/deploy-test-operator.sh --skip-test` | Chart-parity orchestrator (RHBK, Kafka, ODF/S4, operator, CMSC); skips pytest |
+| Existing stack | Already deployed — go straight to step 2 above |
+
+Use the **same** `NAMESPACE` / `CMSC_NAME` as the deploy runbook (`cost-onprem` by default).
 
 ## Default suite (`make test-e2e-cmsc`)
 
@@ -48,7 +61,7 @@ With no extra env vars beyond `E2E_CLUSTER=1`:
 | Day-one conditions | `BeforeSuite` waits for `SchemaUpToDate=True` and `Available=True` |
 | `cost-onprem-koku-api` Deployment | Required for pause/drift specs (name = `{CMSC_NAME}-koku-api`) |
 | Active `oc` / `kubectl` session | Tests use the current kubeconfig context |
-| Time budget | Default suite ~15–25 min without upgrade; **add ~11 min** for downgrade (`005b`); drift waits up to **6 min** each |
+| Time budget | Default suite **~15–25 min** on a warm lab cluster; upper bound **~35–45 min** if drift/migration waits max out. Quick pass (skip 005b): **~8–12 min** |
 
 ## Environment variables
 
@@ -184,6 +197,7 @@ Full env/per-spec matrix: sections above. Prow job owner: [COST-7699](https://re
 
 ## Related
 
-- [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) — deploy path
+- [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) — Cluster Bot deploy + pytest (same namespace; run Go suite after Ready)
 - [COST-7698 Jira](../jira/COST-7698.md)
 - [COST-7699](https://redhat.atlassian.net/browse/COST-7699) — Prow CI gate
+- [COST-7694](https://redhat.atlassian.net/browse/COST-7694) — blocks OP-E2E-009 (secret rotation)
