@@ -120,7 +120,7 @@ test-hack: ## Run no-cluster hack/ script tests (demo-preprod helpers).
 
 .PHONY: check-rbac-seed
 check-rbac-seed: ## Verify embedded RBAC seed snapshots match project-kessel/rbac-config at the pinned ref.
-	go test ./internal/resources/rbac_seed/... -run TestEmbeddedMatchesUpstreamRbacConfig -count=1
+	go test ./internal/resources/rbac_seed/... -run TestEmbeddedMatchesUpstreamRbacConfig -count=1 -timeout 2m
 
 # Statement coverage across internal/controller + internal/resources (coverpkg),
 # not make test's per-package cover.out. Override: make coverage-gate COVERAGE_MIN=84.0

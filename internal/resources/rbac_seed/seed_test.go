@@ -1,7 +1,6 @@
 package rbac_seed
 
 import (
-	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +29,7 @@ func TestEmbeddedMatchesUpstreamRbacConfig(t *testing.T) {
 	if os.Getenv("RBAC_SEED_SKIP_UPSTREAM") == "1" {
 		t.Skip("RBAC_SEED_SKIP_UPSTREAM=1")
 	}
-	if err := CheckEmbeddedMatchesUpstream(http.DefaultClient); err != nil {
+	if err := CheckEmbeddedMatchesUpstream(nil); err != nil {
 		t.Fatal(err)
 	}
 }

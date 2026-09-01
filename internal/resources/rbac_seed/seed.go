@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 //go:embed data/*.json rbac_config_ref
@@ -16,6 +17,7 @@ var embeddedFS embed.FS
 const (
 	rbacConfigRepo       = "project-kessel/rbac-config"
 	rbacConfigConfigPath = "configs/prod"
+	upstreamFetchTimeout = 30 * time.Second
 )
 
 // ConfigRef returns the pinned project-kessel/rbac-config commit SHA.
@@ -252,6 +254,10 @@ func splitPermission(permission string) (app, resource, verb string, err error) 
 	return parts[0], parts[1], parts[2], nil
 }
 
+func upstreamHTTPClient() *http.Client {
+	return &http.Client{Timeout: upstreamFetchTimeout}
+}
+
 // EmbeddedFile returns the bytes of an embedded rbac-config snapshot file.
 func EmbeddedFile(name string) ([]byte, error) {
 	return embeddedFS.ReadFile("data/" + name)
@@ -269,7 +275,7 @@ func FetchUpstreamFile(client *http.Client, name string) ([]byte, error) {
 		return nil, err
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = upstreamHTTPClient()
 	}
 	url := fmt.Sprintf(
 		"https://raw.githubusercontent.com/%s/%s/%s/%s/%s",
