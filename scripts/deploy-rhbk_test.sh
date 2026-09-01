@@ -127,6 +127,11 @@ set -e
 assert_eq "$status" "0" "_obtain_admin_token returns 0 when DNS never recovers"
 assert_eq "$token" "" "_obtain_admin_token is empty after exhausted retries"
 
+export KEYCLOAK_ADMIN_BASE="http://127.0.0.1:18080"
+assert_eq "$(keycloak_admin_base)" "http://127.0.0.1:18080" \
+  "keycloak_admin_base honors KEYCLOAK_ADMIN_BASE (port-forward)"
+unset KEYCLOAK_ADMIN_BASE
+
 rhbk_default="$(grep -E '^RHBK_SCRIPT=' "${ROOT}/hack/deploy-byoi.sh" || true)"
 assert_eq "$rhbk_default" \
   'RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"' \

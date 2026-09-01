@@ -374,10 +374,14 @@ echo ""
 "$KUBECTL" create namespace "${NAMESPACE}" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
 echo "[1/4] BYOI dependencies..."
+# Prow pod is not on the claimed cluster. Keycloak Admin API must use
+# oc port-forward (kube API), not the Hive apps Route.
+export KEYCLOAK_ADMIN_VIA="${KEYCLOAK_ADMIN_VIA:-port-forward}"
 KUBE_CONTEXT="$KUBE_CONTEXT" KUBECTL="$KUBECTL" \
   NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" INFRA_NAMESPACE="$INFRA_NAMESPACE" \
   KAFKA_NAMESPACE="$KAFKA_NAMESPACE" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
   CHART_ROOT="${CHART_ROOT:-}" \
+  KEYCLOAK_ADMIN_VIA="$KEYCLOAK_ADMIN_VIA" \
   ./hack/deploy-byoi.sh
 
 echo "[2/4] Pytest-compatible Secret names ({cr.name}-*)..."
