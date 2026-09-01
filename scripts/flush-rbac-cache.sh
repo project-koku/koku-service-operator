@@ -58,8 +58,16 @@ Notes:
   - Bundled Valkey is flushed via valkey-cli FLUSHALL in-cluster (dev/CI).
   - External cache (BYOI) has no local pod; the script prints manual instructions.
   - FLUSHALL clears all Valkey keys, including Celery metadata.
+  - Django flush runs cache.clear() and purge_cache_for_all_tenants() (AccessCache).
 EOF
 }
+
+# flush_valkey_cache: 0 = success, 1 = pod found but flush failed, 2 = no bundled pod (BYOI skip)
+readonly VALKEY_OK=0
+readonly VALKEY_FAILED=1
+readonly VALKEY_SKIPPED=2
+
+DJANGO_SHELL_FLUSH='from django.core.cache import cache; from management.seeds import purge_cache_for_all_tenants; cache.clear(); purge_cache_for_all_tenants(); print("RBAC and AccessCache cleared")'
 
 detect_kubecli() {
     if [[ -n "${KUBECLI:-}" ]]; then
@@ -114,12 +122,10 @@ flush_django_cache() {
     local kubecli="$1"
     local rbac_pod
     local manage_py_cmd=(
-        python manage.py shell -c
-        "from django.core.cache import cache; cache.clear(); print('RBAC cache cleared')"
+        python manage.py shell -c "$DJANGO_SHELL_FLUSH"
     )
     local fallback_cmd=(
-        python /opt/rbac/rbac/manage.py shell -c
-        "from django.core.cache import cache; cache.clear(); print('RBAC cache cleared')"
+        python /opt/rbac/rbac/manage.py shell -c "$DJANGO_SHELL_FLUSH"
     )
 
     rbac_pod="$(get_pod_by_component "$kubecli" "rbac-api")"
@@ -138,13 +144,13 @@ flush_django_cache() {
     fi
 
     if "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${manage_py_cmd[@]}"; then
-        log_success "insights-rbac Django cache cleared"
+        log_success "insights-rbac Django cache and AccessCache cleared"
         return 0
     fi
 
     log_warn "manage.py not found on default PATH; retrying with /opt/rbac/rbac/manage.py"
     if "$kubecli" exec -n "$NAMESPACE" "$rbac_pod" -- "${fallback_cmd[@]}"; then
-        log_success "insights-rbac Django cache cleared"
+        log_success "insights-rbac Django cache and AccessCache cleared"
         return 0
     fi
 
@@ -162,7 +168,7 @@ flush_valkey_cache() {
         echo "  valkey-cli -h <host> -p <port> FLUSHALL"
         echo "  # or: redis-cli -h <host> -p <port> FLUSHALL"
         echo "See docs/operations/rbac-cache.md for details."
-        return 1
+        return "$VALKEY_SKIPPED"
     fi
 
     log_info "Flushing Valkey cache in pod ${valkey_pod} (FLUSHALL)..."
@@ -182,8 +188,8 @@ flush_valkey_cache() {
         return 0
     fi
 
-    log_error "Failed to flush Valkey cache"
-    return 1
+    log_error "Failed to flush Valkey cache in pod ${valkey_pod}"
+    return "$VALKEY_FAILED"
 }
 
 parse_args() {
@@ -270,18 +276,24 @@ main() {
 
     if [[ "$django_status" -ne 0 || "$valkey_status" -ne 0 ]]; then
         if [[ "$VALKEY_ONLY" == "true" ]]; then
+            if [[ "$valkey_status" -eq "$VALKEY_SKIPPED" ]]; then
+                exit 0
+            fi
             exit "$valkey_status"
         fi
         if [[ "$DJANGO_ONLY" == "true" ]]; then
             exit "$django_status"
         fi
-        # Django flush is required; Valkey missing is a warning for BYOI.
         if [[ "$django_status" -ne 0 ]]; then
             exit "$django_status"
         fi
-        if [[ "$valkey_status" -ne 0 ]]; then
-            log_warn "Django cache cleared; Valkey flush skipped or failed (see above)"
+        if [[ "$valkey_status" -eq "$VALKEY_SKIPPED" ]]; then
+            log_warn "Django cache cleared; bundled Valkey not in namespace (flush external cache manually)"
             exit 0
+        fi
+        if [[ "$valkey_status" -eq "$VALKEY_FAILED" ]]; then
+            log_error "Django cache cleared but Valkey FLUSHALL failed — authorization may still be stale"
+            exit 1
         fi
     fi
 
