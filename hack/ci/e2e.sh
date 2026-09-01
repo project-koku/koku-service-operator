@@ -6,7 +6,7 @@
 #
 # Usage (from operator repo root, operator already installed):
 #   KUBE_CONTEXT=<context> NAMESPACE=cost-onprem CR_NAME=cost-onprem \
-#     INFRA_NAMESPACE=cost-onprem-infra CHART_ROOT=/path/to/cost-onprem-chart ./hack/ci/e2e.sh
+#     INFRA_NAMESPACE=cost-onprem-infra ./hack/ci/e2e.sh
 #
 # KUBE_CONTEXT is required unless KUBECONFIG points at a single-context kubeconfig.
 # The script pins an isolated KUBECONFIG (exported to child scripts) so kubectl/oc
@@ -165,29 +165,12 @@ resolve_chart_root() {
   return 1
 }
 
-# ci-operator tests cannot declare extra_refs. Clone the chart for RHBK when
-# it is not already on disk (sibling checkout or a Prow clonerefs path).
+# Optional sibling chart checkout. Prow does not clone cost-onprem-chart:
+# hack/deploy-byoi.sh uses this repo's scripts/deploy-rhbk.sh.
 ensure_chart_root() {
   local found
   found="$(resolve_chart_root || true)"
-  if [[ -n "$found" ]]; then
-    echo "$found"
-    return 0
-  fi
-  if [[ "${SKIP_KEYCLOAK:-0}" == "1" ]]; then
-    return 0
-  fi
-  if ! command -v git >/dev/null 2>&1; then
-    echo "error: git is required to clone insights-onprem/cost-onprem-chart for RHBK" >&2
-    echo "  Set CHART_ROOT, SKIP_KEYCLOAK=1, or install git." >&2
-    return 1
-  fi
-  local dest="${CHART_CLONE_DIR:-/tmp/cost-onprem-chart}"
-  echo "CHART_ROOT unset; cloning insights-onprem/cost-onprem-chart@${CHART_REF:-main} → ${dest}" >&2
-  rm -rf "$dest"
-  git clone --depth 1 --branch "${CHART_REF:-main}" \
-    https://github.com/insights-onprem/cost-onprem-chart.git "$dest"
-  echo "$dest"
+  echo "$found"
 }
 
 # Redact credential-shaped strings on stdin. Used for anything that may land in

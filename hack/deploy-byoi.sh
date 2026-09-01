@@ -12,8 +12,8 @@
 # Skip steps:
 #   SKIP_KAFKA=1 SKIP_INFRA=1 SKIP_KEYCLOAK=1 SKIP_OAUTH_MIRROR=1 ./hack/deploy-byoi.sh
 #
-# Keycloak lives in the cost-onprem-chart sibling repo by default:
-#   CHART_ROOT=../cost-onprem-chart ./hack/deploy-byoi.sh
+# Keycloak uses this repo's scripts/deploy-rhbk.sh by default.
+# Override with RHBK_SCRIPT or CHART_ROOT (chart copy) if needed.
 #
 set -euo pipefail
 
@@ -28,7 +28,7 @@ KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 CHART_ROOT="${CHART_ROOT:-${ROOT}/../cost-onprem-chart}"
-RHBK_SCRIPT="${RHBK_SCRIPT:-${CHART_ROOT}/scripts/deploy-rhbk.sh}"
+RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"
 
 SKIP_KAFKA="${SKIP_KAFKA:-0}"
 SKIP_INFRA="${SKIP_INFRA:-0}"
@@ -70,6 +70,7 @@ echo "CR name:            $CR_NAME"
 echo "Infra NS:           $INFRA_NAMESPACE"
 echo "Kafka NS:           $KAFKA_NAMESPACE"
 echo "Keycloak NS:        $KEYCLOAK_NAMESPACE"
+echo "RHBK script:        $RHBK_SCRIPT"
 echo "StorageClass:       $STORAGE_CLASS"
 echo "UI base URL:        ${UI_BASE_URL:-<unset>}"
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
@@ -141,7 +142,7 @@ if [[ "$SKIP_KEYCLOAK" != "1" ]]; then
   echo "[A3] Keycloak / RHBK..."
   if [[ ! -x "$RHBK_SCRIPT" ]]; then
     echo "error: RHBK script not found or not executable: $RHBK_SCRIPT" >&2
-    echo "  Set CHART_ROOT or RHBK_SCRIPT, or SKIP_KEYCLOAK=1 if Keycloak already exists." >&2
+    echo "  Set RHBK_SCRIPT, or SKIP_KEYCLOAK=1 if Keycloak already exists." >&2
     exit 1
   fi
   (
