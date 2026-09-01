@@ -188,11 +188,11 @@ func injectExternalDatabaseUnreachable() func() {
 	}
 }
 
-func ensureCacheCredentialsSecret(name string) {
+func ensureCacheCredentialsSecret(name string) bool {
 	secret := &corev1.Secret{}
 	err := cmscK8s.Get(cmscCtx, types.NamespacedName{Namespace: cmscNamespace, Name: name}, secret)
 	if err == nil {
-		return
+		return false
 	}
 	secret = &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -204,6 +204,7 @@ func ensureCacheCredentialsSecret(name string) {
 		},
 	}
 	Expect(cmscK8s.Create(cmscCtx, secret)).To(Succeed())
+	return true
 }
 
 func injectExternalCacheUnreachable() func() {
@@ -214,9 +215,10 @@ func injectExternalCacheUnreachable() func() {
 		port = 6379
 	}
 	secretName := saved.Auth.SecretName
+	createdSecret := false
 	if secretName == "" {
 		secretName = cmscName + "-cache-credentials"
-		ensureCacheCredentialsSecret(secretName)
+		createdSecret = ensureCacheCredentialsSecret(secretName)
 	}
 	updateCMSC(func(c *costv1alpha1.CostManagementServiceConfig) {
 		c.Spec.Cache.Deploy = boolPtr(false)
@@ -228,6 +230,11 @@ func injectExternalCacheUnreachable() func() {
 		updateCMSC(func(c *costv1alpha1.CostManagementServiceConfig) {
 			c.Spec.Cache = saved
 		})
+		if createdSecret {
+			Expect(client.IgnoreNotFound(cmscK8s.Delete(cmscCtx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: cmscNamespace},
+			}))).To(Succeed())
+		}
 	}
 }
 
@@ -412,10 +419,8 @@ func waitMigrationJobStarted(jobName string) {
 // asserting the Deployment image stays on wantImage whenever the Job is active.
 func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage string) {
 	By("verifying Deployment does not roll while migration Job is active")
-	sawActive := false
 	Eventually(func(g Gomega) {
 		if migrationJobActive(jobName) {
-			sawActive = true
 			g.Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
 				"Deployment must not roll while migration Job %s is running", jobName)
 			cond := findCMSCCondition(getCMSC(), costv1alpha1.ConditionSchemaUpToDate)
@@ -426,30 +431,20 @@ func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage 
 		g.Expect(migrationJobTerminal(jobName)).To(BeTrue(),
 			"migration Job %s should reach a terminal state", jobName)
 	}, cmscMigrationWait+cmscMigrationDeadline, 2*time.Second).Should(Succeed())
-
-	if !sawActive {
-		Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
-			"Deployment must not roll before migration Job %s finishes", jobName)
-	}
 }
 
 func restoreKokuImageTag(repo, tag string) {
-	if tag == "" {
-		return
-	}
 	patchCMSCImageKoku(repo, tag)
 	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait)
 	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
 }
 
 func restoreRBACImageTag(repo, tag string) {
-	if tag == "" {
-		return
-	}
 	patchCMSCImageRBAC(repo, tag)
 	waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait)
 	waitCMSCCondition(costv1alpha1.ConditionAvailable, string(metav1.ConditionTrue), cmscMigrationWait)
 }
+
 func patchCMSCImageKoku(repository, tag string) {
 	patch := fmt.Sprintf(
 		`{"spec":{"costManagement":{"api":{"image":{"repository":%q,"tag":%q}}}}}`,

@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT}/hack/deploy-test-operator.sh"
+export KUBE_CONTEXT="${KUBE_CONTEXT:-dry-run}"
 fail=0
 
 assert_eq() {

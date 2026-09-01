@@ -26,10 +26,10 @@ import (
 )
 
 func clientcmdOrInClusterConfig() (*rest.Config, error) {
-	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
-		return clientcmd.BuildConfigFromFlags("", kubeconfig)
-	}
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		loadingRules = &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+	}
 	configOverrides := &clientcmd.ConfigOverrides{}
 	if ctx := os.Getenv("KUBE_CONTEXT"); ctx != "" {
 		configOverrides.CurrentContext = ctx

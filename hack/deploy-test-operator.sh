@@ -81,7 +81,7 @@ Options:
 
 Environment:
   IMG                    Operator image (required unless --tests-only or --skip-operator)
-  KUBE_CONTEXT           Pin kubectl/oc context (optional)
+  KUBE_CONTEXT           Pin kubectl/oc context (required)
   CMSC_READY_TIMEOUT     Wait for day-one CMSC conditions (default: 45m)
   ODF_S3_CA_SECRET_NAME  Secret for openshift service CA on ODF path (default: odf-s3-ca)
 

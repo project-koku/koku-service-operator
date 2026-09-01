@@ -20,6 +20,11 @@ dto_kubectl() {
   fi
 }
 
+# create / apply / patch must target the pinned context (KUBE_CONTEXT is required).
+dto_kubectl_mutate() {
+  dto_kubectl --context="${KUBE_CONTEXT}" "$@"
+}
+
 dto_print_plan() {
   cat <<EOF
 
@@ -76,6 +81,11 @@ dto_check_oc_connection() {
 
 dto_pin_kube_context() {
   if [[ -z "${KUBE_CONTEXT:-}" ]]; then
+    dto_log_error "KUBE_CONTEXT is required (pin kubectl/oc to the target cluster)"
+    exit 1
+  fi
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_verbose "DRY RUN: context pinned to ${KUBE_CONTEXT}"
     return 0
   fi
   local current
@@ -116,7 +126,7 @@ dto_create_app_namespace() {
   if dto_kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
     dto_log_info "namespace ${NAMESPACE} already exists"
   else
-    dto_kubectl create namespace "${NAMESPACE}"
+    dto_kubectl_mutate create namespace "${NAMESPACE}"
     dto_log_success "created namespace ${NAMESPACE}"
   fi
   dto_kubectl label namespace "${NAMESPACE}" cost_management_optimizations=true --overwrite >/dev/null
@@ -170,11 +180,11 @@ dto_copy_s4_storage_credentials() {
     return 1
   fi
 
-  dto_kubectl create secret generic "${storage_secret}" \
+  dto_kubectl_mutate create secret generic "${storage_secret}" \
     --namespace="${target_ns}" \
     --from-literal=access-key="${access_key}" \
     --from-literal=secret-key="${secret_key}" \
-    --dry-run=client -o yaml | dto_kubectl apply -f -
+    --dry-run=client -o yaml | dto_kubectl_mutate apply -f -
   dto_log_success "synced ${source_ns}/${source_secret} → ${target_ns}/${storage_secret}"
 }
 
@@ -256,9 +266,9 @@ dto_ensure_odf_s3_ca_secret() {
     return 0
   fi
   dto_log_info "Ensuring Secret ${NAMESPACE}/${ODF_S3_CA_SECRET_NAME} from cluster service CA (objectStorage TLS)"
-  printf '%s' "$pem" | dto_kubectl -n "${NAMESPACE}" create secret generic "${ODF_S3_CA_SECRET_NAME}" \
+  printf '%s' "$pem" | dto_kubectl_mutate -n "${NAMESPACE}" create secret generic "${ODF_S3_CA_SECRET_NAME}" \
     --from-file=ca.crt=/dev/stdin \
-    --dry-run=client -o yaml | dto_kubectl apply -f -
+    --dry-run=client -o yaml | dto_kubectl_mutate apply -f -
 }
 
 dto_apply_cmsc() {
@@ -289,7 +299,7 @@ dto_apply_cmsc() {
   s4_endpoint="s4.${S4_NAMESPACE}.svc.cluster.local"
 
   yq e ".metadata.namespace = \"${NAMESPACE}\" | .metadata.name = \"${CR_NAME}\"" "${CMSC_SAMPLE}" \
-    | dto_kubectl apply -f -
+    | dto_kubectl_mutate apply -f -
 
   dto_ensure_odf_s3_ca_secret
 
@@ -321,7 +331,7 @@ elif odf_ca_secret:
     spec["objectStorage"] = {"caCertSecretName": odf_ca_secret}
 open(path, "w").write(json.dumps({"spec": spec}))
 PY
-  dto_kubectl patch cmsc "${CR_NAME}" -n "${NAMESPACE}" --type merge --patch-file "${patch_file}"
+  dto_kubectl_mutate patch cmsc "${CR_NAME}" -n "${NAMESPACE}" --type merge --patch-file "${patch_file}"
   if [[ "${DEPLOY_S4:-false}" == "true" ]]; then
     dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (S4 + Keycloak)"
   elif [[ -n "${ODF_S3_CA_SECRET_NAME:-}" ]]; then

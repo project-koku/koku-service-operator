@@ -30,8 +30,6 @@ import (
 )
 
 var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func() {
-	const driftReplicas int32 = 3
-
 	BeforeAll(func() {
 		ensureCMSCNotPaused()
 	})
@@ -46,6 +44,12 @@ var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func(
 		if !deploymentExists(depName) {
 			Skip("koku-api Deployment not found in namespace")
 		}
+
+		desired := getCMSC().Spec.CostManagement.API.Replicas
+		if desired == 0 {
+			desired = 1
+		}
+		driftReplicas := desired + 2
 
 		By("setting pause annotation on CMSC")
 		setCMSCPaused(true)
