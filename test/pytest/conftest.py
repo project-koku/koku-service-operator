@@ -30,6 +30,7 @@ from utils import (
     get_pod_by_label,
     get_route_url,
     get_secret_value,
+    install_route_dns_retries,
     run_oc_command,
 )
 from rbac_bootstrap_scripts import (
@@ -43,6 +44,11 @@ from rbac_bootstrap_scripts import (
 
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Prow pytest talks to Keycloak/gateway via OpenShift Routes. Patch every
+# requests.Session (including requests.post used by token helpers) so a
+# transient NXDOMAIN does not fail the test.
+install_route_dns_retries()
 
 # Fallback identity values when Keycloak is unreachable.
 # Canonical source: jwtAuth.realmUsers in cost-onprem/values.yaml.

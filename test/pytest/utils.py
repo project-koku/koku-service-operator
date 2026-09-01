@@ -26,16 +26,12 @@ from urllib3.response import HTTPResponse
 from urllib3.util.retry import Retry
 
 
-def external_http_session(*, verify: bool = False) -> requests.Session:
-    """Session for Route/API calls from the Prow pod (outside the cluster).
+def route_http_retry() -> Retry:
+    """Retry NXDOMAIN/connect errors to claimed-cluster ``*.apps.*`` Routes.
 
-    Claimed-cluster ``*.apps.*`` DNS occasionally returns NXDOMAIN
-    (``Name or service not known``). urllib3 does not retry that unless
-    ``connect`` retries are set on the adapter.
+    Prow pytest runs outside the cluster. urllib3 does not retry
+    ``NameResolutionError`` unless ``connect`` retries are set.
     """
-    session = requests.Session()
-    session.trust_env = False
-    session.verify = verify
     retry_kw = {
         "total": 6,
         "connect": 6,
@@ -45,13 +41,44 @@ def external_http_session(*, verify: bool = False) -> requests.Session:
         "raise_on_status": False,
     }
     try:
-        retry = Retry(allowed_methods=False, **retry_kw)
+        return Retry(allowed_methods=False, **retry_kw)
     except TypeError:
-        retry = Retry(method_whitelist=False, **retry_kw)
-    adapter = HTTPAdapter(max_retries=retry)
+        return Retry(method_whitelist=False, **retry_kw)
+
+
+def mount_route_dns_retries(session: requests.Session) -> requests.Session:
+    """Mount connect retries on *session* for http and https."""
+    adapter = HTTPAdapter(max_retries=route_http_retry())
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
+
+
+def install_route_dns_retries() -> None:
+    """Apply Route DNS retries to every ``requests.Session``, including ``requests.get``.
+
+    Patching individual fixtures is not enough: token helpers and many tests
+    call ``requests.post`` / ``requests.get``, which construct a throwaway
+    Session with ``max_retries=0``.
+    """
+    if getattr(install_route_dns_retries, "_installed", False):
+        return
+    orig_init = requests.Session.__init__
+
+    def _init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        mount_route_dns_retries(self)
+
+    requests.Session.__init__ = _init  # type: ignore[method-assign]
+    install_route_dns_retries._installed = True  # type: ignore[attr-defined]
+
+
+def external_http_session(*, verify: bool = False) -> requests.Session:
+    """Session for Route/API calls from the Prow pod (outside the cluster)."""
+    session = requests.Session()
+    session.trust_env = False
+    session.verify = verify
+    return mount_route_dns_retries(session)
 
 
 class _FakeSocket:
