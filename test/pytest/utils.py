@@ -200,6 +200,26 @@ def get_pod_by_label(namespace: str, label: str) -> Optional[str]:
         return None
 
 
+_OC_TRANSPORT_RE = re.compile(
+    r"unable to upgrade connection|error dialing backend|i/o timeout|"
+    r"connection refused|temporary failure|lost connection|"
+    r"error: (Timeout|EOF|unexpected EOF)",
+    re.IGNORECASE,
+)
+
+
+def _is_oc_transport_failure(
+    result: Optional[subprocess.CompletedProcess] = None,
+    exc: Optional[BaseException] = None,
+) -> bool:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return True
+    if result is None:
+        return False
+    blob = f"{result.stderr or ''}{result.stdout or ''}"
+    return bool(result.returncode != 0 and _OC_TRANSPORT_RE.search(blob))
+
+
 def exec_in_pod(
     namespace: str,
     pod_name: str,
@@ -209,13 +229,9 @@ def exec_in_pod(
 ) -> Optional[str]:
     """Execute a command in a pod and return stdout."""
     try:
-        args = ["exec", "-n", namespace, pod_name]
-        if container:
-            args.extend(["-c", container])
-        args.append("--")
-        args.extend(command)
-        
-        result = run_oc_command(args, check=False, timeout=timeout)
+        result = exec_in_pod_raw(
+            namespace, pod_name, command, container=container, timeout=timeout
+        )
         return result.stdout if result.returncode == 0 else None
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
@@ -229,17 +245,39 @@ def exec_in_pod_raw(
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
     """Execute a command in a pod and return the full CompletedProcess.
-    
+
     Unlike exec_in_pod(), this returns the full result including stderr
     and returncode, useful for the PodAdapter.
+
+    Prow ``oc exec`` can fail once with EOF / unable to upgrade connection.
+    Retry those transport misses; do not retry application errors (e.g. psql).
     """
     args = ["exec", "-n", namespace, pod_name]
     if container:
         args.extend(["-c", container])
     args.append("--")
     args.extend(command)
-    
-    return run_oc_command(args, check=False, timeout=timeout)
+
+    last_result: Optional[subprocess.CompletedProcess] = None
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):
+        try:
+            result = run_oc_command(args, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            last_exc = exc
+            last_result = None
+        else:
+            last_result = result
+            last_exc = None
+            if result.returncode == 0 or not _is_oc_transport_failure(result=result):
+                return result
+        if attempt < _OC_EXEC_ATTEMPTS:
+            time.sleep(_OC_EXEC_BACKOFF * (2 ** (attempt - 1)))
+    if last_result is not None:
+        return last_result
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("oc exec failed with no result")
 
 
 # =============================================================================

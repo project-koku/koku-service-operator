@@ -80,6 +80,53 @@ assert_eq "$status" "0" "safe_curl returns 0 after exhausted retries"
 assert_eq "$body" "" "safe_curl body is empty after exhausted retries"
 assert_eq "$(cat "$attempts_file")" "3" "safe_curl used all retries"
 
+echo 0 >"$attempts_file"
+cat >"${stub_dir}/curl" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "$attempts_file")
+n=\$((n + 1))
+echo "\$n" >"$attempts_file"
+if [[ "\$n" -lt 3 ]]; then
+  echo "curl: (6) Could not resolve host: keycloak.example" >&2
+  exit 6
+fi
+printf '{"access_token":"renewed"}'
+exit 0
+EOF
+chmod +x "${stub_dir}/curl"
+export SAFE_CURL_RETRIES=5
+
+token=""
+status=0
+set +e
+token="$(_obtain_admin_token https://keycloak.example admin secret)"
+status=$?
+set -e
+assert_eq "$status" "0" "_obtain_admin_token is set -e safe after DNS retries"
+assert_eq "$token" "renewed" "_obtain_admin_token returns token after two DNS failures"
+assert_eq "$(cat "$attempts_file")" "3" "_obtain_admin_token retried via safe_curl"
+
+echo 0 >"$attempts_file"
+cat >"${stub_dir}/curl" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "$attempts_file")
+n=\$((n + 1))
+echo "\$n" >"$attempts_file"
+echo "curl: (6) Could not resolve host" >&2
+exit 6
+EOF
+chmod +x "${stub_dir}/curl"
+export SAFE_CURL_RETRIES=3
+
+token=""
+status=0
+set +e
+token="$(_obtain_admin_token https://keycloak.example admin secret)"
+status=$?
+set -e
+assert_eq "$status" "0" "_obtain_admin_token returns 0 when DNS never recovers"
+assert_eq "$token" "" "_obtain_admin_token is empty after exhausted retries"
+
 rhbk_default="$(grep -E '^RHBK_SCRIPT=' "${ROOT}/hack/deploy-byoi.sh" || true)"
 assert_eq "$rhbk_default" \
   'RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"' \

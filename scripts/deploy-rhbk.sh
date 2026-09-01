@@ -1737,14 +1737,18 @@ create_or_update_user() {
 
 # Acquire a short-lived Keycloak admin token via password grant.
 # Args: $1=keycloak_url $2=admin_username $3=admin_password
+# Always uses safe_curl: Prow DNS to the Keycloak Route (curl 6/7/28) must
+# not abort `set -e` or return empty after a single NXDOMAIN.
 _obtain_admin_token() {
     local url="$1" user="$2" pass="$3"
-    curl -sk -X POST "${url}/realms/master/protocol/openid-connect/token" \
+    local body
+    body="$(safe_curl -X POST "${url}/realms/master/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "username=${user}" \
         -d "password=${pass}" \
         -d "grant_type=password" \
-        -d "client_id=admin-cli" 2>/dev/null | jq -r '.access_token // empty'
+        -d "client_id=admin-cli")"
+    safe_jq '.access_token // empty' "$body"
 }
 
 # Create realm users from jwtAuth.realmUsers (values file) or defaults
@@ -1827,7 +1831,7 @@ create_org_groups() {
     local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping org group creation"
-        return 1
+        return 0
     fi
     KEYCLOAK_URL="https://$KEYCLOAK_URL"
 
@@ -1841,7 +1845,7 @@ create_org_groups() {
     ACCESS_TOKEN=$(_obtain_admin_token "$KEYCLOAK_URL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD")
     if [ -z "$ACCESS_TOKEN" ]; then
         echo_warning "Could not obtain admin token, skipping org group creation"
-        return 1
+        return 0
     fi
 
     local ORG_GROUP_PREFIX="${ORG_GROUP_PREFIX:-org-}"
