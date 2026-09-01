@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"fmt"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -9,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	"github.com/project-koku/koku-service-operator/internal/resources/rbac_seed"
 )
 
 const (
@@ -189,8 +191,11 @@ func rbacMigrationEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.En
 }
 
 func rbacMigrationScript() string {
-	// DB readiness is handled by the waitForPostgres init container.
-	return `set -e
+	seedPy, err := rbac_seed.CostManagementSeedPython()
+	if err != nil {
+		panic(fmt.Sprintf("rbac seed: %v", err))
+	}
+	return fmt.Sprintf(`set -e
 echo "=== insights-rbac migration job ==="
 cd /opt/rbac/rbac
 python manage.py migrate --noinput
@@ -200,65 +205,7 @@ echo "✓ Built-in seeding complete"
 
 echo "Seeding cost-management permissions and roles..."
 python manage.py shell <<'SEED_SCRIPT'
-from api.models import Tenant
-from management.models import Permission, Role, Access
-
-public_tenant = Tenant.objects.get(tenant_name='public')
-
-cm_perms = [
-    ("aws.account", "*"), ("aws.account", "read"),
-    ("aws.organizational_unit", "*"), ("aws.organizational_unit", "read"),
-    ("azure.subscription_guid", "*"), ("azure.subscription_guid", "read"),
-    ("gcp.account", "*"), ("gcp.account", "read"),
-    ("gcp.project", "*"), ("gcp.project", "read"),
-    ("openshift.cluster", "*"), ("openshift.cluster", "read"),
-    ("openshift.node", "*"), ("openshift.node", "read"),
-    ("openshift.project", "*"), ("openshift.project", "read"),
-    ("cost_model", "*"), ("cost_model", "read"), ("cost_model", "write"),
-    ("settings", "*"), ("settings", "read"), ("settings", "write"),
-    ("*", "*"),
-]
-
-perm_count = 0
-for res, verb in cm_perms:
-    _, created = Permission.objects.get_or_create(
-        application="cost-management", resource_type=res, verb=verb,
-        defaults={"permission": f"cost-management:{res}:{verb}", "tenant": public_tenant}
-    )
-    if created:
-        perm_count += 1
-
-_, created = Permission.objects.get_or_create(
-    application="sources", resource_type="*", verb="*",
-    defaults={"permission": "sources:*:*", "tenant": public_tenant}
-)
-if created:
-    perm_count += 1
-print(f"Seeded {perm_count} permissions")
-
-roles = [
-    ("Cost Administrator", "Perform any available operation on cost management resources.", True, False, [("cost-management", "*", "*")]),
-    ("Cost Price List Administrator", "Perform read and write operations on cost models.", False, False, [("cost-management", "cost_model", "*"), ("cost-management", "settings", "*")]),
-    ("Cost Price List Viewer", "Perform read operations on cost models.", False, False, [("cost-management", "cost_model", "read"), ("cost-management", "settings", "read")]),
-    ("Cost Cloud Viewer", "Perform read operations on cost reports related to cloud sources.", False, False, [("cost-management", "aws.account", "*"), ("cost-management", "aws.organizational_unit", "*"), ("cost-management", "azure.subscription_guid", "*"), ("cost-management", "gcp.account", "*"), ("cost-management", "gcp.project", "*")]),
-    ("Cost OpenShift Viewer", "Perform read operations on cost reports related to OpenShift sources.", False, False, [("cost-management", "openshift.cluster", "*")]),
-    ("Sources administrator", "Perform any available operation on any source.", True, False, [("sources", "*", "*")]),
-]
-
-role_count = 0
-for name, desc, admin_default, platform_default, access_list in roles:
-    role, created = Role.objects.get_or_create(
-        name=name, tenant=public_tenant,
-        defaults={"description": desc, "system": True, "platform_default": platform_default, "admin_default": admin_default, "version": 2}
-    )
-    if created:
-        role_count += 1
-    for app, res, verb in access_list:
-        perm = Permission.objects.get(application=app, resource_type=res, verb=verb, tenant=public_tenant)
-        Access.objects.get_or_create(role=role, permission=perm, defaults={"tenant": public_tenant})
-
-print(f"Seeded {role_count} roles (total: {Role.objects.count()})")
-print("RBAC seeding complete.")
+%s
 SEED_SCRIPT
 echo "✓ Cost-management seeding complete"
 
@@ -320,7 +267,7 @@ for group in Group.objects.filter(platform_default=True):
 print(f"Removed {removed} role(s) with cost-management access from platform_default groups")
 CLEANUP_DEFAULTS
 echo "✓ Platform default cleanup complete"
-echo "=== insights-rbac migration job completed ==="`
+echo "=== insights-rbac migration job completed ==="`, seedPy)
 }
 
 // AdminBootstrapJob builds the post-migrate Job that seeds a Tenant/Principal

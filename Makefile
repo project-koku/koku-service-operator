@@ -118,6 +118,10 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 test-hack: ## Run no-cluster hack/ script tests (demo-preprod helpers).
 	./hack/demo-preprod_test.sh
 
+.PHONY: check-rbac-seed
+check-rbac-seed: ## Verify embedded RBAC seed snapshots match project-kessel/rbac-config at the pinned ref.
+	go test ./internal/resources/rbac_seed/... -run TestEmbeddedMatchesUpstreamRbacConfig -count=1
+
 # Statement coverage across internal/controller + internal/resources (coverpkg),
 # not make test's per-package cover.out. Override: make coverage-gate COVERAGE_MIN=84.0
 COVERAGE_PKG ?= ./internal/...

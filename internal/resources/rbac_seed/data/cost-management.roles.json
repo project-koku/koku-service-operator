@@ -1,0 +1,61 @@
+{
+    "roles": [{
+        "name": "Cost Administrator",
+        "display_name": "Cost administrator",
+        "description": "Perform any available operation on cost management resources.",
+        "system": true,
+        "admin_default": true,
+        "version": 4,
+        "access": [{
+            "permission": "cost-management:*:*"
+        }]
+    }, {
+        "name": "Cost Price List Administrator",
+        "display_name": "Cost Price List administrator",
+        "description": "Perform read and write operations on cost models.",
+        "system": true,
+        "version": 5,
+        "access": [{
+            "permission": "cost-management:cost_model:*"
+        }, {
+            "permission": "cost-management:settings:*"
+        }]
+    }, {
+        "name": "Cost Price List Viewer",
+        "display_name": "Cost Price List viewer",
+        "description": "Perform read operations on cost models.",
+        "system": true,
+        "version": 5,
+        "access": [{
+            "permission": "cost-management:cost_model:read"
+        }, {
+            "permission": "cost-management:settings:read"
+        }]
+    }, {
+        "name": "Cost Cloud Viewer",
+        "display_name": "Cost cloud viewer",
+        "description": "Perform read operations on cost reports related to cloud sources.",
+        "system": true,
+        "version": 8,
+        "access": [{
+            "permission": "cost-management:aws.account:*"
+        }, {
+            "permission": "cost-management:aws.organizational_unit:*"
+        }, {
+            "permission": "cost-management:azure.subscription_guid:*"
+        }, {
+            "permission": "cost-management:gcp.account:*"
+        }, {
+            "permission": "cost-management:gcp.project:*"
+        }]
+    }, {
+        "name": "Cost OpenShift Viewer",
+        "display_name": "Cost OpenShift viewer",
+        "description": "Perform read operations on cost reports related to OpenShift sources.",
+        "system": true,
+        "version": 3,
+        "access": [{
+            "permission": "cost-management:openshift.cluster:*"
+        }]
+    }]
+}
