@@ -308,6 +308,16 @@ read_kafka_bootstrap_env_file() {
   return 1
 }
 
+require_cmsc_issuer() {
+  local want="$1"
+  local got
+  got="$("$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='{.spec.auth.keycloak.issuerURL}')"
+  if [[ "$got" != "$want" ]]; then
+    echo "error: CMSC spec.auth.keycloak.issuerURL=${got:-<empty>} want ${want}" >&2
+    exit 1
+  fi
+}
+
 # Copy a Secret under a new name without kubectl apply. Client-side apply
 # writes the full object (including data) into last-applied-configuration.
 copy_secret() {
@@ -387,6 +397,30 @@ else
 fi
 
 echo "[3/4] Apply CMSC ${NAMESPACE}/${CR_NAME} (ros.enabled=false)..."
+# Prow e2e-pytest: this script runs in the stack step with SKIP_PYTEST=1.
+# The later smoke pod only runs pytest and never re-applies the CR, so
+# issuerURL must be on the live CMSC before wait-Ready below.
+# Pytest tokens use the Keycloak Route as iss; JWKS stays on spec.auth.keycloak.url
+# (in-cluster Service). Missing issuerURL → Envoy 401 "Jwt issuer is not configured".
+# CEL requires https; RHBK Route is edge TLS + Redirect (same host pytest uses).
+KEYCLOAK_HOST=""
+for _ in $(seq 1 30); do
+  KEYCLOAK_HOST="$("$KUBECTL" get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  [[ -n "$KEYCLOAK_HOST" ]] && break
+  sleep 2
+done
+if [[ -z "$KEYCLOAK_HOST" && -n "$DOMAIN" ]]; then
+  # OpenShift default: <route>-<ns>.<apps-domain> (keycloak-keycloak.apps.*)
+  KEYCLOAK_HOST="keycloak-${KEYCLOAK_NAMESPACE}.${DOMAIN}"
+  echo "warning: Keycloak route host empty; using ${KEYCLOAK_HOST}" >&2
+fi
+if [[ -z "$KEYCLOAK_HOST" ]]; then
+  echo "error: Keycloak route host not found in ${KEYCLOAK_NAMESPACE} and cluster ingress domain is empty" >&2
+  exit 1
+fi
+KEYCLOAK_ISSUER="https://${KEYCLOAK_HOST}"
+echo "Keycloak issuerURL: $KEYCLOAK_ISSUER"
+
 TMP_CR="$(mktemp)"
 awk -v ns="$NAMESPACE" -v cr="$CR_NAME" -v infra="$INFRA_NAMESPACE" \
     -v domain="$DOMAIN" -v bootstrap="$BOOTSTRAP" \
@@ -408,8 +442,15 @@ awk -v ns="$NAMESPACE" -v cr="$CR_NAME" -v infra="$INFRA_NAMESPACE" \
   in_meta && /^  name: cost-management$/ { print "  name: " cr; next }
   { print }
 ' "$SAMPLE_CR" >"$TMP_CR"
+python3 "${ROOT}/hack/ci/inject_cmsc_issuer.py" "$TMP_CR" "$KEYCLOAK_ISSUER"
 "$KUBECTL" apply -f "$TMP_CR"
 rm -f "$TMP_CR"
+
+# Merge-patch the live CR so stack still wins if apply omitted the field.
+# Must happen before wait-Ready: Prow smoke never patches.
+"$KUBECTL" -n "$NAMESPACE" patch cmsc "$CR_NAME" --type merge \
+  -p "{\"spec\":{\"auth\":{\"keycloak\":{\"issuerURL\":\"${KEYCLOAK_ISSUER}\"}}}}"
+require_cmsc_issuer "$KEYCLOAK_ISSUER"
 
 if [[ -z "$DOMAIN" ]]; then
   echo "warning: cluster ingress domain unset; Routes may wait on discovery" >&2
@@ -425,6 +466,8 @@ if ! "$KUBECTL" wait "cmsc/${CR_NAME}" -n "${NAMESPACE}" \
     2>/dev/null | redact_filter || true
   exit 1
 fi
+# Envoy ConfigMap is built from spec at Ready. Fail here, not as pytest 401s.
+require_cmsc_issuer "$KEYCLOAK_ISSUER"
 
 if [[ "$SKIP_PYTEST" == "1" ]]; then
   echo "[4/4] Skipping pytest (SKIP_PYTEST=1)"
