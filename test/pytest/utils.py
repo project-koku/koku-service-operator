@@ -23,6 +23,35 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.structures import CaseInsensitiveDict
 from urllib3.response import HTTPResponse
+from urllib3.util.retry import Retry
+
+
+def external_http_session(*, verify: bool = False) -> requests.Session:
+    """Session for Route/API calls from the Prow pod (outside the cluster).
+
+    Claimed-cluster ``*.apps.*`` DNS occasionally returns NXDOMAIN
+    (``Name or service not known``). urllib3 does not retry that unless
+    ``connect`` retries are set on the adapter.
+    """
+    session = requests.Session()
+    session.trust_env = False
+    session.verify = verify
+    retry_kw = {
+        "total": 6,
+        "connect": 6,
+        "read": 3,
+        "backoff_factor": 0.5,
+        "status_forcelist": (502, 503, 504),
+        "raise_on_status": False,
+    }
+    try:
+        retry = Retry(allowed_methods=False, **retry_kw)
+    except TypeError:
+        retry = Retry(method_whitelist=False, **retry_kw)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 class _FakeSocket:
