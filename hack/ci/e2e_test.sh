@@ -35,7 +35,8 @@ assert_contains "$cr" \
   'issuerURL: "https://keycloak-keycloak.apps.ci-op-example.ci.aws.devcluster.openshift.com"' \
   "issuerURL set to public Route"
 assert_not_contains "$cr" '# issuerURL:' "commented placeholder removed"
-assert_contains "$cr" "#   insecureSkipVerify: true" "Prow leaves skip-verify commented"
+assert_contains "$cr" "insecureSkipVerify: true" "oauth-proxy skip-verify for claimed-cluster router cert"
+assert_not_contains "$cr" "#   insecureSkipVerify" "commented skip-verify removed"
 
 # Idempotent overwrite of a stale issuer.
 python3 "$INJECT" "$tmp" "https://keycloak-keycloak.apps.other.example.com"

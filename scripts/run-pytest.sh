@@ -181,6 +181,14 @@ check_prerequisites() {
         exit 1
     fi
 
+    # Prow cli: latest ships oc, not kubectl. Kafka/S3 tests still exec kubectl.
+    if ! command -v kubectl >/dev/null 2>&1; then
+        _kubectl_compat_dir="$(mktemp -d "${TMPDIR:-/tmp}/koku-kubectl-compat.XXXXXX")"
+        ln -sf "$(command -v oc)" "${_kubectl_compat_dir}/kubectl"
+        export PATH="${_kubectl_compat_dir}:${PATH}"
+        log_info "kubectl not on PATH; using oc via ${_kubectl_compat_dir}/kubectl"
+    fi
+
     log_success "Prerequisites check passed"
 }
 

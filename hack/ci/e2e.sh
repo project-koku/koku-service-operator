@@ -400,9 +400,11 @@ echo "[3/4] Apply CMSC ${NAMESPACE}/${CR_NAME} (ros.enabled=false)..."
 # Prow e2e-pytest: this script runs in the stack step with SKIP_PYTEST=1.
 # The later smoke pod only runs pytest and never re-applies the CR, so
 # issuerURL must be on the live CMSC before wait-Ready below.
-# Pytest tokens use the Keycloak Route as iss; JWKS stays on spec.auth.keycloak.url
+# Tokens from pytest use the Keycloak Route as iss; JWKS stays on spec.auth.keycloak.url
 # (in-cluster Service). Missing issuerURL → Envoy 401 "Jwt issuer is not configured".
 # CEL requires https; RHBK Route is edge TLS + Redirect (same host pytest uses).
+# oauth2-proxy talks to that Route; claimed-cluster ingress certs are not in the
+# proxy image trust store, so stack also sets tls.insecureSkipVerify (lab/CI only).
 KEYCLOAK_HOST=""
 for _ in $(seq 1 30); do
   KEYCLOAK_HOST="$("$KUBECTL" get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
@@ -449,7 +451,7 @@ rm -f "$TMP_CR"
 # Merge-patch the live CR so stack still wins if apply omitted the field.
 # Must happen before wait-Ready: Prow smoke never patches.
 "$KUBECTL" -n "$NAMESPACE" patch cmsc "$CR_NAME" --type merge \
-  -p "{\"spec\":{\"auth\":{\"keycloak\":{\"issuerURL\":\"${KEYCLOAK_ISSUER}\"}}}}"
+  -p "{\"spec\":{\"auth\":{\"keycloak\":{\"issuerURL\":\"${KEYCLOAK_ISSUER}\",\"tls\":{\"insecureSkipVerify\":true}}}}}"
 require_cmsc_issuer "$KEYCLOAK_ISSUER"
 
 if [[ -z "$DOMAIN" ]]; then
