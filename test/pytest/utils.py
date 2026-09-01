@@ -8,11 +8,13 @@ import base64
 import http.client
 import io
 import json
+import logging
 import re
 import socket
 import subprocess
 import tarfile
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,12 @@ from requests.adapters import HTTPAdapter
 from requests.structures import CaseInsensitiveDict
 from urllib3.response import HTTPResponse
 from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
+
+# Prow ``oc exec`` into BYOI Postgres can miss once (empty stdout / EOF).
+_OC_EXEC_ATTEMPTS = 6
+_OC_EXEC_BACKOFF = 0.5
 
 
 def route_http_retry() -> Retry:
@@ -469,30 +477,53 @@ def execute_db_query(
     query: str,
     password: Optional[str] = None,
 ) -> Optional[list[tuple]]:
-    """Execute a SQL query via kubectl exec and return results."""
-    try:
-        env_prefix = []
-        if password:
-            env_prefix = ["env", f"PGPASSWORD={password}"]
-        
-        cmd = env_prefix + [
-            "psql", "-U", user, "-d", database,
-            "-t", "-A", "-F", "|",
-            "-c", query
-        ]
-        
-        result = exec_in_pod(namespace, pod_name, cmd, timeout=120)
-        if not result:
-            return None
-        
-        # Parse pipe-delimited output
-        rows = []
-        for line in result.strip().split("\n"):
-            if line:
-                rows.append(tuple(line.split("|")))
-        return rows
-    except Exception:
-        return None
+    """Execute a SQL query via oc exec and return results.
+
+    Prow pytest ``oc exec`` into BYOI Postgres can fail once with empty
+    stdout even when the schema is healthy (next test then succeeds).
+    Retry transport/empty-output misses; do not retry SQL ``ERROR:``.
+    """
+    env_prefix: list[str] = []
+    if password:
+        env_prefix = ["env", f"PGPASSWORD={password}"]
+    cmd = env_prefix + [
+        "psql", "-U", user, "-d", database,
+        "-t", "-A", "-F", "|",
+        "-c", query,
+    ]
+
+    last_detail = "no attempt"
+    for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):
+        try:
+            result = exec_in_pod_raw(namespace, pod_name, cmd, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            last_detail = f"timeout: {exc}"
+        except Exception as exc:
+            last_detail = f"{type(exc).__name__}: {exc}"
+        else:
+            combined = f"{result.stdout or ''}{result.stderr or ''}"
+            if result.returncode == 0 and result.stdout and result.stdout.strip():
+                rows: list[tuple] = []
+                for line in result.stdout.strip().split("\n"):
+                    if line:
+                        rows.append(tuple(line.split("|")))
+                return rows
+            last_detail = (
+                f"rc={result.returncode} stdout={(result.stdout or '')[:200]!r} "
+                f"stderr={(result.stderr or '')[:300]!r}"
+            )
+            if "ERROR:" in combined:
+                logger.warning("execute_db_query SQL error (not retried): %s", last_detail)
+                return None
+        if attempt < _OC_EXEC_ATTEMPTS:
+            time.sleep(_OC_EXEC_BACKOFF * (2 ** (attempt - 1)))
+
+    logger.warning(
+        "execute_db_query failed after %s attempts: %s",
+        _OC_EXEC_ATTEMPTS,
+        last_detail,
+    )
+    return None
 
 
 # =============================================================================
