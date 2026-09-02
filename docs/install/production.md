@@ -160,6 +160,13 @@ migration Job. Pin tags (and digests when you can).
 on the CR (key `…/pause`, value `true`) halts reconcile (`Paused` condition).
 Remove it to resume.
 
+## Uninstall
+
+Delete the `CostManagementServiceConfig` and wait until it is gone **before**
+deleting the namespace or the operator. The operator lives in the CR namespace;
+killing it first leaves the CR finalizer stuck and leaks the ConsoleLink.
+Full order and recovery: [uninstall.md](uninstall.md).
+
 ## Next
 
 Point reporting clusters at this instance: [cmmo.md](cmmo.md).

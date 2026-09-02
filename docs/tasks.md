@@ -59,7 +59,7 @@ Last audited: 2026-08-19.
 | [COST-7695](https://redhat.atlassian.net/browse/COST-7695) | Create OLM bundle | 🔄 | Channel `beta`, CSV base polished, generated `bundle/` validates. Makefile: `bundle`, `bundle-build`, `bundle-push`, `bundle-run`, `bundle-cleanup`. Remaining: commit/PR review; optional `minKubeVersion`. |
 | [COST-7696](https://redhat.atlassian.net/browse/COST-7696) | Build CI pipeline for bundle | ❌ | GitHub Actions CI with lint/build/test/check-generated/container-build ✅. Missing: bundle validation, scorecard tests, CatalogSource, OLM install verification. |
 | [COST-7697](https://redhat.atlassian.net/browse/COST-7697) | Adapt existing E2E suite for operator | 🔄 | Pytest suite + scripts merged to `main` (PR #56). Cluster-bot runbook: [clusterbot-operator-pytest.md](development/clusterbot-operator-pytest.md). Remaining: lab deploy glue (`deploy-incluster` vs `install-cmsc`), known test/fixture gaps, baseline parity on MCE. |
-| [COST-7698](https://redhat.atlassian.net/browse/COST-7698) | Implement operator-specific E2E scenarios | ❌ | Unit tests for discovery, ownership, migration pipeline present. Full operator E2E not written. |
+| [COST-7698](https://redhat.atlassian.net/browse/COST-7698) | Implement operator-specific E2E scenarios | 🔄 | `test/e2e/cmsc_*.go` + [cmsc-e2e.md](development/cmsc-e2e.md); OP-E2E-001–008 implemented; 009 stubbed (COST-7694). CI gate: COST-7699. |
 | [COST-7699](https://redhat.atlassian.net/browse/COST-7699) | Set up OpenShift CI integration | ❌ | |
 | [COST-7700](https://redhat.atlassian.net/browse/COST-7700) | Write installation and configuration guides | 🔄 | Split: [COST-8124](jira/COST-8124.md) beta guides in [docs/install/](install/README.md) (this branch). [COST-8125](jira/COST-8125.md) GA remainder (post-beta). Close parent when both sub-tasks are done. |
 
@@ -88,7 +88,6 @@ Short version: bundled infra is dev-only (intentional), profile-based sizing for
 | **Image digest pinning** | Tags are mutable; pin to `tag@sha256:digest` for Dependabot tracking. Priority: before GA. See [review follow-ups](review-follow-ups.md#2-image-digest-pinning). |
 | **`relatedImages` in OLM bundle** | Runtime-constructed images not in CSV `relatedImages`; breaks airgapped deployments. COST-7695. See [review follow-ups](review-follow-ups.md#3-relatedimages-in-olm-bundle-cost-7695). |
 | **RBAC migration/bootstrap code provenance** | Heredoc-embedded Django ORM scripts fail code-provenance audit. Needs `insights-rbac` management commands. See [review follow-ups](review-follow-ups.md#4-rbac-migrationbootstrap-code-provenance). |
-| **`ResolveBootstrapAdmin` fallback values** | Silently substitutes test-fixture IDs (`org1234567`) when CR fields are empty. Pre-existing. See [review follow-ups](review-follow-ups.md#1-resolvebootstrapadmin-silently-substitutes-test-fixture-ids). |
 
 ---
 

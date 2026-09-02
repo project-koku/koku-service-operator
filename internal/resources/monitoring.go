@@ -109,6 +109,12 @@ func CeleryServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstru
 	return serviceMonitor(cfg, cfg.Name+"-celery-metrics", "metrics", "/metrics", []string{"celery-worker"})
 }
 
+// RBACServiceMonitor scrapes the RBAC API Prometheus endpoint through its
+// existing http Service port.
+func RBACServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
+	return serviceMonitor(cfg, cfg.Name+"-rbac-metrics", "http", "/metrics", []string{"rbac-api"})
+}
+
 // PrometheusRules returns UWM-evaluable alert rules (COST-8108 option B gauges +
 // App/operator scrape series). Condition alerts use costmanagement_condition.
 // Deferred until emit paths exist: SecretRotated / DriftCorrected (COST-7694 / G4).
