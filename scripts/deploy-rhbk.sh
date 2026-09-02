@@ -241,12 +241,23 @@ cleanup_keycloak_admin_proxy() {
     fi
 }
 
+# True when the cached admin port-forward is still serving. oc port-forward is
+# fragile: it drops when the Keycloak pod restarts (e.g. after the realm import),
+# leaving the cached http://127.0.0.1 target refusing connections (curl exit 7).
+_keycloak_pf_alive() {
+    [ -n "${_KEYCLOAK_PF_PID:-}" ] || return 1
+    kill -0 "${_KEYCLOAK_PF_PID}" 2>/dev/null || return 1
+    local port="${KEYCLOAK_ADMIN_LOCAL_PORT:-18080}"
+    curl -sS -o /dev/null --max-time 2 "http://127.0.0.1:${port}/" 2>/dev/null
+}
+
 # Prow stack runs outside the claimed cluster. Admin API must use kube
-# port-forward, not https://keycloak.apps.<hive>.
+# port-forward, not https://keycloak.apps.<hive>. Idempotent and self-healing:
+# reuse a live tunnel, rebuild a dead one, and clear the cached base on failure
+# so keycloak_admin_base() can fall back to the Route. Call this (as a plain
+# statement, never inside $(...)) before each admin phase; a subshell would
+# orphan the port-forward and lose _KEYCLOAK_PF_PID/KEYCLOAK_ADMIN_BASE.
 ensure_keycloak_admin_base() {
-    if [ -n "${KEYCLOAK_ADMIN_BASE:-}" ]; then
-        return 0
-    fi
     local via="${KEYCLOAK_ADMIN_VIA:-}"
     if [ -z "$via" ] && [ "${OPENSHIFT_CI:-}" = "true" ]; then
         via="port-forward"
@@ -254,6 +265,10 @@ ensure_keycloak_admin_base() {
     if [ "$via" != "port-forward" ]; then
         return 0
     fi
+    if [ -n "${KEYCLOAK_ADMIN_BASE:-}" ] && _keycloak_pf_alive; then
+        return 0
+    fi
+    cleanup_keycloak_admin_proxy
     local port="${KEYCLOAK_ADMIN_LOCAL_PORT:-18080}"
     echo_info "Keycloak admin API via oc port-forward to keycloak-service (not the apps Route)"
     oc port-forward -n "$NAMESPACE" svc/keycloak-service "${port}:8080" >/tmp/koso-keycloak-pf.log 2>&1 &
@@ -272,6 +287,8 @@ ensure_keycloak_admin_base() {
     echo_warning "port-forward not ready; falling back to Keycloak Route"
     cleanup_keycloak_admin_proxy
     trap - EXIT
+    KEYCLOAK_ADMIN_BASE=""
+    export KEYCLOAK_ADMIN_BASE
     return 0
 }
 
@@ -742,8 +759,8 @@ EOF
 
     # Now wait for Keycloak HTTP endpoint to be fully responsive
     echo_info "Waiting for Keycloak admin API to be fully responsive..."
-    ensure_keycloak_admin_base
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
 
     if [ -z "$KEYCLOAK_URL" ]; then
@@ -1172,6 +1189,7 @@ EOF
     # Additional wait for Keycloak to fully process the realm and make clients available via admin API
     echo_info "Waiting for Keycloak to process realm and clients..."
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     local post_import_timeout=120
     local post_import_elapsed=0
@@ -1327,6 +1345,7 @@ configure_admin_console() {
     local PUBLIC_HOST
     PUBLIC_HOST="$(keycloak_public_host)"
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ] || [ -z "$PUBLIC_HOST" ]; then
         echo_error "Could not get Keycloak route URL"
@@ -1414,6 +1433,7 @@ extract_client_secret() {
 
     # Get Keycloak URL from Route
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping client secret extraction"
@@ -1528,6 +1548,7 @@ assign_sync_client_realm_roles() {
     echo_header "ASSIGNING REALM-MANAGEMENT ROLES TO RBAC SYNC CLIENT"
 
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping role assignment"
@@ -1812,6 +1833,7 @@ create_realm_users() {
     echo_header "CREATING REALM USERS"
 
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping realm user creation"
@@ -1885,6 +1907,7 @@ create_org_groups() {
     echo_header "CREATING ORGANIZATION GROUPS"
 
     local KEYCLOAK_URL
+    ensure_keycloak_admin_base
     KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping org group creation"

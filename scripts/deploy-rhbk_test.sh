@@ -132,6 +132,62 @@ assert_eq "$(keycloak_admin_base)" "http://127.0.0.1:18080" \
   "keycloak_admin_base honors KEYCLOAK_ADMIN_BASE (port-forward)"
 unset KEYCLOAK_ADMIN_BASE
 
+# --- ensure_keycloak_admin_base self-healing (Prow port-forward) ------------
+# CI: oc port-forward to keycloak-service died after the Keycloak pod restarted
+# (realm import). ensure_keycloak_admin_base early-returned on the cached-but-
+# dead http://127.0.0.1:18080, so every later admin phase hit curl exit 7 and
+# auth failed. Fix: probe liveness and rebuild a dead tunnel instead of reusing
+# it. These tests stub the oc/curl collaborators (no cluster required).
+
+# _keycloak_pf_alive reports dead when no port-forward has been started.
+_KEYCLOAK_PF_PID=""
+status=0
+set +e
+_keycloak_pf_alive
+status=$?
+set -e
+assert_eq "$status" "1" "_keycloak_pf_alive reports dead when no port-forward PID cached"
+
+# ensure_keycloak_admin_base rebuilds a dead tunnel rather than reusing it.
+# A backgrounded oc stub keeps a real PID alive so cleanup has something to kill;
+# the curl stub makes the health probe pass immediately. Proof of rebuild is the
+# refreshed base (stale :9999 -> :18080), which is race-free unlike the async oc.
+oc_marker="${stub_dir}/oc-portforward-invoked"
+rm -f "$oc_marker"
+cat >"${stub_dir}/oc" <<EOF
+#!/usr/bin/env bash
+touch "$oc_marker"
+exec sleep 300
+EOF
+chmod +x "${stub_dir}/oc"
+cat >"${stub_dir}/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "${stub_dir}/curl"
+
+_keycloak_pf_alive() { return 1; }                    # simulate a dead tunnel
+export OPENSHIFT_CI=true
+export KEYCLOAK_ADMIN_BASE="http://127.0.0.1:9999"    # stale cached target
+ensure_keycloak_admin_base
+assert_eq "$KEYCLOAK_ADMIN_BASE" "http://127.0.0.1:18080" \
+  "ensure_keycloak_admin_base rebuilds a dead tunnel and refreshes the cached base"
+cleanup_keycloak_admin_proxy                          # kill the backgrounded stub oc
+trap 'rm -rf "$stub_dir"' EXIT                        # ensure_* clobbered the EXIT trap
+
+# ensure_keycloak_admin_base reuses a live tunnel without a new port-forward.
+rm -f "$oc_marker"
+_keycloak_pf_alive() { return 0; }                    # simulate a healthy tunnel
+export KEYCLOAK_ADMIN_BASE="http://127.0.0.1:18080"
+ensure_keycloak_admin_base
+assert_eq "$([ -e "$oc_marker" ] && echo yes || echo no)" "no" \
+  "ensure_keycloak_admin_base reuses a live tunnel (no new oc port-forward)"
+assert_eq "$KEYCLOAK_ADMIN_BASE" "http://127.0.0.1:18080" \
+  "ensure_keycloak_admin_base keeps the cached base when the tunnel is alive"
+
+unset KEYCLOAK_ADMIN_BASE OPENSHIFT_CI
+rm -f "${stub_dir}/oc"
+
 rhbk_default="$(grep -E '^RHBK_SCRIPT=' "${ROOT}/hack/deploy-byoi.sh" || true)"
 assert_eq "$rhbk_default" \
   'RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"' \
