@@ -140,6 +140,8 @@ While unreachable, OP-E2E-007/008 also assert top-level conditions:
 
 - Migration Jobs are keyed on the CMSC application image tag (see table above), via
   the Job annotation `koku.costmanagement.io/image-tag`.
+- Helpers wait for a **replacement** Job whose annotation matches the patched tag.
+  A prior succeeded Job for an older tag does not satisfy the wait.
 - Tag must **change** from the value on the completed migrate Job annotation.
 - **Upgrade (005):** tag must exist in the registry and migrate Job must complete
   within the Job deadline (600s).
@@ -159,6 +161,9 @@ Each `Describe` block sets labels for `-ginkgo.label-filter`:
 | `upgrade` | OP-E2E-005, 005b, 006 |
 | `dependency` | OP-E2E-007, 008, 007b, 008b |
 | `secret-rotation` | OP-E2E-009 (stub) |
+
+The `upgrade` label runs all three migration specs. OP-E2E-006 still **skips**
+unless `E2E_RBAC_UPGRADE_TAG` is set.
 
 Every filtered run still requires `E2E_CLUSTER=1` (and usually `KUBECTL=oc` on
 OpenShift).
@@ -182,6 +187,9 @@ go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
   -ginkgo.label-filter='drift' -timeout 30m
 go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
   -ginkgo.label-filter='dependency' -timeout 30m
+
+# Upgrade label — 005, 005b, and 006 (006 skips without E2E_RBAC_UPGRADE_TAG)
+export E2E_KOKU_UPGRADE_TAG=768be82   # must differ from current CMSC Koku tag
 go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
   -ginkgo.label-filter='upgrade' -timeout 45m
 
