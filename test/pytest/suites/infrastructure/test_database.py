@@ -319,6 +319,10 @@ class TestHiveWorkaround:
 class TestKruizeDatabase:
     """Tests for Kruize database schema."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_when_ros_disabled(self, require_ros_enabled) -> None:
+        """Skip Kruize schema checks when spec.ros.enabled is false."""
+
     @pytest.fixture
     def kruize_credentials(self, cluster_config):
         """Get Kruize database credentials."""

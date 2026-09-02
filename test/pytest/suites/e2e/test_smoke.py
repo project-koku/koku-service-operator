@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from conftest import get_fresh_auth_header
+from smoke_pods import critical_smoke_components
 from utils import check_pod_ready, run_oc_command
 
 
@@ -17,23 +18,20 @@ from utils import check_pod_ready, run_oc_command
 class TestE2ESmoke:
     """Quick smoke tests for E2E validation."""
 
-    def test_all_critical_pods_running(self, cluster_config, database_deployed):
-        """Verify all critical pods are running."""
-        critical_components = [
-            ("ingress", "app.kubernetes.io/component=ingress"),
-            ("kruize", "app.kubernetes.io/component=ros-optimization"),
-            ("ros-api", "app.kubernetes.io/component=ros-api"),
-        ]
-        if database_deployed:
-            critical_components.insert(
-                0, ("database", "app.kubernetes.io/component=database")
-            )
-        
+    def test_all_critical_pods_running(
+        self, cluster_config, database_deployed, ros_enabled
+    ):
+        """Verify critical Cost pods are running (ROS/Kruize only when enabled)."""
+        critical_components = critical_smoke_components(
+            database_deployed=database_deployed,
+            ros_enabled=ros_enabled,
+        )
+
         failures = []
         for name, label in critical_components:
             if not check_pod_ready(cluster_config.namespace, label):
                 failures.append(name)
-        
+
         assert not failures, f"Critical pods not ready: {failures}"
 
     def test_keycloak_accessible(self, keycloak_config, http_session: requests.Session):
