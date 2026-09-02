@@ -52,6 +52,31 @@ With no extra env vars beyond `E2E_CLUSTER=1`:
 | OP-E2E-005b (downgrade gating, ~10–20 min) | OP-E2E-009 (blocked on COST-7694) |
 | OP-E2E-007 / 008 (dependency validation) | |
 
+## Operator vs application images
+
+Deploy uses the **operator** image (`IMG=...`). Migration specs patch **application**
+image tags on the CMSC. A new operator tag does not satisfy `E2E_KOKU_UPGRADE_TAG` or
+`E2E_RBAC_UPGRADE_TAG`.
+
+| Image | Example registry path | How it is set | Go e2e specs |
+|-------|----------------------|---------------|--------------|
+| Operator | `quay.io/project-koku/koku-service-operator:<tag>` | `IMG=` at deploy | All specs after deploy (pause, drift, dependency, …) |
+| Koku app | `quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
+| RBAC app | `quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
+
+**What you need to run migration specs**
+
+| Spec | Application tag required? | Notes |
+|------|---------------------------|-------|
+| Default suite (no `E2E_*_UPGRADE_TAG`) | No | OP-E2E-005 and 006 skip; OP-E2E-005b runs if downgrade tag ≠ current Koku tag |
+| OP-E2E-005 (upgrade) | Yes — Koku | Set `E2E_KOKU_UPGRADE_TAG` to a pullable tag **different** from CMSC; migrate Job must succeed |
+| OP-E2E-005b (downgrade gating) | Yes — Koku | Uses `E2E_KOKU_DOWNGRADE_TAG` (default `5432d06`); pass on migrate success or fail-closed |
+| OP-E2E-006 (RBAC upgrade) | Yes — RBAC | Set `E2E_RBAC_UPGRADE_TAG` to a pullable tag **different** from CMSC |
+
+Lab sample tags (BYOI CMSC): Koku `768be82`, RBAC `73870d8` — see
+`config/samples/byoi/app/costmanagementserviceconfig.yaml`. You do not need a
+newly published tag for 005b; any **different** pullable tag is enough.
+
 ## Cluster prerequisites (all specs)
 
 | Requirement | Detail |
@@ -113,8 +138,8 @@ While unreachable, OP-E2E-007/008 also assert top-level conditions:
 
 ### Notes on migration tests (005/005b/006)
 
-- Migration is keyed on **`spec.costManagement.api.image.tag`** (Koku) or
-  **`spec.rbac.image.tag`** (RBAC), not the operator manager image.
+- Migration Jobs are keyed on the CMSC application image tag (see table above), via
+  the Job annotation `koku.costmanagement.io/image-tag`.
 - Tag must **change** from the value on the completed migrate Job annotation.
 - **Upgrade (005):** tag must exist in the registry and migrate Job must complete
   within the Job deadline (600s).

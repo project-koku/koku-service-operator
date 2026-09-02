@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	"github.com/project-koku/koku-service-operator/internal/resources"
 	"github.com/project-koku/koku-service-operator/test/utils"
 )
 
@@ -110,6 +111,11 @@ func kokuMigrationJobName() string {
 
 func rbacMigrationJobName() string {
 	return cmscName + "-rbac-migrate"
+}
+
+// rbacMigrationJobImageTag is the image-tag annotation value on RBAC migration Jobs.
+func rbacMigrationJobImageTag(imageTag string) string {
+	return resources.RBACSeedJobTag(imageTag)
 }
 
 func databaseStatefulSetName() string {
@@ -380,47 +386,61 @@ func getMigrationJob(jobName string) (*batchv1.Job, error) {
 	return job, err
 }
 
-func migrationJobActive(jobName string) bool {
+func migrationJobHasImageTag(job *batchv1.Job, wantTag string) bool {
+	if job == nil {
+		return false
+	}
+	return job.Annotations[resources.MigrationImageTagAnnotation] == wantTag
+}
+
+func migrationJobActiveForTag(jobName, wantTag string) bool {
 	job, err := getMigrationJob(jobName)
-	if err != nil {
+	if err != nil || !migrationJobHasImageTag(job, wantTag) {
 		return false
 	}
 	return job.Status.Active > 0
 }
 
-func migrationJobComplete(jobName string) bool {
+func migrationJobCompleteForTag(jobName, wantTag string) bool {
 	job, err := getMigrationJob(jobName)
-	if err != nil {
+	if err != nil || !migrationJobHasImageTag(job, wantTag) {
 		return false
 	}
 	return job.Status.Succeeded > 0
 }
 
-func migrationJobFailed(jobName string) bool {
+func migrationJobFailedForTag(jobName, wantTag string) bool {
 	job, err := getMigrationJob(jobName)
-	if err != nil {
+	if err != nil || !migrationJobHasImageTag(job, wantTag) {
 		return false
 	}
 	return job.Status.Failed > 0
 }
 
-func migrationJobTerminal(jobName string) bool {
-	return migrationJobComplete(jobName) || migrationJobFailed(jobName)
+func migrationJobTerminalForTag(jobName, wantTag string) bool {
+	return migrationJobCompleteForTag(jobName, wantTag) || migrationJobFailedForTag(jobName, wantTag)
 }
 
-func waitMigrationJobStarted(jobName string) {
+// waitMigrationJobStarted waits for the operator to recreate the stable-name migration
+// Job for wantTag and observe it running. A prior succeeded Job for an older tag does
+// not satisfy this helper.
+func waitMigrationJobStarted(jobName, wantTag string) {
 	Eventually(func(g Gomega) {
-		g.Expect(migrationJobActive(jobName) || migrationJobTerminal(jobName)).
-			To(BeTrue(), "expected migration Job %s to start", jobName)
+		job, err := getMigrationJob(jobName)
+		g.Expect(err).NotTo(HaveOccurred(), "migration Job %s should exist", jobName)
+		g.Expect(job.Annotations[resources.MigrationImageTagAnnotation]).To(Equal(wantTag),
+			"migration Job %s should be recreated for image tag %s", jobName, wantTag)
+		g.Expect(job.Status.Active).To(BeNumerically(">", 0),
+			"replacement migration Job %s should be running", jobName)
 	}, cmscDependencyWait, 10*time.Second).Should(Succeed())
 }
 
-// assertRolloutBlockedDuringMigration waits for the migration Job to finish while
-// asserting the Deployment image stays on wantImage whenever the Job is active.
-func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage string) {
+// assertRolloutBlockedDuringMigration waits for the tag-scoped migration Job to finish
+// while asserting the Deployment image stays on wantImage whenever that Job is active.
+func assertRolloutBlockedDuringMigration(jobName, wantTag, depName, container, wantImage string) {
 	By("verifying Deployment does not roll while migration Job is active")
 	Eventually(func(g Gomega) {
-		if migrationJobActive(jobName) {
+		if migrationJobActiveForTag(jobName, wantTag) {
 			g.Expect(deploymentContainerImage(depName, container)).To(Equal(wantImage),
 				"Deployment must not roll while migration Job %s is running", jobName)
 			cond := findCMSCCondition(getCMSC(), costv1alpha1.ConditionSchemaUpToDate)
@@ -428,8 +448,8 @@ func assertRolloutBlockedDuringMigration(jobName, depName, container, wantImage 
 			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			g.Expect(cond.Reason).To(Equal("MigrationRunning"))
 		}
-		g.Expect(migrationJobTerminal(jobName)).To(BeTrue(),
-			"migration Job %s should reach a terminal state", jobName)
+		g.Expect(migrationJobTerminalForTag(jobName, wantTag)).To(BeTrue(),
+			"migration Job %s should reach a terminal state for image tag %s", jobName, wantTag)
 	}, cmscMigrationWait+cmscMigrationDeadline, 2*time.Second).Should(Succeed())
 }
 

@@ -56,12 +56,12 @@ var _ = Describe("CMSC upgrade sequencing", Label("cmsc", "upgrade"), func() {
 		By("patching CMSC Koku API image tag (upgrade)")
 		patchCMSCImageKoku(repo, upgradeTag)
 
-		waitMigrationJobStarted(kokuMigrationJobName())
-		assertRolloutBlockedDuringMigration(kokuMigrationJobName(), depName, "koku-api", originalImage)
+		waitMigrationJobStarted(kokuMigrationJobName(), upgradeTag)
+		assertRolloutBlockedDuringMigration(kokuMigrationJobName(), upgradeTag, depName, "koku-api", originalImage)
 
 		By("waiting for successful migration Job completion")
-		Eventually(migrationJobComplete, cmscMigrationWait, 15*time.Second).
-			WithArguments(kokuMigrationJobName()).Should(BeTrue())
+		Eventually(migrationJobCompleteForTag, cmscMigrationWait, 15*time.Second).
+			WithArguments(kokuMigrationJobName(), upgradeTag).Should(BeTrue())
 		waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait, "MigrationComplete")
 
 		By("verifying Deployment rolled to upgraded image")
@@ -93,14 +93,14 @@ var _ = Describe("CMSC upgrade sequencing", Label("cmsc", "upgrade"), func() {
 		By("patching CMSC Koku API image tag (downgrade)")
 		patchCMSCImageKoku(repo, downgradeTag)
 
-		waitMigrationJobStarted(kokuMigrationJobName())
-		assertRolloutBlockedDuringMigration(kokuMigrationJobName(), depName, "koku-api", originalImage)
+		waitMigrationJobStarted(kokuMigrationJobName(), downgradeTag)
+		assertRolloutBlockedDuringMigration(kokuMigrationJobName(), downgradeTag, depName, "koku-api", originalImage)
 
 		By("waiting for migration Job to finish (success or failure)")
-		Eventually(migrationJobTerminal, cmscMigrationWait+cmscMigrationDeadline, 15*time.Second).
-			WithArguments(kokuMigrationJobName()).Should(BeTrue())
+		Eventually(migrationJobTerminalForTag, cmscMigrationWait+cmscMigrationDeadline, 15*time.Second).
+			WithArguments(kokuMigrationJobName(), downgradeTag).Should(BeTrue())
 
-		if migrationJobComplete(kokuMigrationJobName()) {
+		if migrationJobCompleteForTag(kokuMigrationJobName(), downgradeTag) {
 			By("downgrade migration succeeded — Deployment may roll to older image")
 			waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionTrue), cmscMigrationWait, "MigrationComplete")
 			Eventually(func(g Gomega) {
@@ -111,7 +111,7 @@ var _ = Describe("CMSC upgrade sequencing", Label("cmsc", "upgrade"), func() {
 		}
 
 		By("downgrade migration failed — operator must stay fail-closed on prior image")
-		Expect(migrationJobFailed(kokuMigrationJobName())).To(BeTrue())
+		Expect(migrationJobFailedForTag(kokuMigrationJobName(), downgradeTag)).To(BeTrue())
 		waitCMSCCondition(costv1alpha1.ConditionSchemaUpToDate, string(metav1.ConditionFalse), cmscMigrationWait, "MigrationFailed")
 		waitCMSCCondition(costv1alpha1.ConditionDegraded, string(metav1.ConditionTrue), cmscMigrationWait, "MigrationFailed")
 		Expect(deploymentContainerImage(depName, "koku-api")).To(Equal(originalImage))
@@ -142,11 +142,11 @@ var _ = Describe("CMSC upgrade sequencing", Label("cmsc", "upgrade"), func() {
 		By("patching CMSC RBAC image tag")
 		patchCMSCImageRBAC(repo, upgradeTag)
 
-		waitMigrationJobStarted(rbacMigrationJobName())
-		assertRolloutBlockedDuringMigration(rbacMigrationJobName(), depName, "rbac-api", oldImage)
+		waitMigrationJobStarted(rbacMigrationJobName(), rbacMigrationJobImageTag(upgradeTag))
+		assertRolloutBlockedDuringMigration(rbacMigrationJobName(), rbacMigrationJobImageTag(upgradeTag), depName, "rbac-api", oldImage)
 
-		Eventually(migrationJobComplete, cmscMigrationWait, 15*time.Second).
-			WithArguments(rbacMigrationJobName()).Should(BeTrue())
+		Eventually(migrationJobCompleteForTag, cmscMigrationWait, 15*time.Second).
+			WithArguments(rbacMigrationJobName(), rbacMigrationJobImageTag(upgradeTag)).Should(BeTrue())
 
 		Eventually(func(g Gomega) {
 			g.Expect(deploymentContainerImage(depName, "rbac-api")).To(ContainSubstring(upgradeTag))
