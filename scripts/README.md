@@ -13,6 +13,7 @@ Automation scripts for deploying, configuring, and testing the Cost Management O
 | `deploy-rhbk.sh` | Deploy Red Hat Build of Keycloak | OpenShift |
 | `setup-cost-mgmt-tls.sh` | Configure TLS certificates | OpenShift |
 | `query-kruize.sh` | Query Kruize database | All environments |
+| `flush-rbac-cache.sh` | Flush insights-rbac + Koku RBAC caches after permission changes | OpenShift |
 
 ## 🚀 Quick Start
 
@@ -391,6 +392,22 @@ Query Kruize database for experiments and recommendations.
 - Database pod accessible via `oc exec`
 
 **Best for:** Debugging, validating data flow, checking recommendation generation status
+
+---
+
+### `flush-rbac-cache.sh`
+Flush insights-rbac Django cache and Koku RBAC response cache after permission changes.
+
+**Usage:**
+```bash
+./flush-rbac-cache.sh cost-onprem
+./flush-rbac-cache.sh cost-onprem --instance cost-onprem
+./flush-rbac-cache.sh cost-onprem --dry-run
+```
+
+See [docs/operations/rbac-cache.md](../docs/operations/rbac-cache.md) for BYOI/external cache notes.
+
+**Best for:** Immediate effect after RBAC role/group changes (when 300s TTL is too slow)
 
 ---
 
