@@ -21,6 +21,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Prow CLI: the in-cluster e2e image ships `oc`, not `kubectl`, but this script
+# uses kubectl for all cluster access. Symlink oc -> kubectl onto PATH so the
+# existing kubectl calls work unchanged. Locally kubectl is usually present, so
+# this is a no-op there. (Mirrors the shim in run-pytest.sh.)
+if ! command -v kubectl >/dev/null 2>&1; then
+    if ! command -v oc >/dev/null 2>&1; then
+        echo "ERROR: neither kubectl nor oc found on PATH" >&2
+        exit 1
+    fi
+    _kubectl_compat_dir="$(mktemp -d "${TMPDIR:-/tmp}/koku-kubectl-compat.XXXXXX")"
+    ln -sf "$(command -v oc)" "${_kubectl_compat_dir}/kubectl"
+    export PATH="${_kubectl_compat_dir}:${PATH}"
+    echo "kubectl not on PATH; using oc via ${_kubectl_compat_dir}/kubectl"
+fi
+
 # Source shared filter configuration
 # shellcheck source=lib/iqe-filters.sh
 source "${SCRIPT_DIR}/lib/iqe-filters.sh"
