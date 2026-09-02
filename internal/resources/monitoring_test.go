@@ -317,6 +317,41 @@ func TestCeleryServiceMonitor(t *testing.T) {
 	}
 }
 
+func TestRBACServiceMonitor(t *testing.T) {
+	sm := RBACServiceMonitor(testMonitoringCFG())
+	if sm.GetName() != "cost-management-rbac-metrics" {
+		t.Errorf("name: got %q", sm.GetName())
+	}
+
+	endpoints, found, err := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
+	if err != nil || !found || len(endpoints) != 1 {
+		t.Fatalf("endpoints: found=%v len=%d err=%v", found, len(endpoints), err)
+	}
+	ep, ok := endpoints[0].(map[string]any)
+	if !ok {
+		t.Fatalf("endpoint type %T", endpoints[0])
+	}
+	if ep["port"] != "http" {
+		t.Errorf("port: got %v want http", ep["port"])
+	}
+	if ep["path"] != "/metrics" {
+		t.Errorf("path: got %v want /metrics", ep["path"])
+	}
+
+	exprs, found, err := unstructured.NestedSlice(sm.Object, "spec", "selector", "matchExpressions")
+	if err != nil || !found || len(exprs) != 1 {
+		t.Fatalf("matchExpressions: found=%v len=%d err=%v", found, len(exprs), err)
+	}
+	expr, ok := exprs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expression type %T", exprs[0])
+	}
+	values, ok := expr["values"].([]any)
+	if !ok || len(values) != 1 || values[0] != "rbac-api" {
+		t.Fatalf("selector values = %v, want [rbac-api]", values)
+	}
+}
+
 func TestPrometheusRules_CeleryBacklogIdentifiesQueue(t *testing.T) {
 	pr := PrometheusRules(testMonitoringCFG())
 

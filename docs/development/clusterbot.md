@@ -141,8 +141,17 @@ NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make
 
 ## Tear down
 
+Delete the CR **first** and wait until it is gone. The operator lives in
+`cost-byoi`; deleting the namespace first leaves the CR finalizer stuck.
+Full order and recovery: [uninstall.md](../install/uninstall.md).
+
 ```bash
-oc delete cmsc -n cost-byoi --all --ignore-not-found
+# Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
+oc delete cmsc -n cost-byoi --all --timeout=180s --ignore-not-found
+if oc get cmsc -n cost-byoi --no-headers 2>/dev/null | grep -q .; then
+  echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
+  exit 1
+fi
 oc delete ns cost-byoi cost-byoi-infra --ignore-not-found
 # If you used AMQ Streams / Keycloak instead of the smoke path:
 #   ./config/samples/byoi/deploy-kafka.sh cleanup

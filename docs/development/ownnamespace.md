@@ -49,3 +49,11 @@ IMG=quay.io/<you>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-on
 
 Do not split operator (`koku-service-operator-system`) and CR (`cost-onprem`) — the
 operator will not reconcile. See [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md).
+
+## Uninstall
+
+Because the manager and the CR share a namespace, delete the
+`CostManagementServiceConfig` and wait until it is gone **before** deleting
+the namespace or the operator Deployment. Otherwise the CR finalizer never
+runs and the namespace stays `Terminating` (ConsoleLink leak). Procedure and
+recovery: [uninstall.md](../install/uninstall.md).

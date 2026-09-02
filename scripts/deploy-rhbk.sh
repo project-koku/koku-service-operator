@@ -142,6 +142,48 @@ echo_warning() { log_warning "$1"; }
 echo_error() { log_error "$1"; }
 echo_header() { log_header "$1"; }
 
+# Under `set -e`, `VAR=$(curl ...)` aborts with curl's exit code. Curl 6 is
+# "Could not resolve host" (Prow pod → Hive apps Route). Retry 6/7/28 and
+# always return 0 so the caller can inspect an empty body (same idea as safe_jq).
+safe_curl() {
+    local retries="${SAFE_CURL_RETRIES:-5}"
+    local delay="${SAFE_CURL_RETRY_DELAY:-2}"
+    local attempt=1
+    local body=""
+    local status=0
+    local err
+    err="$(mktemp "${TMPDIR:-/tmp}/safe-curl-XXXXXX")"
+
+    while [ "$attempt" -le "$retries" ]; do
+        body="$(curl -sk --max-time 30 "$@" 2>"$err")" && status=0 || status=$?
+        if [ "$status" -eq 0 ]; then
+            printf '%s' "$body"
+            rm -f "$err"
+            return 0
+        fi
+        case "$status" in
+            6|7|28)
+                echo_warning "curl failed (exit ${status}, attempt ${attempt}/${retries})" >&2
+                if [ "$attempt" -lt "$retries" ]; then
+                    sleep "$delay"
+                fi
+                attempt=$((attempt + 1))
+                ;;
+            *)
+                echo_warning "curl failed (exit ${status})" >&2
+                printf '%s' "$body"
+                rm -f "$err"
+                return 0
+                ;;
+        esac
+    done
+
+    echo_warning "curl exhausted retries (last exit ${status})" >&2
+    printf '%s' "$body"
+    rm -f "$err"
+    return 0
+}
+
 # Helper function to safely parse JSON with jq
 # Usage: safe_jq [jq_args...] 'filter' "$json_string"
 # The json_string should be the last argument
@@ -167,6 +209,87 @@ get_admin_credentials() {
     ADMIN_USERNAME=$(oc get secret keycloak-initial-admin -n "$NAMESPACE" -o jsonpath='{.data.username}' 2>/dev/null | base64 -d)
     ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
     ADMIN_PASSWORD=$(oc get secret keycloak-initial-admin -n "$NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d)
+}
+
+# Public Route hostname (redirect URIs, CMSC issuerURL). Never used as the
+# Prow-pod HTTP target when KEYCLOAK_ADMIN_VIA=port-forward.
+keycloak_public_host() {
+    oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true
+}
+
+# Base URL for Keycloak Admin API curls. In OpenShift CI this is
+# http://127.0.0.1 after oc port-forward to keycloak-service (kube API).
+# Hive apps Route DNS from the Prow/build pod is intermittently NXDOMAIN.
+keycloak_admin_base() {
+    if [ -n "${KEYCLOAK_ADMIN_BASE:-}" ]; then
+        printf '%s' "${KEYCLOAK_ADMIN_BASE%/}"
+        return 0
+    fi
+    local host
+    host="$(keycloak_public_host)"
+    if [ -z "$host" ]; then
+        return 1
+    fi
+    printf 'https://%s' "$host"
+}
+
+_KEYCLOAK_PF_PID=""
+cleanup_keycloak_admin_proxy() {
+    if [ -n "${_KEYCLOAK_PF_PID:-}" ]; then
+        kill "${_KEYCLOAK_PF_PID}" 2>/dev/null || true
+        _KEYCLOAK_PF_PID=""
+    fi
+}
+
+# True when the cached admin port-forward is still serving. oc port-forward is
+# fragile: it drops when the Keycloak pod restarts (e.g. after the realm import),
+# leaving the cached http://127.0.0.1 target refusing connections (curl exit 7).
+_keycloak_pf_alive() {
+    [ -n "${_KEYCLOAK_PF_PID:-}" ] || return 1
+    kill -0 "${_KEYCLOAK_PF_PID}" 2>/dev/null || return 1
+    local port="${KEYCLOAK_ADMIN_LOCAL_PORT:-18080}"
+    curl -sS -o /dev/null --max-time 2 "http://127.0.0.1:${port}/" 2>/dev/null
+}
+
+# Prow stack runs outside the claimed cluster. Admin API must use kube
+# port-forward, not https://keycloak.apps.<hive>. Idempotent and self-healing:
+# reuse a live tunnel, rebuild a dead one, and clear the cached base on failure
+# so keycloak_admin_base() can fall back to the Route. Call this (as a plain
+# statement, never inside $(...)) before each admin phase; a subshell would
+# orphan the port-forward and lose _KEYCLOAK_PF_PID/KEYCLOAK_ADMIN_BASE.
+ensure_keycloak_admin_base() {
+    local via="${KEYCLOAK_ADMIN_VIA:-}"
+    if [ -z "$via" ] && [ "${OPENSHIFT_CI:-}" = "true" ]; then
+        via="port-forward"
+    fi
+    if [ "$via" != "port-forward" ]; then
+        return 0
+    fi
+    if [ -n "${KEYCLOAK_ADMIN_BASE:-}" ] && _keycloak_pf_alive; then
+        return 0
+    fi
+    cleanup_keycloak_admin_proxy
+    local port="${KEYCLOAK_ADMIN_LOCAL_PORT:-18080}"
+    echo_info "Keycloak admin API via oc port-forward to keycloak-service (not the apps Route)"
+    oc port-forward -n "$NAMESPACE" svc/keycloak-service "${port}:8080" >/tmp/koso-keycloak-pf.log 2>&1 &
+    _KEYCLOAK_PF_PID=$!
+    trap cleanup_keycloak_admin_proxy EXIT
+    local i
+    for i in $(seq 1 30); do
+        if curl -sS -o /dev/null --max-time 2 "http://127.0.0.1:${port}/" 2>/dev/null; then
+            KEYCLOAK_ADMIN_BASE="http://127.0.0.1:${port}"
+            export KEYCLOAK_ADMIN_BASE
+            echo_success "✓ Keycloak admin on 127.0.0.1:${port}"
+            return 0
+        fi
+        sleep 1
+    done
+    echo_warning "port-forward not ready; falling back to Keycloak Route"
+    cleanup_keycloak_admin_proxy
+    trap - EXIT
+    KEYCLOAK_ADMIN_BASE=""
+    export KEYCLOAK_ADMIN_BASE
+    return 0
 }
 
 # Function to check prerequisites
@@ -636,14 +759,14 @@ EOF
 
     # Now wait for Keycloak HTTP endpoint to be fully responsive
     echo_info "Waiting for Keycloak admin API to be fully responsive..."
-    local KEYCLOAK_ROUTE_HOST=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null)
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
 
-    if [ -z "$KEYCLOAK_ROUTE_HOST" ]; then
-        echo_error "Could not find Keycloak route"
+    if [ -z "$KEYCLOAK_URL" ]; then
+        echo_error "Could not determine Keycloak admin URL"
         exit 1
     fi
-
-    local KEYCLOAK_URL="https://$KEYCLOAK_ROUTE_HOST"
     local http_timeout=300
     local http_elapsed=0
     local http_ready=false
@@ -655,13 +778,14 @@ EOF
         # Test the token endpoint with a dummy request
         # Should return JSON (either {"error":"invalid_grant"} or a token)
         # NOT HTML or empty response
-        local response=$(curl -sk --max-time 5 \
+        local response
+        response="$(safe_curl --max-time 5 \
             -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "username=test-readiness-check" \
             -d "password=test" \
             -d "grant_type=password" \
-            -d "client_id=admin-cli" 2>/dev/null || echo "")
+            -d "client_id=admin-cli")"
 
         # Check if we got a valid JSON response (contains "error" or "access_token")
         if echo "$response" | grep -qE '("error"|"access_token")'; then
@@ -1064,7 +1188,9 @@ EOF
 
     # Additional wait for Keycloak to fully process the realm and make clients available via admin API
     echo_info "Waiting for Keycloak to process realm and clients..."
-    local KEYCLOAK_URL="https://$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null)"
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
     local post_import_timeout=120
     local post_import_elapsed=0
     local clients_available=false
@@ -1073,19 +1199,15 @@ EOF
 
     while [ $post_import_elapsed -lt $post_import_timeout ]; do
         # Try to list clients in the realm - this will fail if realm is not fully processed
-        local token_response=$(curl -sk -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "username=$ADMIN_USERNAME" \
-            -d "password=$ADMIN_PASSWORD" \
-            -d "grant_type=password" \
-            -d "client_id=admin-cli" 2>/dev/null)
-
-        local access_token=$(safe_jq '.access_token // empty' "$token_response")
+        local token_response
+        token_response="$(_obtain_admin_token "$KEYCLOAK_URL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD")"
+        local access_token="$token_response"
 
         if [ -n "$access_token" ]; then
             # Try to get the clients we just created
-            local client_data=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
-                -H "Authorization: Bearer $access_token" 2>/dev/null)
+            local client_data
+            client_data="$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
+                -H "Authorization: Bearer $access_token")"
 
             # Check if both clients are in the list
             local operator_client_found=false
@@ -1220,14 +1342,17 @@ validate_deployment() {
 configure_admin_console() {
     echo_header "CONFIGURING ADMIN CONSOLE"
 
-    # Get Keycloak URL
-    local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    if [ -z "$KEYCLOAK_URL" ]; then
+    local PUBLIC_HOST
+    PUBLIC_HOST="$(keycloak_public_host)"
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
+    if [ -z "$KEYCLOAK_URL" ] || [ -z "$PUBLIC_HOST" ]; then
         echo_error "Could not get Keycloak route URL"
         return 1
     fi
 
-    echo_info "Keycloak URL: https://$KEYCLOAK_URL"
+    echo_info "Keycloak URL: https://$PUBLIC_HOST"
 
     get_admin_credentials
     if [ -z "$ADMIN_PASSWORD" ]; then
@@ -1235,21 +1360,13 @@ configure_admin_console() {
         return 1
     fi
 
-    # Wait for Keycloak to be ready
     echo_info "Waiting for Keycloak admin API to be available..."
     local max_attempts=30
     local attempt=0
-    local token_response=""
+    local access_token=""
 
     while [ $attempt -lt $max_attempts ]; do
-        token_response=$(curl -sk -X POST "https://$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "username=$ADMIN_USERNAME" \
-            -d "password=$ADMIN_PASSWORD" \
-            -d "grant_type=password" \
-            -d "client_id=admin-cli" 2>/dev/null)
-
-        local access_token=$(safe_jq '.access_token // empty' "$token_response")
+        access_token="$(_obtain_admin_token "$KEYCLOAK_URL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD")"
 
         if [ -n "$access_token" ]; then
             echo_success "✓ Admin API is available"
@@ -1267,8 +1384,9 @@ configure_admin_console() {
 
     # Get security-admin-console client ID
     echo_info "Configuring security-admin-console client..."
-    local clients_response=$(curl -sk "https://$KEYCLOAK_URL/admin/realms/master/clients" \
-        -H "Authorization: Bearer $access_token" 2>/dev/null)
+    local clients_response
+    clients_response="$(safe_curl "$KEYCLOAK_URL/admin/realms/master/clients" \
+        -H "Authorization: Bearer $access_token")"
 
     local client_uuid=$(safe_jq '.[] | select(.clientId == "security-admin-console") | .id // empty' "$clients_response")
 
@@ -1279,32 +1397,31 @@ configure_admin_console() {
 
     echo_info "Client UUID: $client_uuid"
 
-    # Update client configuration to fix admin console loading issue
-    # This adds explicit Web Origins and Redirect URIs
-    local update_response=$(curl -sk -X PUT "https://$KEYCLOAK_URL/admin/realms/master/clients/$client_uuid" \
+    local update_response
+    update_response="$(safe_curl -X PUT "$KEYCLOAK_URL/admin/realms/master/clients/$client_uuid" \
         -H "Authorization: Bearer $access_token" \
         -H "Content-Type: application/json" \
         -d '{
             "id": "'"$client_uuid"'",
             "clientId": "security-admin-console",
             "webOrigins": [
-                "https://'"$KEYCLOAK_URL"'",
+                "https://'"$PUBLIC_HOST"'",
                 "+"
             ],
             "redirectUris": [
-                "https://'"$KEYCLOAK_URL"'/admin/master/console/*",
+                "https://'"$PUBLIC_HOST"'/admin/master/console/*",
                 "/admin/master/console/*"
             ]
-        }' 2>/dev/null)
+        }')"
 
-    # Verify the update
-    local verify_response=$(curl -sk "https://$KEYCLOAK_URL/admin/realms/master/clients/$client_uuid" \
-        -H "Authorization: Bearer $access_token" 2>/dev/null)
+    local verify_response
+    verify_response="$(safe_curl "$KEYCLOAK_URL/admin/realms/master/clients/$client_uuid" \
+        -H "Authorization: Bearer $access_token")"
 
-    if echo "$verify_response" | grep -q "https://$KEYCLOAK_URL"; then
+    if echo "$verify_response" | grep -q "https://$PUBLIC_HOST"; then
         echo_success "✓ Admin console client configured successfully"
-        echo_info "  - Web Origins: https://$KEYCLOAK_URL"
-        echo_info "  - Redirect URIs: https://$KEYCLOAK_URL/admin/master/console/*"
+        echo_info "  - Web Origins: https://$PUBLIC_HOST"
+        echo_info "  - Redirect URIs: https://$PUBLIC_HOST/admin/master/console/*"
     else
         echo_warning "Could not verify client configuration update"
     fi
@@ -1315,13 +1432,14 @@ extract_client_secret() {
     echo_header "EXTRACTING CLIENT SECRET"
 
     # Get Keycloak URL from Route
-    local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping client secret extraction"
         return 1
     fi
 
-    KEYCLOAK_URL="https://$KEYCLOAK_URL"
     echo_info "Keycloak URL: $KEYCLOAK_URL"
 
     get_admin_credentials
@@ -1336,14 +1454,8 @@ extract_client_secret() {
 
     # Get admin token
     echo_info "Obtaining admin access token..."
-    local TOKEN_RESPONSE=$(curl -sk -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=$ADMIN_USERNAME" \
-        -d "password=$ADMIN_PASSWORD" \
-        -d "grant_type=password" \
-        -d "client_id=admin-cli" 2>/dev/null)
-
-    local ACCESS_TOKEN=$(safe_jq '.access_token // empty' "$TOKEN_RESPONSE")
+    local ACCESS_TOKEN
+    ACCESS_TOKEN="$(_obtain_admin_token "$KEYCLOAK_URL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD")"
 
     if [ -z "$ACCESS_TOKEN" ]; then
         echo_warning "Could not obtain admin token, skipping client secret extraction"
@@ -1360,9 +1472,10 @@ extract_client_secret() {
         local secret_name=$2
 
         echo_info "Looking up client UUID for '$client_id'..."
-        local CLIENT_DATA=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
+        local CLIENT_DATA
+        CLIENT_DATA="$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" 2>/dev/null)
+            -H "Content-Type: application/json")"
 
         local CLIENT_UUID=$(safe_jq --arg cid "$client_id" '.[] | select(.clientId == $cid) | .id // empty' "$CLIENT_DATA")
 
@@ -1375,9 +1488,10 @@ extract_client_secret() {
 
         # Get client secret
         echo_info "Retrieving client secret for '$client_id'..."
-        local CLIENT_SECRET_RESPONSE=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$CLIENT_UUID/client-secret" \
+        local CLIENT_SECRET_RESPONSE
+        CLIENT_SECRET_RESPONSE="$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$CLIENT_UUID/client-secret" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -H "Content-Type: application/json" 2>/dev/null)
+            -H "Content-Type: application/json")"
 
         local CLIENT_SECRET=$(safe_jq '.value // empty' "$CLIENT_SECRET_RESPONSE")
 
@@ -1433,32 +1547,34 @@ extract_client_secret() {
 assign_sync_client_realm_roles() {
     echo_header "ASSIGNING REALM-MANAGEMENT ROLES TO RBAC SYNC CLIENT"
 
-    local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping role assignment"
-        return 1
+        return 0
     fi
-    KEYCLOAK_URL="https://$KEYCLOAK_URL"
 
     get_admin_credentials
     if [ -z "$ADMIN_PASSWORD" ]; then
         echo_error "Could not retrieve admin password, skipping role assignment"
-        return 1
+        return 0
     fi
 
+    echo_info "Obtaining admin access token..."
     local TOKEN_RESPONSE
-    TOKEN_RESPONSE=$(curl -sk -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+    TOKEN_RESPONSE=$(safe_curl -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "username=$ADMIN_USERNAME" \
         -d "password=$ADMIN_PASSWORD" \
         -d "grant_type=password" \
-        -d "client_id=admin-cli" 2>/dev/null)
+        -d "client_id=admin-cli")
 
     local ACCESS_TOKEN=$(safe_jq '.access_token // empty' "$TOKEN_RESPONSE")
 
     if [ -z "$ACCESS_TOKEN" ]; then
         echo_warning "Could not obtain admin token, skipping role assignment"
-        return 1
+        return 0
     fi
 
     # Look up the service account user for the sync client
@@ -1466,27 +1582,27 @@ assign_sync_client_realm_roles() {
     echo_info "Looking up service account user: $SA_USERNAME"
 
     local SA_RESPONSE
-    SA_RESPONSE=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users?username=$SA_USERNAME&exact=true" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+    SA_RESPONSE=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users?username=$SA_USERNAME&exact=true" \
+        -H "Authorization: Bearer $ACCESS_TOKEN")
 
     local SA_USER_ID=$(safe_jq '.[0].id // empty' "$SA_RESPONSE")
 
     if [ -z "$SA_USER_ID" ]; then
         echo_warning "Could not find service account user '$SA_USERNAME'"
-        return 1
+        return 0
     fi
     echo_success "Found service account user: $SA_USER_ID"
 
     # Look up the realm-management client UUID
     local RM_RESPONSE
-    RM_RESPONSE=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=realm-management" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+    RM_RESPONSE=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients?clientId=realm-management" \
+        -H "Authorization: Bearer $ACCESS_TOKEN")
 
     local RM_CLIENT_UUID=$(safe_jq '.[0].id // empty' "$RM_RESPONSE")
 
     if [ -z "$RM_CLIENT_UUID" ]; then
         echo_warning "Could not find realm-management client"
-        return 1
+        return 0
     fi
     echo_success "Found realm-management client: $RM_CLIENT_UUID"
 
@@ -1497,8 +1613,8 @@ assign_sync_client_realm_roles() {
 
     for role_name in "${ROLES_NEEDED[@]}"; do
         local ROLE_JSON
-        ROLE_JSON=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$RM_CLIENT_UUID/roles/$role_name" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+        ROLE_JSON=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/clients/$RM_CLIENT_UUID/roles/$role_name" \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
 
         local ROLE_ID=$(safe_jq '.id // empty' "$ROLE_JSON")
 
@@ -1519,16 +1635,16 @@ assign_sync_client_realm_roles() {
 
     if [ "$ROLE_PAYLOAD" = "[]" ]; then
         echo_warning "No roles found to assign"
-        return 1
+        return 0
     fi
 
     # Assign the roles to the service account user
     local HTTP_CODE
-    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X POST \
+    HTTP_CODE=$(safe_curl -o /dev/null -w "%{http_code}" -X POST \
         "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$SA_USER_ID/role-mappings/clients/$RM_CLIENT_UUID" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "$ROLE_PAYLOAD" 2>/dev/null)
+        -d "$ROLE_PAYLOAD")
 
     if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
         echo_success "✓ Assigned realm-management roles (${ROLES_NEEDED[*]}) to $SA_USERNAME"
@@ -1605,11 +1721,12 @@ create_or_update_user() {
 
     local tmp_response
     tmp_response=$(mktemp "${TMPDIR:-/tmp}/rhbk-user-XXXXXX")
-    local USER_HTTP_CODE=$(curl -sk -o "$tmp_response" -w "%{http_code}" \
+    local USER_HTTP_CODE
+    USER_HTTP_CODE="$(safe_curl -o "$tmp_response" -w "%{http_code}" \
         -X POST "$keycloak_url/admin/realms/$REALM_NAME/users" \
         -H "Authorization: Bearer $access_token" \
         -H "Content-Type: application/json" \
-        -d "$create_payload" 2>/dev/null)
+        -d "$create_payload")"
 
     local USER_RESPONSE=$(cat "$tmp_response" 2>/dev/null || echo "")
     rm -f "$tmp_response"
@@ -1617,23 +1734,25 @@ create_or_update_user() {
     local USER_ID=""
     if [ "$USER_HTTP_CODE" = "409" ] || { echo "$USER_RESPONSE" | jq empty >/dev/null 2>&1 && echo "$USER_RESPONSE" | jq -e '.errorMessage // empty | test("already exists|Conflict"; "i")' >/dev/null 2>&1; }; then
         echo_info "User '$username' already exists, updating..."
-        local USERS_RESPONSE=$(curl -sk -X GET "$keycloak_url/admin/realms/$REALM_NAME/users?username=$username&exact=true" \
+        local USERS_RESPONSE
+        USERS_RESPONSE="$(safe_curl -X GET "$keycloak_url/admin/realms/$REALM_NAME/users?username=$username&exact=true" \
             -H "Authorization: Bearer $access_token" \
-            -H "Content-Type: application/json" 2>/dev/null)
+            -H "Content-Type: application/json")"
         USER_ID=$(safe_jq '.[0].id // empty' "$USERS_RESPONSE")
 
         if [ -n "$USER_ID" ]; then
-            curl -sk -X PUT "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID" \
+            safe_curl -X PUT "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID" \
                 -H "Authorization: Bearer $access_token" \
                 -H "Content-Type: application/json" \
-                -d "$create_payload" >/dev/null 2>&1
+                -d "$create_payload" >/dev/null
             echo_success "✓ User '$username' updated"
         fi
     elif [ "$USER_HTTP_CODE" = "201" ] || [ "$USER_HTTP_CODE" = "200" ]; then
         sleep 2
-        local USERS_RESPONSE=$(curl -sk -X GET "$keycloak_url/admin/realms/$REALM_NAME/users?username=$username&exact=true" \
+        local USERS_RESPONSE
+        USERS_RESPONSE="$(safe_curl -X GET "$keycloak_url/admin/realms/$REALM_NAME/users?username=$username&exact=true" \
             -H "Authorization: Bearer $access_token" \
-            -H "Content-Type: application/json" 2>/dev/null)
+            -H "Content-Type: application/json")"
         USER_ID=$(safe_jq '.[0].id // empty' "$USERS_RESPONSE")
         echo_success "✓ User '$username' created"
     fi
@@ -1645,11 +1764,11 @@ create_or_update_user() {
 
     # Set password (check HTTP status, not just curl exit code)
     local pw_http_code
-    pw_http_code=$(curl -sk -o /dev/null -w "%{http_code}" \
+    pw_http_code=$(safe_curl -o /dev/null -w "%{http_code}" \
         -X PUT "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID/reset-password" \
         -H "Authorization: Bearer $access_token" \
         -H "Content-Type: application/json" \
-        -d "$(jq -n --arg p "$password" '{type:"password",value:$p,temporary:false}')" 2>/dev/null)
+        -d "$(jq -n --arg p "$password" '{type:"password",value:$p,temporary:false}')")
 
     if [ "$pw_http_code" = "204" ] || [ "$pw_http_code" = "200" ]; then
         echo_success "✓ Password set for user '$username'"
@@ -1660,8 +1779,9 @@ create_or_update_user() {
     # Manage org-admin realm role assignment based on orgAdmin flag.
     # This ensures the declared state in realmUsers is enforced on every run.
     local is_org_admin=$(echo "$user_json" | jq -r '.orgAdmin // false')
-    local role_json=$(curl -sk -X GET "$keycloak_url/admin/realms/$REALM_NAME/roles/org-admin" \
-        -H "Authorization: Bearer $access_token" 2>/dev/null)
+    local role_json
+    role_json="$(safe_curl -X GET "$keycloak_url/admin/realms/$REALM_NAME/roles/org-admin" \
+        -H "Authorization: Bearer $access_token")"
     local role_id=$(echo "$role_json" | jq -r '.id // empty')
 
     if [ -z "$role_id" ]; then
@@ -1673,18 +1793,18 @@ create_or_update_user() {
     local audit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     if [ "$is_org_admin" = "true" ]; then
-        curl -sk -X POST "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID/role-mappings/realm" \
+        safe_curl -X POST "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID/role-mappings/realm" \
             -H "Authorization: Bearer $access_token" \
             -H "Content-Type: application/json" \
-            -d "$role_payload" 2>/dev/null
+            -d "$role_payload" >/dev/null
         echo_success "✓ Assigned 'org-admin' realm role to '$username'"
         echo "[AUDIT] $audit_ts action=assign_role user=$username role=org-admin realm=$REALM_NAME actor=deploy-rhbk.sh"
     else
         # Remove org-admin role if previously assigned (Day 2: orgAdmin changed to false)
-        curl -sk -X DELETE "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID/role-mappings/realm" \
+        safe_curl -X DELETE "$keycloak_url/admin/realms/$REALM_NAME/users/$USER_ID/role-mappings/realm" \
             -H "Authorization: Bearer $access_token" \
             -H "Content-Type: application/json" \
-            -d "$role_payload" 2>/dev/null
+            -d "$role_payload" >/dev/null
         echo_info "Ensured '$username' does not have 'org-admin' realm role"
         echo "[AUDIT] $audit_ts action=remove_role user=$username role=org-admin realm=$REALM_NAME actor=deploy-rhbk.sh"
     fi
@@ -1694,27 +1814,32 @@ create_or_update_user() {
 
 # Acquire a short-lived Keycloak admin token via password grant.
 # Args: $1=keycloak_url $2=admin_username $3=admin_password
+# Always uses safe_curl: Prow DNS to the Keycloak Route (curl 6/7/28) must
+# not abort `set -e` or return empty after a single NXDOMAIN.
 _obtain_admin_token() {
     local url="$1" user="$2" pass="$3"
-    curl -sk -X POST "${url}/realms/master/protocol/openid-connect/token" \
+    local body
+    body="$(safe_curl -X POST "${url}/realms/master/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "username=${user}" \
         -d "password=${pass}" \
         -d "grant_type=password" \
-        -d "client_id=admin-cli" 2>/dev/null | jq -r '.access_token // empty'
+        -d "client_id=admin-cli")"
+    safe_jq '.access_token // empty' "$body"
 }
 
 # Create realm users from jwtAuth.realmUsers (values file) or defaults
 create_realm_users() {
     echo_header "CREATING REALM USERS"
 
-    local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping realm user creation"
         return 1
     fi
 
-    KEYCLOAK_URL="https://$KEYCLOAK_URL"
     echo_info "Keycloak URL: $KEYCLOAK_URL"
 
     get_admin_credentials
@@ -1781,12 +1906,13 @@ create_realm_users() {
 create_org_groups() {
     echo_header "CREATING ORGANIZATION GROUPS"
 
-    local KEYCLOAK_URL=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    local KEYCLOAK_URL
+    ensure_keycloak_admin_base
+    KEYCLOAK_URL="$(keycloak_admin_base || true)"
     if [ -z "$KEYCLOAK_URL" ]; then
         echo_warning "Could not determine Keycloak URL, skipping org group creation"
-        return 1
+        return 0
     fi
-    KEYCLOAK_URL="https://$KEYCLOAK_URL"
 
     get_admin_credentials
     if [ -z "$ADMIN_PASSWORD" ]; then
@@ -1798,7 +1924,7 @@ create_org_groups() {
     ACCESS_TOKEN=$(_obtain_admin_token "$KEYCLOAK_URL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD")
     if [ -z "$ACCESS_TOKEN" ]; then
         echo_warning "Could not obtain admin token, skipping org group creation"
-        return 1
+        return 0
     fi
 
     local ORG_GROUP_PREFIX="${ORG_GROUP_PREFIX:-org-}"
@@ -1842,11 +1968,11 @@ create_org_groups() {
             '{name: $name, attributes: {org_id: [$org], account_number: [$acct]}}')
 
         local GROUP_HTTP_CODE
-        GROUP_HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
+        GROUP_HTTP_CODE=$(safe_curl -o /dev/null -w "%{http_code}" \
             -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$group_payload" 2>/dev/null)
+            -d "$group_payload")
 
         if [ "$GROUP_HTTP_CODE" = "201" ]; then
             echo_success "  ✓ Group '$group_name' created"
@@ -1854,15 +1980,15 @@ create_org_groups() {
             echo_info "  Group '$group_name' already exists, updating attributes..."
             # Find existing group and update
             local existing_group
-            existing_group=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups?search=$group_name&exact=true" \
-                -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+            existing_group=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups?search=$group_name&exact=true" \
+                -H "Authorization: Bearer $ACCESS_TOKEN")
             local group_id
             group_id=$(echo "$existing_group" | jq -r ".[0].id // empty")
             if [ -n "$group_id" ]; then
-                curl -sk -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups/$group_id" \
+                safe_curl -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups/$group_id" \
                     -H "Authorization: Bearer $ACCESS_TOKEN" \
                     -H "Content-Type: application/json" \
-                    -d "$group_payload" >/dev/null 2>&1
+                    -d "$group_payload" >/dev/null
                 echo_success "  ✓ Group '$group_name' updated"
             fi
         else
@@ -1873,8 +1999,8 @@ create_org_groups() {
 
         # Find the group ID
         local groups_response
-        groups_response=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups?search=$group_name&exact=true" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+        groups_response=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups?search=$group_name&exact=true" \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
         local GROUP_ID
         GROUP_ID=$(echo "$groups_response" | jq -r ".[0].id // empty")
 
@@ -1888,11 +2014,11 @@ create_org_groups() {
         local subgroup_payload
         subgroup_payload=$(jq -n --arg name "$ORG_ADMIN_SUBGROUP" '{name: $name}')
         local SUB_HTTP_CODE
-        SUB_HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
+        SUB_HTTP_CODE=$(safe_curl -o /dev/null -w "%{http_code}" \
             -X POST "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups/$GROUP_ID/children" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$subgroup_payload" 2>/dev/null)
+            -d "$subgroup_payload")
 
         if [ "$SUB_HTTP_CODE" = "201" ]; then
             echo_success "  ✓ Sub-group '$ORG_ADMIN_SUBGROUP' created"
@@ -1905,8 +2031,8 @@ create_org_groups() {
         # Find the admin sub-group ID via the parent group representation
         # (GET /groups/{id}/children is not supported in all RHBK versions)
         local group_detail
-        group_detail=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups/$GROUP_ID" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+        group_detail=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/groups/$GROUP_ID" \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
         local ADMIN_SG_ID
         ADMIN_SG_ID=$(echo "$group_detail" | jq -r ".subGroups[] | select(.name==\"$ORG_ADMIN_SUBGROUP\") | .id // empty")
 
@@ -1923,21 +2049,21 @@ create_org_groups() {
             if [ "$u_org" = "$org_id" ]; then
                 # Find user ID
                 local user_response
-                user_response=$(curl -sk -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users?username=$u_name&exact=true" \
-                    -H "Authorization: Bearer $ACCESS_TOKEN" 2>/dev/null)
+                user_response=$(safe_curl -X GET "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users?username=$u_name&exact=true" \
+                    -H "Authorization: Bearer $ACCESS_TOKEN")
                 local USER_ID
                 USER_ID=$(echo "$user_response" | jq -r ".[0].id // empty")
 
                 if [ -n "$USER_ID" ]; then
                     # Add user to org group
-                    curl -sk -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$USER_ID/groups/$GROUP_ID" \
-                        -H "Authorization: Bearer $ACCESS_TOKEN" >/dev/null 2>&1
+                    safe_curl -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$USER_ID/groups/$GROUP_ID" \
+                        -H "Authorization: Bearer $ACCESS_TOKEN" >/dev/null
                     echo_info "  Added user '$u_name' to group '$group_name'"
 
                     # Add orgAdmin users to admin sub-group
                     if [ "$u_admin" = "true" ] && [ -n "$ADMIN_SG_ID" ]; then
-                        curl -sk -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$USER_ID/groups/$ADMIN_SG_ID" \
-                            -H "Authorization: Bearer $ACCESS_TOKEN" >/dev/null 2>&1
+                        safe_curl -X PUT "$KEYCLOAK_URL/admin/realms/$REALM_NAME/users/$USER_ID/groups/$ADMIN_SG_ID" \
+                            -H "Authorization: Bearer $ACCESS_TOKEN" >/dev/null
                         echo_info "  Added user '$u_name' to admin sub-group '$ORG_ADMIN_SUBGROUP'"
                     fi
                 else
@@ -2138,6 +2264,11 @@ main() {
         exit 1
     fi
 }
+
+# Skip CLI when sourced (scripts/deploy-rhbk_test.sh).
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
 
 # Parse all flags and collect the command in a single pass
 COMMAND=""
