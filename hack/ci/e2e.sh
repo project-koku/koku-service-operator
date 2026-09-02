@@ -6,7 +6,7 @@
 #
 # Usage (from operator repo root, operator already installed):
 #   KUBE_CONTEXT=<context> NAMESPACE=cost-onprem CR_NAME=cost-onprem \
-#     INFRA_NAMESPACE=cost-onprem-infra CHART_ROOT=/path/to/cost-onprem-chart ./hack/ci/e2e.sh
+#     INFRA_NAMESPACE=cost-onprem-infra ./hack/ci/e2e.sh
 #
 # KUBE_CONTEXT is required unless KUBECONFIG points at a single-context kubeconfig.
 # The script pins an isolated KUBECONFIG (exported to child scripts) so kubectl/oc
@@ -165,29 +165,12 @@ resolve_chart_root() {
   return 1
 }
 
-# ci-operator tests cannot declare extra_refs. Clone the chart for RHBK when
-# it is not already on disk (sibling checkout or a Prow clonerefs path).
+# Optional sibling chart checkout. Prow does not clone cost-onprem-chart:
+# hack/deploy-byoi.sh uses this repo's scripts/deploy-rhbk.sh.
 ensure_chart_root() {
   local found
   found="$(resolve_chart_root || true)"
-  if [[ -n "$found" ]]; then
-    echo "$found"
-    return 0
-  fi
-  if [[ "${SKIP_KEYCLOAK:-0}" == "1" ]]; then
-    return 0
-  fi
-  if ! command -v git >/dev/null 2>&1; then
-    echo "error: git is required to clone insights-onprem/cost-onprem-chart for RHBK" >&2
-    echo "  Set CHART_ROOT, SKIP_KEYCLOAK=1, or install git." >&2
-    return 1
-  fi
-  local dest="${CHART_CLONE_DIR:-/tmp/cost-onprem-chart}"
-  echo "CHART_ROOT unset; cloning insights-onprem/cost-onprem-chart@${CHART_REF:-main} → ${dest}" >&2
-  rm -rf "$dest"
-  git clone --depth 1 --branch "${CHART_REF:-main}" \
-    https://github.com/insights-onprem/cost-onprem-chart.git "$dest"
-  echo "$dest"
+  echo "$found"
 }
 
 # Redact credential-shaped strings on stdin. Used for anything that may land in
@@ -325,6 +308,16 @@ read_kafka_bootstrap_env_file() {
   return 1
 }
 
+require_cmsc_issuer() {
+  local want="$1"
+  local got
+  got="$("$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='{.spec.auth.keycloak.issuerURL}')"
+  if [[ "$got" != "$want" ]]; then
+    echo "error: CMSC spec.auth.keycloak.issuerURL=${got:-<empty>} want ${want}" >&2
+    exit 1
+  fi
+}
+
 # Copy a Secret under a new name without kubectl apply. Client-side apply
 # writes the full object (including data) into last-applied-configuration.
 copy_secret() {
@@ -381,10 +374,14 @@ echo ""
 "$KUBECTL" create namespace "${NAMESPACE}" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
 echo "[1/4] BYOI dependencies..."
+# Prow pod is not on the claimed cluster. Keycloak Admin API must use
+# oc port-forward (kube API), not the Hive apps Route.
+export KEYCLOAK_ADMIN_VIA="${KEYCLOAK_ADMIN_VIA:-port-forward}"
 KUBE_CONTEXT="$KUBE_CONTEXT" KUBECTL="$KUBECTL" \
   NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" INFRA_NAMESPACE="$INFRA_NAMESPACE" \
   KAFKA_NAMESPACE="$KAFKA_NAMESPACE" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
   CHART_ROOT="${CHART_ROOT:-}" \
+  KEYCLOAK_ADMIN_VIA="$KEYCLOAK_ADMIN_VIA" \
   ./hack/deploy-byoi.sh
 
 echo "[2/4] Pytest-compatible Secret names ({cr.name}-*)..."
@@ -404,6 +401,32 @@ else
 fi
 
 echo "[3/4] Apply CMSC ${NAMESPACE}/${CR_NAME} (ros.enabled=false)..."
+# Prow e2e-pytest: this script runs in the stack step with SKIP_PYTEST=1.
+# The later smoke pod only runs pytest and never re-applies the CR, so
+# issuerURL must be on the live CMSC before wait-Ready below.
+# Tokens from pytest use the Keycloak Route as iss; JWKS stays on spec.auth.keycloak.url
+# (in-cluster Service). Missing issuerURL → Envoy 401 "Jwt issuer is not configured".
+# CEL requires https; RHBK Route is edge TLS + Redirect (same host pytest uses).
+# oauth2-proxy talks to that Route; claimed-cluster ingress certs are not in the
+# proxy image trust store, so stack also sets tls.insecureSkipVerify (lab/CI only).
+KEYCLOAK_HOST=""
+for _ in $(seq 1 30); do
+  KEYCLOAK_HOST="$("$KUBECTL" get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  [[ -n "$KEYCLOAK_HOST" ]] && break
+  sleep 2
+done
+if [[ -z "$KEYCLOAK_HOST" && -n "$DOMAIN" ]]; then
+  # OpenShift default: <route>-<ns>.<apps-domain> (keycloak-keycloak.apps.*)
+  KEYCLOAK_HOST="keycloak-${KEYCLOAK_NAMESPACE}.${DOMAIN}"
+  echo "warning: Keycloak route host empty; using ${KEYCLOAK_HOST}" >&2
+fi
+if [[ -z "$KEYCLOAK_HOST" ]]; then
+  echo "error: Keycloak route host not found in ${KEYCLOAK_NAMESPACE} and cluster ingress domain is empty" >&2
+  exit 1
+fi
+KEYCLOAK_ISSUER="https://${KEYCLOAK_HOST}"
+echo "Keycloak issuerURL: $KEYCLOAK_ISSUER"
+
 TMP_CR="$(mktemp)"
 awk -v ns="$NAMESPACE" -v cr="$CR_NAME" -v infra="$INFRA_NAMESPACE" \
     -v domain="$DOMAIN" -v bootstrap="$BOOTSTRAP" \
@@ -425,8 +448,15 @@ awk -v ns="$NAMESPACE" -v cr="$CR_NAME" -v infra="$INFRA_NAMESPACE" \
   in_meta && /^  name: cost-management$/ { print "  name: " cr; next }
   { print }
 ' "$SAMPLE_CR" >"$TMP_CR"
+python3 "${ROOT}/hack/ci/inject_cmsc_issuer.py" "$TMP_CR" "$KEYCLOAK_ISSUER"
 "$KUBECTL" apply -f "$TMP_CR"
 rm -f "$TMP_CR"
+
+# Merge-patch the live CR so stack still wins if apply omitted the field.
+# Must happen before wait-Ready: Prow smoke never patches.
+"$KUBECTL" -n "$NAMESPACE" patch cmsc "$CR_NAME" --type merge \
+  -p "{\"spec\":{\"auth\":{\"keycloak\":{\"issuerURL\":\"${KEYCLOAK_ISSUER}\",\"tls\":{\"insecureSkipVerify\":true}}}}}"
+require_cmsc_issuer "$KEYCLOAK_ISSUER"
 
 if [[ -z "$DOMAIN" ]]; then
   echo "warning: cluster ingress domain unset; Routes may wait on discovery" >&2
@@ -442,6 +472,8 @@ if ! "$KUBECTL" wait "cmsc/${CR_NAME}" -n "${NAMESPACE}" \
     2>/dev/null | redact_filter || true
   exit 1
 fi
+# Envoy ConfigMap is built from spec at Ready. Fail here, not as pytest 401s.
+require_cmsc_issuer "$KEYCLOAK_ISSUER"
 
 if [[ "$SKIP_PYTEST" == "1" ]]; then
   echo "[4/4] Skipping pytest (SKIP_PYTEST=1)"

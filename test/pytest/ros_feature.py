@@ -6,11 +6,7 @@ from typing import Optional
 
 from utils import check_pod_exists, run_oc_command
 
-ROS_DISABLED_SKIP_REASON = (
-    "ROS is disabled (spec.ros.enabled=false or ROSEnabled=False); "
-    "recommendations API and ROS workloads are not deployed on the Cost-only beta path. "
-    "Set spec.ros.enabled=true (and ROS/Kruize images) to run ROS API tests."
-)
+ROS_DISABLED_SKIP_REASON = "ROS is disabled (spec.ros.enabled=false)"
 
 
 @dataclass

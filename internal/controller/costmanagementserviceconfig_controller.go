@@ -1036,6 +1036,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.
 		resources.GatewayServiceMonitor(cfg),
 		resources.OperatorServiceMonitor(cfg),
 		resources.CeleryServiceMonitor(cfg),
+		resources.RBACServiceMonitor(cfg),
 		resources.PrometheusRules(cfg),
 	}
 

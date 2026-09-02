@@ -8,11 +8,13 @@ import base64
 import http.client
 import io
 import json
+import logging
 import re
 import socket
 import subprocess
 import tarfile
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,68 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.structures import CaseInsensitiveDict
 from urllib3.response import HTTPResponse
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
+
+# Prow ``oc exec`` into BYOI Postgres can miss once (empty stdout / EOF).
+_OC_EXEC_ATTEMPTS = 6
+_OC_EXEC_BACKOFF = 0.5
+
+
+def route_http_retry() -> Retry:
+    """Retry NXDOMAIN/connect errors to claimed-cluster ``*.apps.*`` Routes.
+
+    Prow pytest runs outside the cluster. urllib3 does not retry
+    ``NameResolutionError`` unless ``connect`` retries are set.
+    """
+    retry_kw = {
+        "total": 6,
+        "connect": 6,
+        "read": 3,
+        "backoff_factor": 0.5,
+        "status_forcelist": (502, 503, 504),
+        "raise_on_status": False,
+    }
+    try:
+        return Retry(allowed_methods=False, **retry_kw)
+    except TypeError:
+        return Retry(method_whitelist=False, **retry_kw)
+
+
+def mount_route_dns_retries(session: requests.Session) -> requests.Session:
+    """Mount connect retries on *session* for http and https."""
+    adapter = HTTPAdapter(max_retries=route_http_retry())
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def install_route_dns_retries() -> None:
+    """Apply Route DNS retries to every ``requests.Session``, including ``requests.get``.
+
+    Patching individual fixtures is not enough: token helpers and many tests
+    call ``requests.post`` / ``requests.get``, which construct a throwaway
+    Session with ``max_retries=0``.
+    """
+    if getattr(install_route_dns_retries, "_installed", False):
+        return
+    orig_init = requests.Session.__init__
+
+    def _init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        mount_route_dns_retries(self)
+
+    requests.Session.__init__ = _init  # type: ignore[method-assign]
+    install_route_dns_retries._installed = True  # type: ignore[attr-defined]
+
+
+def external_http_session(*, verify: bool = False) -> requests.Session:
+    """Session for Route/API calls from the Prow pod (outside the cluster)."""
+    session = requests.Session()
+    session.trust_env = False
+    session.verify = verify
+    return mount_route_dns_retries(session)
 
 
 class _FakeSocket:
@@ -136,6 +200,26 @@ def get_pod_by_label(namespace: str, label: str) -> Optional[str]:
         return None
 
 
+_OC_TRANSPORT_RE = re.compile(
+    r"unable to upgrade connection|error dialing backend|i/o timeout|"
+    r"connection refused|temporary failure|lost connection|"
+    r"error: (Timeout|EOF|unexpected EOF)",
+    re.IGNORECASE,
+)
+
+
+def _is_oc_transport_failure(
+    result: Optional[subprocess.CompletedProcess] = None,
+    exc: Optional[BaseException] = None,
+) -> bool:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return True
+    if result is None:
+        return False
+    blob = f"{result.stderr or ''}{result.stdout or ''}"
+    return bool(result.returncode != 0 and _OC_TRANSPORT_RE.search(blob))
+
+
 def exec_in_pod(
     namespace: str,
     pod_name: str,
@@ -145,13 +229,9 @@ def exec_in_pod(
 ) -> Optional[str]:
     """Execute a command in a pod and return stdout."""
     try:
-        args = ["exec", "-n", namespace, pod_name]
-        if container:
-            args.extend(["-c", container])
-        args.append("--")
-        args.extend(command)
-        
-        result = run_oc_command(args, check=False, timeout=timeout)
+        result = exec_in_pod_raw(
+            namespace, pod_name, command, container=container, timeout=timeout
+        )
         return result.stdout if result.returncode == 0 else None
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
@@ -165,17 +245,39 @@ def exec_in_pod_raw(
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
     """Execute a command in a pod and return the full CompletedProcess.
-    
+
     Unlike exec_in_pod(), this returns the full result including stderr
     and returncode, useful for the PodAdapter.
+
+    Prow ``oc exec`` can fail once with EOF / unable to upgrade connection.
+    Retry those transport misses; do not retry application errors (e.g. psql).
     """
     args = ["exec", "-n", namespace, pod_name]
     if container:
         args.extend(["-c", container])
     args.append("--")
     args.extend(command)
-    
-    return run_oc_command(args, check=False, timeout=timeout)
+
+    last_result: Optional[subprocess.CompletedProcess] = None
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):
+        try:
+            result = run_oc_command(args, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            last_exc = exc
+            last_result = None
+        else:
+            last_result = result
+            last_exc = None
+            if result.returncode == 0 or not _is_oc_transport_failure(result=result):
+                return result
+        if attempt < _OC_EXEC_ATTEMPTS:
+            time.sleep(_OC_EXEC_BACKOFF * (2 ** (attempt - 1)))
+    if last_result is not None:
+        return last_result
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("oc exec failed with no result")
 
 
 # =============================================================================
@@ -413,30 +515,53 @@ def execute_db_query(
     query: str,
     password: Optional[str] = None,
 ) -> Optional[list[tuple]]:
-    """Execute a SQL query via kubectl exec and return results."""
-    try:
-        env_prefix = []
-        if password:
-            env_prefix = ["env", f"PGPASSWORD={password}"]
-        
-        cmd = env_prefix + [
-            "psql", "-U", user, "-d", database,
-            "-t", "-A", "-F", "|",
-            "-c", query
-        ]
-        
-        result = exec_in_pod(namespace, pod_name, cmd, timeout=120)
-        if not result:
-            return None
-        
-        # Parse pipe-delimited output
-        rows = []
-        for line in result.strip().split("\n"):
-            if line:
-                rows.append(tuple(line.split("|")))
-        return rows
-    except Exception:
-        return None
+    """Execute a SQL query via oc exec and return results.
+
+    Prow pytest ``oc exec`` into BYOI Postgres can fail once with empty
+    stdout even when the schema is healthy (next test then succeeds).
+    Retry transport/empty-output misses; do not retry SQL ``ERROR:``.
+    """
+    env_prefix: list[str] = []
+    if password:
+        env_prefix = ["env", f"PGPASSWORD={password}"]
+    cmd = env_prefix + [
+        "psql", "-U", user, "-d", database,
+        "-t", "-A", "-F", "|",
+        "-c", query,
+    ]
+
+    last_detail = "no attempt"
+    for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):
+        try:
+            result = exec_in_pod_raw(namespace, pod_name, cmd, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            last_detail = f"timeout: {exc}"
+        except Exception as exc:
+            last_detail = f"{type(exc).__name__}: {exc}"
+        else:
+            combined = f"{result.stdout or ''}{result.stderr or ''}"
+            if result.returncode == 0 and result.stdout and result.stdout.strip():
+                rows: list[tuple] = []
+                for line in result.stdout.strip().split("\n"):
+                    if line:
+                        rows.append(tuple(line.split("|")))
+                return rows
+            last_detail = (
+                f"rc={result.returncode} stdout={(result.stdout or '')[:200]!r} "
+                f"stderr={(result.stderr or '')[:300]!r}"
+            )
+            if "ERROR:" in combined:
+                logger.warning("execute_db_query SQL error (not retried): %s", last_detail)
+                return None
+        if attempt < _OC_EXEC_ATTEMPTS:
+            time.sleep(_OC_EXEC_BACKOFF * (2 ** (attempt - 1)))
+
+    logger.warning(
+        "execute_db_query failed after %s attempts: %s",
+        _OC_EXEC_ATTEMPTS,
+        last_detail,
+    )
+    return None
 
 
 # =============================================================================
