@@ -19,6 +19,7 @@ namespace** as the CR (OwnNamespace). See [quickstart.md](quickstart.md#install-
 | [Production](production.md) | You are sizing, hardening TLS, and planning backup for a lasting deploy |
 | [Uninstall](uninstall.md) | You need to remove a CR, the operator, or the namespace without getting stuck in `Terminating` |
 | [CMMO](cmmo.md) | You need reporting clusters to upload metrics into this instance |
+| [RBAC cache flush](../operations/rbac-cache.md) | Permission changes need immediate effect (skip 300s TTL) |
 
 Each guide is self-contained. The quickstart clock starts **after**
 prerequisites and the operator are in place.
