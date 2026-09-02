@@ -169,8 +169,8 @@ func TestKeycloakDefaults(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
 	}
-	if got := KeycloakURL(cfg); got != defaultKeycloakURL {
-		t.Errorf("KeycloakURL default = %q, want %q", got, defaultKeycloakURL)
+	if got := KeycloakURL(cfg); got != "" {
+		t.Errorf("KeycloakURL default = %q, want empty string", got)
 	}
 	if got := KeycloakRealm(cfg); got != defaultKeycloakRealm {
 		t.Errorf("KeycloakRealm default = %q, want %q", got, defaultKeycloakRealm)

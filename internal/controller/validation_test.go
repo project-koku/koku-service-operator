@@ -419,6 +419,26 @@ func TestReconcileValidation_KafkaUnreachableNonBlocking(t *testing.T) {
 	}
 }
 
+func TestReconcileValidation_MissingKeycloakURLSetsAuthConditionFalse(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("missing auth config must not block the pipeline, got %+v", result)
+	}
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	if found == nil || found.Status != metav1.ConditionFalse || found.Reason != "OIDCConfigMissing" {
+		t.Fatalf("AuthenticationReady=%+v, want False/OIDCConfigMissing", found)
+	}
+}
+
 func TestReconcileValidation_OIDCJWKS(t *testing.T) {
 	tests := []struct {
 		name   string

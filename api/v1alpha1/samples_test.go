@@ -69,6 +69,14 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_DefaultLeavesAuthKeycloakURLBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Auth.Keycloak.URL != "" {
+		t.Fatalf("default sample auth.keycloak.url = %q, want empty string", cfg.Spec.Auth.Keycloak.URL)
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)

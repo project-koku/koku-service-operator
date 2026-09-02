@@ -268,7 +268,7 @@ type S3Options struct {
 }
 
 // -----------------------------------------------------------------------------
-// AuthConfig (JWT via Envoy + Keycloak/RHBK)
+// AuthConfig (JWT via Envoy + external identity provider)
 // -----------------------------------------------------------------------------
 
 type AuthConfig struct {
@@ -283,12 +283,15 @@ type EnvoySpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.url) && size(self.url) > 0",message="url is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.url) || size(self.url) == 0 || self.url.startsWith('http://') || self.url.startsWith('https://')",message="url must use http or https when set"
 // +kubebuilder:validation:XValidation:rule="!has(self.issuerURL) || size(self.issuerURL) == 0 || self.issuerURL.startsWith('https://')",message="issuerURL must use https when set"
 // +kubebuilder:validation:XValidation:rule="!has(self.audiences) || size(self.audiences) > 0",message="audiences must not be empty when set"
 type KeycloakSpec struct {
-	// Full URL of the Keycloak instance used for JWKS fetch (and issuer when
-	// issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
-	// can reach JWKS without depending on the OpenShift router.
+	// Full URL of the external Keycloak/RHBK identity provider used for JWKS
+	// fetch (and issuer when issuerURL is unset). Prefer an in-cluster http(s)
+	// Service URL so Envoy can reach JWKS without depending on the OpenShift
+	// router.
 	// Example: http://keycloak-service.keycloak.svc.cluster.local:8080
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	URL string `json:"url,omitempty"`
