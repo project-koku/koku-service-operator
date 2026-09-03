@@ -1,5 +1,5 @@
 """
-Pytest fixtures and configuration for cost-onprem-chart tests.
+Pytest fixtures and configuration for Cost Management operator tests.
 
 This is the root conftest.py that provides shared fixtures used across all test suites.
 Suite-specific fixtures are defined in each suite's conftest.py.
@@ -26,9 +26,11 @@ from utils import (
     check_pod_exists,
     exec_in_pod,
     exec_in_pod_raw,
+    external_http_session,
     get_pod_by_label,
     get_route_url,
     get_secret_value,
+    install_route_dns_retries,
     run_oc_command,
 )
 from rbac_bootstrap_scripts import (
@@ -42,6 +44,11 @@ from rbac_bootstrap_scripts import (
 
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Prow pytest talks to Keycloak/gateway via OpenShift Routes. Patch every
+# requests.Session (including requests.post used by token helpers) so a
+# transient NXDOMAIN does not fail the test.
+install_route_dns_retries()
 
 # Fallback identity values when Keycloak is unreachable.
 # Canonical source: jwtAuth.realmUsers in cost-onprem/values.yaml.
@@ -184,7 +191,7 @@ def ros_enabled(cluster_config: ClusterConfig) -> bool:
 
 @pytest.fixture(scope="session")
 def require_ros_enabled(ros_enabled: bool) -> None:
-    """Skip the test when ROS is disabled (Cost-only beta default)."""
+    """Skip the test when spec.ros.enabled is false."""
     if not ros_enabled:
         pytest.skip(ROS_DISABLED_SKIP_REASON)
 
@@ -233,17 +240,17 @@ def keycloak_config(cluster_config: ClusterConfig) -> KeycloakConfig:
 
 def obtain_jwt_token(keycloak_config: KeycloakConfig) -> JWTToken:
     """Obtain a fresh JWT token from Keycloak using client credentials flow.
-    
+
     This is a helper function that can be called by fixtures or tests that need
     to generate their own tokens. Use this directly when you need control over
     token lifecycle (e.g., module-scoped fixtures that run longer than 5 minutes).
-    
+
     Args:
         keycloak_config: Keycloak configuration with URL and credentials
-        
+
     Returns:
         JWTToken object with access token and expiration time
-        
+
     Raises:
         pytest.fail: If token request fails
     """
@@ -276,21 +283,21 @@ def get_fresh_auth_header(
     http_session: requests.Session,
 ) -> Optional[Dict[str, str]]:
     """Get a fresh JWT authorization header from Keycloak.
-    
+
     This is a lightweight alternative to obtain_jwt_token() when you only need
     the authorization header and don't need the full JWTToken object with
     expiration tracking.
-    
+
     Use this in tests that need to refresh tokens mid-execution or when you
     already have an http_session available.
-    
+
     Args:
         keycloak_config: Keycloak configuration with URL and credentials
         http_session: Existing requests session (used for the token request)
-        
+
     Returns:
         Dict with "Authorization" header, or None if token acquisition fails
-        
+
     Example:
         auth_header = get_fresh_auth_header(keycloak_config, http_session)
         if not auth_header:
@@ -308,10 +315,10 @@ def get_fresh_auth_header(
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=30,
         )
-        
+
         if response.status_code != 200:
             return None
-        
+
         token = response.json().get("access_token")
         return {"Authorization": f"Bearer {token}"} if token else None
     except requests.RequestException:
@@ -323,26 +330,26 @@ def create_authenticated_session(
     content_type: Optional[str] = None,
 ) -> requests.Session:
     """Create a requests session pre-configured with JWT authentication.
-    
+
     This is a factory function for creating authenticated sessions. Use this
     when you need a fresh session with a new token, particularly for:
     - Module-scoped fixtures that may outlive the token lifetime
     - One-off API operations in test setup/teardown
     - Tests that need isolated sessions
-    
+
     Args:
         keycloak_config: Keycloak configuration with URL and credentials
         content_type: Optional Content-Type header (e.g., "application/json")
-        
+
     Returns:
         Configured requests.Session with:
         - Authorization header with Bearer token
         - SSL verification disabled (for self-signed certs)
         - Optional Content-Type header
-        
+
     Raises:
         pytest.fail: If token acquisition fails
-        
+
     Example:
         session = create_authenticated_session(keycloak_config, content_type="application/json")
         response = session.get(f"{gateway_url}/cost-management/v1/sources")
@@ -360,12 +367,12 @@ def create_authenticated_session(
 @pytest.fixture(scope="function")
 def jwt_token(keycloak_config: KeycloakConfig) -> JWTToken:
     """Obtain a JWT token from Keycloak using client credentials flow.
-    
+
     Scope: function - Each test gets a fresh token to prevent expiration.
     Keycloak tokens expire after 5 minutes. Using function scope ensures each
     test gets a fresh token, eliminating any possibility of expiration during
     test execution.
-    
+
     For fixtures that need tokens and run longer than 5 minutes, call
     obtain_jwt_token(keycloak_config) directly instead of depending on this fixture.
     """
@@ -543,13 +550,13 @@ def _get_db_host_from_app_pod(cluster_config: ClusterConfig) -> Optional[str]:
             checked_labels.append(f"{lookup.label} (pod={pod}, env={lookup.env_var}: empty)")
         else:
             checked_labels.append(f"{lookup.label} (no pod found)")
-    
+
     # Log diagnostic info when no DB host found
     print(f"[database_config] No DB_HOST found in namespace '{cluster_config.namespace}'")
     print(f"[database_config] Checked labels:")
     for label_info in checked_labels:
         print(f"  - {label_info}")
-    
+
     # Also show what pods exist in the namespace for debugging
     try:
         result = run_oc_command([
@@ -563,7 +570,7 @@ def _get_db_host_from_app_pod(cluster_config: ClusterConfig) -> Optional[str]:
                 print(f"    {line}")
     except Exception as e:
         print(f"[database_config] Could not list pods: {e}")
-    
+
     return None
 
 
@@ -934,13 +941,13 @@ if failed:
 @pytest.fixture(scope="session")
 def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> str:
     """Get org_id from Keycloak admin test user or use default.
-    
+
     Looks up the admin user (configurable via TEST_USERNAME env var,
     default: "admin") in Keycloak to retrieve the org_id attribute.
-    
+
     Note: Currently uses "admin" user. More involved RBAC testing may require
     different users with specific role assignments in the future.
-    
+
     SECURITY NOTE: These credentials are ONLY valid in ephemeral CI test
     environments. The test Keycloak user is provisioned by the test harness
     bootstrap (see scripts/deploy-rhbk.sh). These credentials must never
@@ -952,12 +959,12 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
             "get", "secret", "-n", cluster_config.keycloak_namespace,
             "keycloak-initial-admin", "-o", "jsonpath={.data.password}"
         ], check=False)
-        
+
         if not admin_pass_result.stdout.strip():
             return _DEFAULT_ORG_ID
-        
+
         admin_password = base64.b64decode(admin_pass_result.stdout.strip()).decode("utf-8")
-        
+
         # Get admin token
         token_response = requests.post(
             f"{keycloak_config.url}/realms/master/protocol/openid-connect/token",
@@ -970,12 +977,12 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
             verify=False,
             timeout=30,
         )
-        
+
         if token_response.status_code != 200:
             return _DEFAULT_ORG_ID
-        
+
         admin_token = token_response.json().get("access_token")
-        
+
         # Get admin user's org_id (username configurable via TEST_USERNAME)
         # Note: Currently uses "admin" user. More involved RBAC testing may
         # require different users with specific role assignments in the future.
@@ -987,14 +994,14 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
             verify=False,
             timeout=30,
         )
-        
+
         if users_response.status_code == 200:
             users = users_response.json()
             if users:
                 org_id_value = users[0].get("attributes", {}).get("org_id", [None])[0]
                 if org_id_value:
                     return org_id_value
-        
+
         return _DEFAULT_ORG_ID
     except Exception:
         return _DEFAULT_ORG_ID
@@ -1004,10 +1011,11 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
 def _ensure_keycloak_password_grant_lab_users(
     cluster_config: ClusterConfig,
 ) -> None:
-    """Keep ``admin`` / ``viewer`` and the ``org-admin`` realm role aligned with tests.
+    """Keep ``admin`` / ``viewer``, org-admin role, and viewer org-group membership aligned.
 
     Ephemeral lab clusters can drift (missing realm role on admin, wrong viewer
-    password). Provisioning runs once per session after ``org_id`` is resolved.
+    password, viewer not in ``org-{org_id}``). Provisioning runs once per session
+    after ``org_id`` is resolved.
 
     Detects Keycloak and gateway inline (instead of depending on fixtures that
     call pytest.skip) so that offline tests (helm template, lint) can run
@@ -1290,10 +1298,7 @@ def test_csv_data() -> str:
 @pytest.fixture
 def http_session() -> requests.Session:
     """Create a requests session with SSL verification disabled."""
-    session = requests.Session()
-    session.trust_env = False
-    session.verify = False
-    return session
+    return external_http_session(verify=False)
 
 
 # =============================================================================
@@ -1313,12 +1318,10 @@ def authenticated_session(user_jwt_token: JWTToken) -> requests.Session:
     Note: Content-Type is NOT set by default to allow multipart/form-data
     uploads to work correctly. Set it explicitly in tests that need JSON.
     """
-    session = requests.Session()
+    session = external_http_session(verify=False)
     session.headers.update({
         "Authorization": f"Bearer {user_jwt_token.access_token}",
     })
-    session.trust_env = False
-    session.verify = False
     return session
 
 
@@ -1506,10 +1509,10 @@ def test_runner_pod(cluster_config: ClusterConfig):
 @pytest.fixture(scope="session")
 def internal_api_url(cluster_config: ClusterConfig) -> str:
     """Internal Koku API URL (ClusterIP service).
-    
+
     Use this for tests that need to bypass the gateway and test
     Koku API directly via internal service networking.
-    
+
     Format: http://{release}-koku-api.{namespace}.svc:8000
     """
     return f"http://{cluster_config.helm_release_name}-koku-api.{cluster_config.namespace}.svc:8000"
@@ -1518,10 +1521,10 @@ def internal_api_url(cluster_config: ClusterConfig) -> str:
 @pytest.fixture(scope="session")
 def internal_ros_api_url(cluster_config: ClusterConfig) -> str:
     """Internal ROS API URL (ClusterIP service).
-    
+
     Use this for tests that need to bypass the gateway and test
     ROS API directly via internal service networking.
-    
+
     Format: http://{release}-ros-api.{namespace}.svc:8000
     """
     return f"http://{cluster_config.helm_release_name}-ros-api.{cluster_config.namespace}.svc:8000"
@@ -1563,24 +1566,24 @@ def enable_tags_via_api(
     provider_type: str = "OCP",
 ) -> Dict[str, any]:
     """Enable tag keys via the Cost Management API.
-    
+
     Uses PUT /settings/tags/enable/ endpoint with tag UUIDs.
     This is the same method the UI uses to enable tags.
-    
+
     See koku docs: docs/architecture/api-settings-endpoints.md
-    
+
     Args:
         gateway_url: Base gateway URL (e.g., https://gateway.example.com/api)
         auth_header: Authorization header dict with Bearer token
         tag_keys: List of tag key names to enable
         provider_type: Provider type filter (default: OCP)
-        
+
     Returns:
         Dict with 'enabled', 'not_found', 'already_enabled', and 'total_enabled' keys
     """
     base_url = f"{gateway_url}/cost-management/v1"
     headers = {**auth_header, "Content-Type": "application/json"}
-    
+
     # Get all available tags
     try:
         resp = requests.get(
@@ -1593,20 +1596,20 @@ def enable_tags_via_api(
         if resp.status_code != 200:
             logging.warning(f"[tag-enable] Failed to list tags: {resp.status_code}")
             return {"enabled": [], "not_found": tag_keys, "already_enabled": [], "total_enabled": 0}
-        
+
         all_tags = resp.json().get("data", [])
         meta = resp.json().get("meta", {})
     except Exception as e:
         logging.warning(f"[tag-enable] Error listing tags: {e}")
         return {"enabled": [], "not_found": tag_keys, "already_enabled": [], "total_enabled": 0}
-    
+
     # Find UUIDs for the tag keys we want to enable
     tag_map = {t["key"]: t for t in all_tags if t.get("source_type") == provider_type}
-    
+
     uuids_to_enable = []
     not_found = []
     already_enabled = []
-    
+
     for key in tag_keys:
         if key in tag_map:
             tag = tag_map[key]
@@ -1616,9 +1619,9 @@ def enable_tags_via_api(
                 uuids_to_enable.append(tag["uuid"])
         else:
             not_found.append(key)
-    
+
     enabled = list(already_enabled)
-    
+
     # Enable the tags that need enabling
     if uuids_to_enable:
         try:
@@ -1637,9 +1640,9 @@ def enable_tags_via_api(
                 logging.warning(f"[tag-enable] Enable request failed: {resp.status_code}")
         except Exception as e:
             logging.warning(f"[tag-enable] Error enabling tags: {e}")
-    
+
     total_enabled = meta.get("enabled_tags_count", 0) + len(uuids_to_enable)
-    
+
     return {
         "enabled": enabled,
         "not_found": not_found,
@@ -1671,45 +1674,45 @@ def get_enabled_tag_count_via_api(
 @pytest.fixture(scope="session")
 def ensure_tags_enabled(gateway_url: str, keycloak_config: KeycloakConfig):
     """Ensure common test tags are enabled via the API.
-    
+
     Tags in Koku are discovered automatically when data is processed, but they
     are disabled by default. This fixture enables tags needed for testing.
-    
+
     Uses the official API endpoint: PUT /settings/tags/enable/
     This is the same method the UI uses to enable tags.
-    
+
     The fixture runs once per session and enables:
     - environment, tier, app (common pod labels)
     - OpenShift system labels (monitoring, os, roles)
-    
+
     Note: Tags must have associated data values to appear in the /tags/ API.
     This fixture only enables the keys; data must be uploaded/collected first.
-    
+
     Currently used by: performance tests (API-006 tag filtering)
     Available to: all test suites
     """
     print(f"\n[tags] Ensuring test tags are enabled via API...")
-    
+
     try:
         token = obtain_jwt_token(keycloak_config)
         auth_header = {"Authorization": f"Bearer {token.access_token}"}
     except Exception as e:
         print(f"[tags] Failed to obtain JWT token: {e}")
         return {"enabled": [], "not_found": DEFAULT_TEST_TAG_KEYS, "total_enabled": 0, "error": str(e)}
-    
+
     before_count = get_enabled_tag_count_via_api(gateway_url, auth_header)
-    
+
     results = enable_tags_via_api(
         gateway_url,
         auth_header,
         DEFAULT_TEST_TAG_KEYS,
     )
-    
+
     print(f"[tags] Enabled: {results['enabled']}")
     if results.get('already_enabled'):
         print(f"[tags] Already enabled: {results['already_enabled']}")
     if results['not_found']:
         print(f"[tags] Not found (data may not be uploaded yet): {results['not_found']}")
     print(f"[tags] Total enabled tags: {before_count} -> {results['total_enabled']}")
-    
+
     return results

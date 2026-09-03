@@ -107,7 +107,7 @@ spec:
       # public hostname, tokens use that URL as iss — set issuerURL to match.
       # For CRC + RHBK/BYOI, override to
       # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
-      url: "https://keycloak.keycloak.svc.cluster.local"
+      url: "https://keycloak.keycloak.svc.cluster.local:8443"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       realm: kubernetes
       audiences:

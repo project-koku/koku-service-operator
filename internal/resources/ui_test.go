@@ -311,8 +311,8 @@ func TestUIRoute_GlobalClusterDomainFallback(t *testing.T) {
 		t.Errorf("spec.host = %q, want %q", host, wantHost)
 	}
 	term, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
-	if term != "passthrough" {
-		t.Errorf("tls.termination = %q, want passthrough", term)
+	if term != "reencrypt" {
+		t.Errorf("tls.termination = %q, want reencrypt", term)
 	}
 
 	cl := ConsoleLink(cfg)
@@ -365,8 +365,8 @@ func TestUIRoute_Spec(t *testing.T) {
 		t.Errorf("spec.port.targetPort = %q, want https", targetPort)
 	}
 	term, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
-	if term != "passthrough" {
-		t.Errorf("tls.termination = %q, want passthrough", term)
+	if term != "reencrypt" {
+		t.Errorf("tls.termination = %q, want reencrypt", term)
 	}
 }
 

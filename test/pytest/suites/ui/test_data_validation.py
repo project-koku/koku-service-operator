@@ -32,6 +32,7 @@ def save_screenshot(page: Page, name: str) -> str:
 
 @pytest.mark.ui
 @pytest.mark.data_validation
+@pytest.mark.timeout(900)  # NISE upload + summary-table wait (same as cost_management)
 class TestCostDataVisualization:
     """Test that cost data displays correctly in charts and tables.
     
@@ -232,6 +233,7 @@ class TestCostDataVisualization:
 @pytest.mark.ui
 @pytest.mark.ros
 @pytest.mark.data_validation
+@pytest.mark.timeout(900)  # NISE upload + summary-table wait (same as cost_management)
 class TestOptimizationsPipeline:
     """Validate the full optimizations pipeline: upload → processing → UI display.
 

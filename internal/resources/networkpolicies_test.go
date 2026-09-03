@@ -86,6 +86,47 @@ func TestRBACAPINetworkPolicy(t *testing.T) {
 			t.Errorf("missing peer component %q", comp)
 		}
 	}
+
+	var monitoring *networkingv1.NetworkPolicyIngressRule
+	for i := range np.Spec.Ingress {
+		rule := &np.Spec.Ingress[i]
+		if ruleHasNamespaceLabel(*rule, "kubernetes.io/metadata.name", "openshift-user-workload-monitoring") {
+			monitoring = rule
+			break
+		}
+	}
+	if monitoring == nil {
+		t.Fatal("missing monitoring ingress rule")
+	}
+	if !ingressRuleAllowsPort(*monitoring, rbacAPIPort) {
+		t.Errorf("monitoring rule missing RBAC API port %d", rbacAPIPort)
+	}
+	if len(monitoring.From) != 2 {
+		t.Fatalf("expected 2 Prometheus peers, got %d", len(monitoring.From))
+	}
+	wantNamespaces := map[string]bool{
+		"openshift-monitoring":               false,
+		"openshift-user-workload-monitoring": false,
+	}
+	for _, peer := range monitoring.From {
+		if peer.NamespaceSelector == nil || peer.PodSelector == nil {
+			t.Fatal("monitoring peer must select both a namespace and Prometheus pods")
+		}
+		if peer.PodSelector.MatchLabels["app.kubernetes.io/name"] != "prometheus" {
+			t.Errorf("monitoring pod selector = %v, want app.kubernetes.io/name=prometheus", peer.PodSelector.MatchLabels)
+		}
+		namespace := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
+		if _, ok := wantNamespaces[namespace]; !ok {
+			t.Errorf("unexpected monitoring namespace selector %v", peer.NamespaceSelector.MatchLabels)
+			continue
+		}
+		wantNamespaces[namespace] = true
+	}
+	for namespace, found := range wantNamespaces {
+		if !found {
+			t.Errorf("missing Prometheus peer for namespace %q", namespace)
+		}
+	}
 }
 
 func TestMasuNetworkPolicy(t *testing.T) {
@@ -222,6 +263,11 @@ func TestCacheNetworkPolicy(t *testing.T) {
 func TestDatabaseNetworkPolicy(t *testing.T) {
 	wantFrom := []string{
 		"cost-management-api", "cost-processor", "cost-management-migration",
+		"listener", "cost-scheduler",
+		"cost-worker-celery", "cost-worker-priority", "cost-worker-summary",
+		"cost-worker-ocp", "cost-worker-cost-model", "cost-worker-refresh",
+		"cost-worker-hcs", "cost-worker-download",
+		"cost-worker-subs-extraction", "cost-worker-subs-transmission",
 		"rbac-api", "rbac-worker", "rbac-migration", "rbac-admin-bootstrap", "rbac-keycloak-sync",
 		"ros-api", "ros-processor", "ros-recommendation-poller",
 		"ros-housekeeper", "ros-optimization", "ros-migration",

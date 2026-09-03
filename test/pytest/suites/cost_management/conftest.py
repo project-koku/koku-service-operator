@@ -44,10 +44,16 @@ from utils import (
 )
 
 
+# Operator NetworkPolicy does not allow the ingress pod to reach koku-api.
+# Exec API curls from the API pod instead (same label/container as the Helm chart).
+_KOKU_API_LABEL = "app.kubernetes.io/component=cost-management-api"
+_KOKU_API_CONTAINER = "koku-api"
+
+
 def cleanup_old_cost_val_clusters(
     namespace: str,
     db_pod: str,
-    ingress_pod: str,
+    api_pod: str,
     api_url: str,
     rh_identity_header: str,
 ):
@@ -67,13 +73,13 @@ def cleanup_old_cost_val_clusters(
     try:
         result = exec_in_pod(
             namespace,
-            ingress_pod,
+            api_pod,
             [
                 "curl", "-s", f"{api_url}/sources",
                 "-H", "Content-Type: application/json",
                 "-H", f"X-Rh-Identity: {rh_identity_header}",
             ],
-            container="ingress",
+            container=_KOKU_API_CONTAINER,
         )
         
         if result:
@@ -88,13 +94,13 @@ def cleanup_old_cost_val_clusters(
                     print(f"       Deleting old source: {source_name} (ref: {source_ref})")
                     exec_in_pod(
                         namespace,
-                        ingress_pod,
+                        api_pod,
                         [
                             "curl", "-s", "-X", "DELETE",
                             f"{api_url}/sources/{source_id}",
                             "-H", f"X-Rh-Identity: {rh_identity_header}",
                         ],
-                        container="ingress",
+                        container=_KOKU_API_CONTAINER,
                     )
     except Exception as e:
         print(f"       Warning: Could not clean old sources: {e}")
@@ -219,9 +225,9 @@ def cost_validation_data(cluster_config, s3_config, keycloak_config, ingress_url
     if not db_pod:
         pytest.skip("Database pod not found")
     
-    ingress_pod = get_pod_by_label(cluster_config.namespace, "app.kubernetes.io/component=ingress")
-    if not ingress_pod:
-        pytest.skip("Ingress pod not found")
+    api_pod = get_pod_by_label(cluster_config.namespace, _KOKU_API_LABEL)
+    if not api_pod:
+        pytest.skip("Koku API pod not found")
     
     temp_dir = tempfile.mkdtemp(prefix="cost_validation_")
     source_registration = None
@@ -247,7 +253,7 @@ def cost_validation_data(cluster_config, s3_config, keycloak_config, ingress_url
         if cleanup_before:
             print("\n  [0/5] Pre-test cleanup...")
             cleanup_old_cost_val_clusters(
-                cluster_config.namespace, db_pod, ingress_pod,
+                cluster_config.namespace, db_pod, api_pod,
                 api_url, rh_identity,
             )
             print("       Cleanup complete")
@@ -277,13 +283,13 @@ def cost_validation_data(cluster_config, s3_config, keycloak_config, ingress_url
         print("\n  [2/5] Registering source...")
         source_registration = register_source(
             namespace=cluster_config.namespace,
-            pod=ingress_pod,
+            pod=api_pod,
             api_url=api_url,
             rh_identity_header=rh_identity,
             cluster_id=cluster_id,
             org_id=org_id,
             source_name=f"cost-validation-{cluster_id[-8:]}",
-            container="ingress",
+            container=_KOKU_API_CONTAINER,
         )
         print(f"       Source ID: {source_registration.source_id}")
         
@@ -380,11 +386,11 @@ def cost_validation_data(cluster_config, s3_config, keycloak_config, ingress_url
             if source_registration:
                 if delete_source(
                     cluster_config.namespace,
-                    ingress_pod,
+                    api_pod,
                     api_url,
                     rh_identity,
                     source_registration.source_id,
-                    container="ingress",
+                    container=_KOKU_API_CONTAINER,
                 ):
                     print(f"  Deleted source {source_registration.source_id}")
                 else:

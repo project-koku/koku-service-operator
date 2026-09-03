@@ -100,7 +100,7 @@ func testCfg() *costv1alpha1.CostManagementServiceConfig {
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
 			Auth: costv1alpha1.AuthConfig{
 				Keycloak: costv1alpha1.KeycloakSpec{
-					URL:       "https://keycloak.keycloak.svc.cluster.local",
+					URL:       "https://keycloak.keycloak.svc.cluster.local:8443",
 					Realm:     "kubernetes",
 					Audiences: []string{"cost-management-operator", "cost-management-ui"},
 				},
@@ -118,7 +118,7 @@ func testCfg() *costv1alpha1.CostManagementServiceConfig {
 
 func TestKeycloakIssuerAndJWKS(t *testing.T) {
 	cfg := testCfg()
-	wantIssuer := "https://keycloak.keycloak.svc.cluster.local/realms/kubernetes"
+	wantIssuer := "https://keycloak.keycloak.svc.cluster.local:8443/realms/kubernetes"
 	if got := KeycloakIssuerURL(cfg); got != wantIssuer {
 		t.Errorf("KeycloakIssuerURL = %q, want %q", got, wantIssuer)
 	}
@@ -223,8 +223,8 @@ func TestEnvoyYAMLContainsIssuerAudiencesAndKokuCluster(t *testing.T) {
 	yaml := EnvoyYAML(cfg)
 
 	checks := []string{
-		"issuer: https://keycloak.keycloak.svc.cluster.local/realms/kubernetes",
-		"uri: https://keycloak.keycloak.svc.cluster.local/realms/kubernetes/protocol/openid-connect/certs",
+		"issuer: https://keycloak.keycloak.svc.cluster.local:8443/realms/kubernetes",
+		"uri: https://keycloak.keycloak.svc.cluster.local:8443/realms/kubernetes/protocol/openid-connect/certs",
 		"- cost-management-operator",
 		"- cost-management-ui",
 		"address: cost-management-koku-api.cost-onprem.svc.cluster.local",
@@ -232,7 +232,7 @@ func TestEnvoyYAMLContainsIssuerAudiencesAndKokuCluster(t *testing.T) {
 		"X-Rh-Identity",
 		"X-Bearer-Token",
 		"address: keycloak.keycloak.svc.cluster.local",
-		"port_value: 443",
+		"port_value: 8443",
 		"transport_socket:",
 	}
 	for _, want := range checks {

@@ -23,7 +23,7 @@ class TestPodHealth:
     def test_database_pod_exists(self, cluster_config, database_deployed):
         """Verify database pod exists (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed by chart (BYOI mode)")
+            pytest.skip("Database not deployed (BYOI)")
         assert check_pod_exists(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"
@@ -32,7 +32,7 @@ class TestPodHealth:
     def test_database_pod_ready(self, cluster_config, database_deployed):
         """Verify database pod is ready (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed by chart (BYOI mode)")
+            pytest.skip("Database not deployed (BYOI)")
         assert check_pod_ready(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"
@@ -92,7 +92,9 @@ class TestDatabaseConnectivity:
         
         assert result is not None and "1" in result, f"{db_name} database not found"
 
-    def test_kruize_database_exists(self, cluster_config, kruize_database_config):
+    def test_kruize_database_exists(
+        self, require_ros_enabled, cluster_config, kruize_database_config
+    ):
         """Verify Kruize database exists."""
         db_name = kruize_database_config.database
         cmd = [

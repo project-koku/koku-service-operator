@@ -74,6 +74,34 @@ func monitoringFrom(port int32) networkingv1.NetworkPolicyIngressRule {
 	}
 }
 
+// prometheusFrom allows only the OpenShift platform and user-workload
+// Prometheus pods to scrape a port. Use this for a metrics endpoint that
+// shares its listener with application routes, because NetworkPolicy cannot
+// restrict access by HTTP path.
+func prometheusFrom(port int32) networkingv1.NetworkPolicyIngressRule {
+	return networkingv1.NetworkPolicyIngressRule{
+		From: []networkingv1.NetworkPolicyPeer{
+			{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-monitoring"},
+				},
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"},
+				},
+			},
+			{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-user-workload-monitoring"},
+				},
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"},
+				},
+			},
+		},
+		Ports: []networkingv1.NetworkPolicyPort{tcpPort(port)},
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Gateway (Envoy JWT proxy)
 // -----------------------------------------------------------------------------
@@ -136,13 +164,15 @@ func KruizeNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *network
 // -----------------------------------------------------------------------------
 
 // RBACAPINetworkPolicy allows the gateway, koku-api, masu, and ros-api to
-// call the RBAC service for authorization checks.
+// call the RBAC service for authorization checks, and Prometheus to scrape
+// its metrics endpoint.
 func RBACAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
 	return netpol(cfg, cfg.Name+"-rbac-api", "rbac-api", []networkingv1.NetworkPolicyIngressRule{
 		podFrom(cfg, "gateway", rbacAPIPort),
 		podFrom(cfg, "cost-management-api", rbacAPIPort),
 		podFrom(cfg, "cost-processor", rbacAPIPort),
 		podFrom(cfg, "ros-api", rbacAPIPort),
+		prometheusFrom(rbacAPIPort),
 	})
 }
 
@@ -210,6 +240,22 @@ func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *netwo
 		"cost-management-api",
 		"cost-processor",
 		"cost-management-migration",
+		// Listener and Celery check Django migrations over Postgres at
+		// startup (koku.database.check_migrations). Omitting them makes
+		// check_migrations() return False on OperationalError, so workers
+		// loop on "Migrations not done. Sleeping" and never process uploads.
+		"listener",
+		"cost-scheduler",
+		"cost-worker-celery",
+		"cost-worker-priority",
+		"cost-worker-summary",
+		"cost-worker-ocp",
+		"cost-worker-cost-model",
+		"cost-worker-refresh",
+		"cost-worker-hcs",
+		"cost-worker-download",
+		"cost-worker-subs-extraction",
+		"cost-worker-subs-transmission",
 		"rbac-api",
 		"rbac-worker",
 		"rbac-migration",
