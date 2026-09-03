@@ -22,10 +22,10 @@ func TestKokuCommonEnvRequestedBucketPrefersDiscovered(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
-			CostManagement: costv1alpha1.CostManagementConfig{
-				Storage: costv1alpha1.CostManagementStorageSpec{
-					BucketName:    "koku-bucket",
-					ROSBucketName: "ros-data",
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{
+					Koku: "koku-bucket",
+					ROS:  "ros-data",
 				},
 			},
 		},

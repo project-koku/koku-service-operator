@@ -43,7 +43,7 @@ func TestKafkaPortMultiBroker(t *testing.T) {
 func TestS3BucketPrefersDiscovered(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
 	cfg.Spec.ObjectStorage.SecretName = "user-s3"
-	cfg.Spec.CostManagement.Storage.BucketName = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
 	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{
 		S3: &costv1alpha1.DiscoveredS3{Bucket: "from-status"},
 	}
@@ -54,7 +54,7 @@ func TestS3BucketPrefersDiscovered(t *testing.T) {
 
 func TestS3BucketFallsBackToSpec(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
-	cfg.Spec.CostManagement.Storage.BucketName = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
 	if got := S3Bucket(cfg); got != "koku-bucket" {
 		t.Errorf("S3Bucket = %q, want koku-bucket", got)
 	}

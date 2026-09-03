@@ -33,9 +33,14 @@ spec:
       tag: "master"
 
   objectStorage:
-    endpoint: "s3.openshift-storage.svc.cluster.local"
+    endpoint: ""
     port: 443
     useSSL: true
+    secretName: ""
+    buckets:
+      koku: ""
+      ingress: ""
+      ros: ""
 
   costManagement:
     api:

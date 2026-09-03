@@ -74,14 +74,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	if validTypes == "" {
 		validTypes = "hccm"
 	}
-	stagingBucket := spec.StagingBucket
-	if stagingBucket == "" {
-		// Same resolution as Koku REQUESTED_BUCKET: discovered S3 bucket, then spec.
-		stagingBucket = S3Bucket(cfg)
-	}
-	if stagingBucket == "" {
-		stagingBucket = "koku-bucket"
-	}
+	ingressBucket := S3IngressBucket(cfg)
 
 	env := []corev1.EnvVar{
 		EnvVal("INGRESS_WEBPORT", int32String(ingressHTTPPort)),
@@ -92,7 +85,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		EnvVal("INGRESS_VALID_UPLOAD_TYPES", validTypes),
 		// S3-compatible storage (insights-ingress-go uses MINIO env names)
 		EnvVal("INGRESS_MINIOENDPOINT", ingressS3Endpoint(cfg)),
-		EnvVal("INGRESS_STAGEBUCKET", stagingBucket),
+		EnvVal("INGRESS_STAGEBUCKET", ingressBucket),
 		EnvVal("INGRESS_USESSL", ingressS3UseSSL(cfg)),
 		EnvVal("INGRESS_STAGERIMPLEMENTATION", "s3"),
 		EnvFromSecretOptional("INGRESS_MINIOACCESSKEY", storageSecret, "access-key"),

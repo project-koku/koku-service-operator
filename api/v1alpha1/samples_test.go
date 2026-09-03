@@ -69,6 +69,48 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_DefaultLeavesObjectStorageValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.ObjectStorage.Endpoint != "" {
+		t.Fatalf("default sample objectStorage.endpoint = %q, want empty string", cfg.Spec.ObjectStorage.Endpoint)
+	}
+	if cfg.Spec.ObjectStorage.SecretName != "" {
+		t.Fatalf("default sample objectStorage.secretName = %q, want empty string", cfg.Spec.ObjectStorage.SecretName)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Koku != "" {
+		t.Fatalf("default sample objectStorage.buckets.koku = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Koku)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Ingress != "" {
+		t.Fatalf("default sample objectStorage.buckets.ingress = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Ingress)
+	}
+}
+
+func TestSampleCRs_DefaultShowsObjectStorageBucketsShape(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(samplePath(sampleDefault))
+	if err != nil {
+		t.Fatalf("read %s: %v", sampleDefault, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "buckets:") {
+		t.Fatalf("%s must show objectStorage.buckets", sampleDefault)
+	}
+	if !strings.Contains(text, `koku: ""`) {
+		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit blank field", sampleDefault)
+	}
+	if !strings.Contains(text, `ingress: ""`) {
+		t.Fatalf("%s must show objectStorage.buckets.ingress as an explicit blank field", sampleDefault)
+	}
+	if strings.Contains(text, "stagingBucket:") {
+		t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
+	}
+	if strings.Contains(text, "bucketName:") {
+		t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)
