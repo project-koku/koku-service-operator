@@ -111,7 +111,7 @@ func DNS1123Label(s string) string {
 
 // DatabaseHost returns the hostname of the database that all services should connect to.
 func DatabaseHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		return NameDatabase(cfg)
 	}
 	return cfg.Spec.Database.Host
@@ -127,7 +127,7 @@ func cachePortStr(cfg *costv1alpha1.CostManagementServiceConfig) string {
 
 // CacheHost returns the hostname of the Valkey/Redis instance.
 func CacheHost(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		return NameValkey(cfg)
 	}
 	return cfg.Spec.Cache.Host

@@ -323,6 +323,36 @@ func TestReconcileValidation_ExternalDBUnreachable(t *testing.T) {
 	}
 }
 
+func TestReconcileValidation_DefaultBYOIDatabaseReachabilityWhenDeployUnset(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Host: localHost,
+				Port: int32(addr.Port),
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
+		},
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("expected zero result (default BYOI DB reachable), got %+v", result)
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionTrue || dbCond.Reason != "DatabaseReachable" {
+		t.Fatalf("expected DatabaseReady=True DatabaseReachable, got %+v", dbCond)
+	}
+}
+
 func TestReconcileValidation_ExternalCacheUnreachable_SetsAvailableDegraded(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},

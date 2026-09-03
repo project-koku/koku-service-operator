@@ -79,6 +79,35 @@ func TestInfrastructureReadyEvent_ExternalInfra(t *testing.T) {
 	assertNoEvent(t, rec, "InfrastructureReady")
 }
 
+func TestInfrastructureReadyEvent_DefaultsToExternalInfraWhenDeployUnset(t *testing.T) {
+	scheme := testScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	rec := record.NewFakeRecorder(10)
+	r := &CostManagementServiceConfigReconciler{Client: c, Scheme: scheme, Recorder: rec}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	result, err := r.reconcileInfrastructure(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("pass 1: %v", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("expected zero result for default BYOI infra, got %+v", result)
+	}
+	assertEvent(t, rec, "InfrastructureReady")
+
+	db := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if db == nil || db.Status != metav1.ConditionTrue || db.Reason != "ExternalDatabase" {
+		t.Fatalf("expected DatabaseReady=True ExternalDatabase, got %+v", db)
+	}
+	cache := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
+	if cache == nil || cache.Status != metav1.ConditionTrue || cache.Reason != "ExternalCache" {
+		t.Fatalf("expected CacheReady=True ExternalCache, got %+v", cache)
+	}
+}
+
 func TestCoreServicesAvailableEvent_GuardLogic(t *testing.T) {
 	rec := record.NewFakeRecorder(10)
 	r := &CostManagementServiceConfigReconciler{Recorder: rec}

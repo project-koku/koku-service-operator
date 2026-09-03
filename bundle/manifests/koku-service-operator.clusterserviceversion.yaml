@@ -30,14 +30,13 @@ metadata:
               }
             },
             "cache": {
-              "deploy": true,
-              "image": {
-                "repository": "registry.redhat.io/rhel10/valkey-8",
-                "tag": "10.1"
+              "auth": {
+                "enabled": true,
+                "secretName": ""
               },
-              "persistence": {
-                "size": "5Gi"
-              }
+              "deploy": false,
+              "host": "",
+              "port": 6379
             },
             "costManagement": {
               "api": {
@@ -78,14 +77,11 @@ metadata:
               }
             },
             "database": {
-              "deploy": true,
-              "image": {
-                "repository": "registry.redhat.io/rhel10/postgresql-16",
-                "tag": "10.1"
-              },
-              "storage": {
-                "size": "30Gi"
-              }
+              "deploy": false,
+              "host": "",
+              "port": 5432,
+              "secretName": "",
+              "sslMode": "require"
             },
             "global": {
               "clusterDomain": "apps.cluster.local",
@@ -156,7 +152,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-08-21T19:45:45Z"
+    createdAt: "2026-08-25T23:21:47Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1

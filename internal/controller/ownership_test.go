@@ -37,11 +37,16 @@ func ownershipScheme(t *testing.T) *runtime.Scheme {
 
 // minimalCR returns the smallest valid CostManagementServiceConfig with a fixed UID.
 func minimalCR(name, ns string) *costv1alpha1.CostManagementServiceConfig {
+	deploy := true
 	return &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 			UID:       "test-uid-1234",
+		},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: &deploy},
+			Cache:    costv1alpha1.CacheConfig{Deploy: &deploy},
 		},
 	}
 }

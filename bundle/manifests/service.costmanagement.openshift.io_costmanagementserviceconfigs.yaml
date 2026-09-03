@@ -202,7 +202,7 @@ spec:
                         type: string
                     type: object
                   deploy:
-                    default: true
+                    default: false
                     description: |-
                       Deploy the bundled Valkey instance (dev/CI only — not for production).
                       Set false to connect to an external Redis/Valkey endpoint.
@@ -1357,7 +1357,7 @@ spec:
               database:
                 properties:
                   deploy:
-                    default: true
+                    default: false
                     description: |-
                       Deploy the bundled PostgreSQL StatefulSet (dev/CI only — not for production).
                       Set false to connect to an external database.

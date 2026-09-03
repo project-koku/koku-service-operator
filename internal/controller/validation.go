@@ -54,7 +54,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 
 	// --- External DB ---
 	// Bundled DB is already gated in reconcileInfrastructure; probe only when external.
-	if !costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if !costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		host := resources.DatabaseHost(cfg)
 		port := cfg.Spec.Database.Port
 		if port == 0 {
@@ -87,7 +87,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	}
 
 	// --- External Cache ---
-	if !costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if !costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		host := resources.CacheHost(cfg)
 		port := cfg.Spec.Cache.Port
 		if port == 0 {
