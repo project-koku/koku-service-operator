@@ -15,6 +15,7 @@ cluster-bot reproduction are tracked in
 | [ownnamespace.md](ownnamespace.md) | Why operator install NS must equal CR NS |
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
+| [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
 
 ## Goal
 
@@ -429,8 +430,19 @@ oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 | `make run` | **No** — BYOI hostnames not reachable from laptop |
 | `scripts/run-pytest.sh` | **Yes** — test orchestration |
 
+## Related: operator lifecycle Go e2e (COST-7698)
+
+After the stack reaches `SchemaUpToDate=True` and `Available=True`, you can run
+the reconciler-focused Go suite on the **same cluster and namespace** (`cost-onprem`):
+
+→ **[cmsc-e2e.md](cmsc-e2e.md)** — prerequisites, env vars, and per-spec skip conditions
+
+This runbook covers **pytest** (application behavior, COST-7697). The Go suite
+covers **operator lifecycle** (pause, drift, dependencies, migration gating).
+
 ## Related JIRA
 
 - [COST-8121](https://redhat.atlassian.net/browse/COST-8121) — reproduce and triage pytest on cluster-bot (active)
 - [COST-7697](https://redhat.atlassian.net/browse/COST-7697) — adapt pytest suite for operator (**Closed**)
+- [COST-7698](https://redhat.atlassian.net/browse/COST-7698) — operator lifecycle Go e2e ([cmsc-e2e.md](cmsc-e2e.md))
 - PR #56 — original pytest port (merged to `main`)

@@ -1,0 +1,214 @@
+# CMSC operator lifecycle e2e (COST-7698)
+
+Go e2e tests in `test/e2e/cmsc_*.go` exercise **operator reconciler behavior** on
+a live, reconciled `CostManagementServiceConfig` stack. They are **not**
+application-level tests — those live in the pytest suite
+([clusterbot-operator-pytest.md](clusterbot-operator-pytest.md), COST-7697).
+
+This suite is **not** run in GitHub Actions Kind CI (`make test-e2e`); the Prow
+gate is deferred to [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+
+## Quick start
+
+```bash
+# 1. Deploy stack (pick one lab path below)
+IMG=quay.io/.../koku-service-operator:<tag> ./hack/deploy-test-operator.sh --namespace cost-onprem --skip-test
+
+# 2. Confirm day-one gate
+oc get cmsc -n cost-onprem -o jsonpath='SchemaUpToDate={.status.conditions[?(@.type=="SchemaUpToDate")].status} Available={.status.conditions[?(@.type=="Available")].status}{"\n"}'
+
+# 3. Run suite (OpenShift labs: set KUBECTL=oc)
+export E2E_CLUSTER=1
+export NAMESPACE=cost-onprem
+export CMSC_NAME=cost-onprem
+export KUBECTL=oc
+make test-e2e-cmsc
+```
+
+Build tag: tests compile only with `-tags cluster_e2e` (the Makefile sets this).
+
+### Lab deploy paths
+
+Any path that leaves a reconciled CMSC in `cost-onprem` with
+`SchemaUpToDate=True` and `Available=True` is valid:
+
+| Path | When to use |
+|------|-------------|
+| [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) | Cluster Bot / MCE lab: infra + `hack/deploy-incluster.sh` + CMSC — then run **pytest** and/or this Go suite |
+| `hack/deploy-test-operator.sh --skip-test` | Chart-parity orchestrator (RHBK, Kafka, ODF/S4, operator, CMSC); skips pytest |
+| Existing stack | Already deployed — go straight to step 2 above |
+
+Use the **same** `NAMESPACE` / `CMSC_NAME` as the deploy runbook (`cost-onprem` by default).
+
+## Default suite (`make test-e2e-cmsc`)
+
+With no extra env vars beyond `E2E_CLUSTER=1`:
+
+| Runs | Skips |
+|------|-------|
+| OP-E2E-001/004 (pause halts drift) | OP-E2E-005 (needs `E2E_KOKU_UPGRADE_TAG`) |
+| OP-E2E-002 (resume + drift correction) | OP-E2E-006 (needs `E2E_RBAC_UPGRADE_TAG`) |
+| OP-E2E-003 (drift correction) | OP-E2E-007b / 008b (need `E2E_BUNDLED_INFRA_PROBE=1`) |
+| OP-E2E-005b (downgrade gating, ~10–20 min) | OP-E2E-009 (blocked on COST-7694) |
+| OP-E2E-007 / 008 (dependency validation) | |
+
+## Operator vs application images
+
+Deploy uses the **operator** image (`IMG=...`). Migration specs patch **application**
+image tags on the CMSC. A new operator tag does not satisfy `E2E_KOKU_UPGRADE_TAG` or
+`E2E_RBAC_UPGRADE_TAG`.
+
+| Image | Example registry path | How it is set | Go e2e specs |
+|-------|----------------------|---------------|--------------|
+| Operator | `quay.io/project-koku/koku-service-operator:<tag>` | `IMG=` at deploy | All specs after deploy (pause, drift, dependency, …) |
+| Koku app | `quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
+| RBAC app | `quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
+
+**What you need to run migration specs**
+
+| Spec | Application tag required? | Notes |
+|------|---------------------------|-------|
+| Default suite (no `E2E_*_UPGRADE_TAG`) | No | OP-E2E-005 and 006 skip; OP-E2E-005b runs if downgrade tag ≠ current Koku tag |
+| OP-E2E-005 (upgrade) | Yes — Koku | Set `E2E_KOKU_UPGRADE_TAG` to a pullable tag **different** from CMSC; migrate Job must succeed |
+| OP-E2E-005b (downgrade gating) | Yes — Koku | Uses `E2E_KOKU_DOWNGRADE_TAG` (default `5432d06`); pass on migrate success or fail-closed |
+| OP-E2E-006 (RBAC upgrade) | Yes — RBAC | Set `E2E_RBAC_UPGRADE_TAG` to a pullable tag **different** from CMSC |
+
+Lab sample tags (BYOI CMSC): Koku `768be82`, RBAC `73870d8` — see
+`config/samples/byoi/app/costmanagementserviceconfig.yaml`. You do not need a
+newly published tag for 005b; any **different** pullable tag is enough.
+
+## Cluster prerequisites (all specs)
+
+| Requirement | Detail |
+|-------------|--------|
+| OwnNamespace | Operator, CMSC, and `NAMESPACE` env must match (e.g. `cost-onprem`) |
+| CMSC CRD + operator | Installed and watching the app namespace |
+| Day-one conditions | `BeforeSuite` waits for `SchemaUpToDate=True` and `Available=True` |
+| `cost-onprem-koku-api` Deployment | Required for pause/drift specs (name = `{CMSC_NAME}-koku-api`) |
+| Active `oc` / `kubectl` session | Tests use the current kubeconfig context |
+| Time budget | Default suite **~15–25 min** on a warm lab cluster; upper bound **~35–45 min** if drift/migration waits max out. Quick pass (skip 005b): **~8–12 min** |
+
+## Environment variables
+
+| Variable | Required | Default | Used by |
+|----------|----------|---------|---------|
+| `E2E_CLUSTER` | **Yes** | — | Entire suite (`TestCMSCE2E` skips unless `1`) |
+| `NAMESPACE` | No | `cost-onprem` | CMSC and workload namespace |
+| `CMSC_NAME` | No | `cost-onprem` | CMSC `metadata.name`; falls back to `CR_NAME` |
+| `CR_NAME` | No | — | Alias for `CMSC_NAME` when set |
+| `KUBECONFIG` | No | default kubeconfig | API client |
+| `KUBE_CONTEXT` | No | current context | Pin cluster context |
+| `KUBECTL` | No | `kubectl` | CLI for jobs/logs (`oc` works if `KUBECTL=oc`) |
+| `E2E_KOKU_UPGRADE_TAG` | For OP-E2E-005 only | — | **Newer** pullable `spec.costManagement.api.image.tag`; spec **skipped** if unset |
+| `E2E_KOKU_DOWNGRADE_TAG` | No | `5432d06` | OP-E2E-005b downgrade target; must differ from current tag |
+| `E2E_RBAC_UPGRADE_TAG` | For OP-E2E-006 only | — | Pullable `spec.rbac.image.tag`; spec **skipped** if unset |
+| `E2E_BUNDLED_INFRA_PROBE` | For 007b/008b only | unset (off) | Set to `1` to run bundled pod-delete readiness specs |
+| `E2E_CACHE_WORKLOAD` | No | auto | `deployment` or `statefulset` for OP-E2E-008b when Valkey shape differs |
+
+`make test-e2e-cmsc` fails fast if `E2E_CLUSTER` is not `1`.
+
+## Per-spec requirements
+
+| ID | Spec | Runs by default? | Extra configuration |
+|----|------|------------------|---------------------|
+| OP-E2E-001/004 | Pause halts drift | Yes | `cost-onprem-koku-api` Deployment |
+| OP-E2E-002 | Resume + drift | Yes | Same; **~6 min** wait after resume |
+| OP-E2E-003 | Drift correction | Yes | Same; **~6 min** SSA requeue wait |
+| OP-E2E-005 | Koku **upgrade** migrate → rollout | **Skipped** | `E2E_KOKU_UPGRADE_TAG` = newer tag than CMSC; image pullable from cluster; migrate Job must **succeed** |
+| OP-E2E-005b | Koku **downgrade** gating | Yes | `E2E_KOKU_DOWNGRADE_TAG` (default `5432d06`); accepts migrate **success or fail-closed**; **~10–20 min** |
+| OP-E2E-006 | RBAC migrate → rollout | **Skipped** | `E2E_RBAC_UPGRADE_TAG`; `cost-onprem-rbac-api` Deployment |
+| OP-E2E-007 | DB dependency (validation) | Yes | Temporarily sets `database.deploy=false` + unreachable host; needs `cost-onprem-db-credentials` Secret (or `spec.database.secretName`) |
+| OP-E2E-008 | Cache dependency (validation) | Yes | Temporarily sets `cache.deploy=false` + unreachable host; creates `{CMSC_NAME}-cache-credentials` if needed (CEL requires `auth.secretName`) |
+| OP-E2E-007b | Bundled DB pod loss | **Skipped** | `E2E_BUNDLED_INFRA_PROBE=1`, `database.deploy=true`, `{CMSC_NAME}-database` StatefulSet |
+| OP-E2E-008b | Bundled cache pod loss | **Skipped** | `E2E_BUNDLED_INFRA_PROBE=1`, `cache.deploy=true`, Valkey workload (Deployment by default) |
+| OP-E2E-009 | Secret rotation | **Skipped** | Blocked on [COST-7694](https://redhat.atlassian.net/browse/COST-7694) |
+
+### Notes on dependency tests (007/008)
+
+The primary path simulates **BYOI validation** by patching CMSC to external mode
+with an unreachable hostname. It does **not** require a separate infra namespace.
+
+Scaling bundled Postgres/Valkey to **0 replicas does not flip conditions** — the
+operator treats zero replicas as ready. Use 007b/008b (pod delete) for bundled
+readiness, or the external-probe path above.
+
+While unreachable, OP-E2E-007/008 also assert top-level conditions:
+`Available=False` (`DependencyNotReady`) and `Degraded=True`
+(`DependencyUnreachable`). Both are restored in each spec's `defer`.
+
+### Notes on migration tests (005/005b/006)
+
+- Migration Jobs are keyed on the CMSC application image tag (see table above), via
+  the Job annotation `koku.costmanagement.io/image-tag`.
+- Helpers wait for a **replacement** Job whose annotation matches the patched tag.
+  A prior succeeded Job for an older tag does not satisfy the wait.
+- Tag must **change** from the value on the completed migrate Job annotation.
+- **Upgrade (005):** tag must exist in the registry and migrate Job must complete
+  within the Job deadline (600s).
+- **Downgrade (005b):** schema downgrade may fail (e.g. `768be82` → `5432d06`);
+  test asserts fail-closed behavior (`MigrationFailed`, Deployment stays on prior image).
+- Tests **restore** the original CMSC image tag in `defer` after each migration spec.
+
+## Ginkgo labels
+
+Each `Describe` block sets labels for `-ginkgo.label-filter`:
+
+| Label | Specs |
+|-------|-------|
+| `cmsc` | All CMSC lifecycle specs |
+| `pause` | OP-E2E-001/002/004 |
+| `drift` | OP-E2E-003 |
+| `upgrade` | OP-E2E-005, 005b, 006 |
+| `dependency` | OP-E2E-007, 008, 007b, 008b |
+| `secret-rotation` | OP-E2E-009 (stub) |
+
+The `upgrade` label runs all three migration specs. OP-E2E-006 still **skips**
+unless `E2E_RBAC_UPGRADE_TAG` is set.
+
+Every filtered run still requires `E2E_CLUSTER=1` (and usually `KUBECTL=oc` on
+OpenShift).
+
+## Filtering specs
+
+```bash
+export E2E_CLUSTER=1 NAMESPACE=cost-onprem CMSC_NAME=cost-onprem KUBECTL=oc
+
+# Full default suite
+make test-e2e-cmsc
+
+# Quick pass — skip ~10–20 min downgrade (005b)
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.skip='OP-E2E-005b' -timeout 30m
+
+# By label
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.label-filter='pause' -timeout 30m
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.label-filter='drift' -timeout 30m
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.label-filter='dependency' -timeout 30m
+
+# Upgrade label — 005, 005b, and 006 (006 skips without E2E_RBAC_UPGRADE_TAG)
+export E2E_KOKU_UPGRADE_TAG=768be82   # must differ from current CMSC Koku tag
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.label-filter='upgrade' -timeout 45m
+
+# Single spec by name
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.focus='OP-E2E-005b' -timeout 45m
+go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
+  -ginkgo.focus='OP-E2E-007' -timeout 15m
+```
+
+## Prow integration (COST-7699)
+
+Prow wiring is tracked in [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+After the stack is Ready (`SchemaUpToDate=True`, `Available=True`), run
+`make test-e2e-cmsc` with `E2E_CLUSTER=1` (see env vars above).
+
+## Related
+
+- [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) — Cluster Bot deploy + pytest (same namespace; run Go suite after Ready)
+- [COST-7698 Jira](../jira/COST-7698.md)
+- [COST-7699](https://redhat.atlassian.net/browse/COST-7699) — Prow CI gate
+- [COST-7694](https://redhat.atlassian.net/browse/COST-7694) — blocks OP-E2E-009 (secret rotation)

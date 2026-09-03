@@ -9,7 +9,7 @@ from utils import get_pod_by_label, get_secret_value, get_route_url, run_oc_comm
 
 @pytest.fixture(autouse=True)
 def _skip_ros_suite_when_disabled(require_ros_enabled) -> None:
-    """Skip ROS suite tests when spec.ros.enabled is false (Cost-only beta)."""
+    """Skip ROS suite tests when spec.ros.enabled is false."""
 
 
 @pytest.fixture(scope="module")
