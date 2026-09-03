@@ -74,3 +74,17 @@ class TestJWTTokenAcquisition:
 
         assert "exp" in payload, "Token missing 'exp' claim"
         assert "iss" in payload, "Token missing 'iss' claim"
+        assert "org_id" in payload, "Token missing org_id claim"
+        assert "account_number" in payload, "Token missing account_number claim"
+
+        aud = payload.get("aud")
+        if isinstance(aud, str):
+            aud_values = {aud}
+        elif isinstance(aud, list):
+            aud_values = {a for a in aud if isinstance(a, str)}
+        else:
+            aud_values = set()
+        expected_audiences = {"cost-management-operator", "cost-management-ui"}
+        assert aud_values & expected_audiences, (
+            f"Token aud {aud!r} does not intersect {sorted(expected_audiences)}"
+        )

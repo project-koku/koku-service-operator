@@ -9,7 +9,7 @@ supported. You must still provision the ROS/Kruize database users listed below:
 the operator validates those Secret keys even when ROS is off.
 
 Companion guides: [quickstart](quickstart.md), [production](production.md),
-[CMMO](cmmo.md).
+[Keycloak](keycloak.md), [CMMO](cmmo.md).
 
 ## What you need
 
@@ -192,15 +192,17 @@ not block the rest of the pipeline, but uploads will not work.
 
 ## OIDC (Keycloak / RHBK)
 
-The operator never deploys Keycloak. Configure a realm (samples use
-`kubernetes`) and JWT audiences that match Envoy:
+The operator never deploys Keycloak. `spec.auth.keycloak.url` is **required**
+(JWKS fetch URL; the operator does not auto-detect Keycloak). Configure a
+realm (default `kubernetes`) and JWT audiences that match Envoy. Full realm,
+client, mapper, and claim setup: [keycloak.md](keycloak.md).
 
 - `cost-management-operator`
 - `cost-management-ui`
 
 | Spec field | Purpose |
 |------------|---------|
-| `spec.auth.keycloak.url` | In-cluster base URL used to fetch JWKS (prefer a Service URL so Envoy does not depend on the router) |
+| `spec.auth.keycloak.url` | **Required.** In-cluster base URL used to fetch JWKS (prefer a Service URL so Envoy does not depend on the router) |
 | `spec.auth.keycloak.issuerURL` | Token `iss` value. Set this to the public Route URL when RHBK issues tokens with that `iss` even if clients talk to the in-cluster Service |
 | `spec.auth.keycloak.realm` | Default `kubernetes` |
 | `spec.auth.keycloak.audiences` | Default `cost-management-operator`, `cost-management-ui` |

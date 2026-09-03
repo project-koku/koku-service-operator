@@ -490,7 +490,7 @@ For detailed troubleshooting, see [Troubleshooting Guide](../docs/operations/tro
 ## 📚 Related Documentation
 
 - **[Installation Guide](../docs/operations/installation.md)** - Complete installation instructions
-- **[JWT Authentication](../docs/api/native-jwt-authentication.md)** - JWT setup and configuration
+- **[JWT Authentication](../docs/install/keycloak.md)** - JWT setup and configuration
 - **[TLS Setup Guide](../docs/operations/cost-management-operator-tls-config-setup.md)** - Detailed TLS configuration
 - **[Configuration Reference](../docs/operations/configuration.md)** - Helm values and configuration options
 - **[Helm Templates Reference](../docs/architecture/helm-templates-reference.md)** - Technical chart details
