@@ -285,10 +285,12 @@ type EnvoySpec struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.issuerURL) || size(self.issuerURL) == 0 || self.issuerURL.startsWith('https://')",message="issuerURL must use https when set"
 // +kubebuilder:validation:XValidation:rule="!has(self.audiences) || size(self.audiences) > 0",message="audiences must not be empty when set"
+// +kubebuilder:validation:XValidation:rule="has(self.url) && size(self.url) > 0",message="url is required (JWKS fetch URL); operator does not auto-detect Keycloak"
 type KeycloakSpec struct {
-	// Full URL of the Keycloak instance used for JWKS fetch (and issuer when
-	// issuerURL is unset). Prefer an in-cluster http(s) Service URL so Envoy
-	// can reach JWKS without depending on the OpenShift router.
+	// URL is required. Full URL of the Keycloak instance used for JWKS fetch
+	// (and issuer when issuerURL is unset). Prefer an in-cluster http(s)
+	// Service URL so Envoy can reach JWKS without depending on the OpenShift
+	// router. The operator never deploys or auto-detects Keycloak.
 	// Example: http://keycloak-service.keycloak.svc.cluster.local:8080
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	URL string `json:"url,omitempty"`
@@ -299,8 +301,6 @@ type KeycloakSpec struct {
 	// When empty, issuer is derived from url + realm.
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	IssuerURL string `json:"issuerURL,omitempty"`
-	// Keycloak namespace. Defaults to "keycloak".
-	Namespace string `json:"namespace,omitempty"`
 	// +kubebuilder:default:=kubernetes
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	Realm string `json:"realm,omitempty"`

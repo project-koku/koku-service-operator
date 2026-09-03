@@ -70,11 +70,57 @@ func TestValidateResourceRequirements(t *testing.T) {
 	})
 }
 
+func TestValidateKeycloakURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "empty", url: "", wantErr: true},
+		{name: "whitespace", url: "   ", wantErr: true},
+		{name: "valid", url: "http://keycloak.example.svc:8080", wantErr: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &CostManagementServiceConfig{}
+			cfg.Name = "test"
+			cfg.Spec.Auth.Keycloak.URL = tc.url
+
+			err := cfg.validateCostManagementServiceConfig()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected validation error for empty or whitespace-only url")
+				}
+				got := err.Error()
+				if !strings.Contains(got, "spec.auth.keycloak.url") {
+					t.Errorf("error should name spec.auth.keycloak.url, got %q", got)
+				}
+				if !strings.Contains(got, "JWKS fetch URL") {
+					t.Errorf("error should mention JWKS fetch URL, got %q", got)
+				}
+				if !strings.Contains(got, "auto-detect") {
+					t.Errorf("error should say operator does not auto-detect Keycloak, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("valid url must not fail this check: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateCostManagementServiceConfigResources(t *testing.T) {
 	t.Parallel()
 
 	cfg := &CostManagementServiceConfig{}
 	cfg.Name = "test"
+	cfg.Spec.Auth.Keycloak.URL = "http://keycloak.example.svc:8080"
 	cfg.Spec.CostManagement.API.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceMemory: resource.MustParse("1Gi"),

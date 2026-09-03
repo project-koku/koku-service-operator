@@ -169,15 +169,38 @@ func TestKeycloakDefaults(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
 	}
-	if got := KeycloakURL(cfg); got != defaultKeycloakURL {
-		t.Errorf("KeycloakURL default = %q, want %q", got, defaultKeycloakURL)
+	if got := KeycloakURL(cfg); got != "" {
+		t.Errorf("KeycloakURL empty spec = %q, want empty (no silent default)", got)
 	}
+	const oldDefault = "https://keycloak.keycloak.svc.cluster.local"
+	if KeycloakURL(cfg) == oldDefault {
+		t.Error("KeycloakURL must not fall back to the old in-cluster default")
+	}
+
+	cfg.Spec.Auth.Keycloak.URL = "  https://keycloak.example.svc:8080/  "
+	if got := KeycloakURL(cfg); got != "https://keycloak.example.svc:8080" {
+		t.Errorf("KeycloakURL trimmed = %q, want https://keycloak.example.svc:8080", got)
+	}
+
 	if got := KeycloakRealm(cfg); got != defaultKeycloakRealm {
 		t.Errorf("KeycloakRealm default = %q, want %q", got, defaultKeycloakRealm)
 	}
 	aud := KeycloakAudiences(cfg)
 	if len(aud) != 2 || aud[0] != "cost-management-operator" {
 		t.Errorf("KeycloakAudiences default = %v", aud)
+	}
+}
+
+func TestEnvoyLuaFilterExactJWTClaims(t *testing.T) {
+	for _, want := range []string{`jwt_data["org_id"]`, `jwt_data["account_number"]`} {
+		if !strings.Contains(envoyLuaFilter, want) {
+			t.Errorf("envoyLuaFilter missing %s", want)
+		}
+	}
+	for _, banned := range []string{"organization_id", "tenant_id", "account_id"} {
+		if strings.Contains(envoyLuaFilter, banned) {
+			t.Errorf("envoyLuaFilter must not use Helm claim fallback %q", banned)
+		}
 	}
 }
 

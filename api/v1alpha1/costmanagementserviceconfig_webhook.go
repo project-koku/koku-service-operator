@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,6 +71,7 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 	specPath := field.NewPath("spec")
 	spec := &c.Spec
 
+	allErrs = append(allErrs, validateKeycloakURL(specPath.Child("auth", "keycloak", "url"), spec.Auth.Keycloak.URL)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("database", "resources"), spec.Database.Resources)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("cache", "resources"), spec.Cache.Resources)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("auth", "envoy", "resources"), spec.Auth.Envoy.Resources)...)
@@ -117,4 +119,13 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 		c.Name,
 		allErrs,
 	)
+}
+
+const keycloakURLRequiredMsg = "JWKS fetch URL required; operator does not auto-detect Keycloak"
+
+func validateKeycloakURL(path *field.Path, url string) field.ErrorList {
+	if strings.TrimSpace(url) == "" {
+		return field.ErrorList{field.Required(path, keycloakURLRequiredMsg)}
+	}
+	return nil
 }

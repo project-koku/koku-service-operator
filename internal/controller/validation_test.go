@@ -462,6 +462,26 @@ func TestReconcileValidation_OIDCJWKS(t *testing.T) {
 	}
 }
 
+func TestReconcileValidation_OIDCEmptyURLSkipsProbe(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+
+	r := newValidationReconciler(t)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("empty url must not block the pipeline, got %+v", result)
+	}
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	if found != nil {
+		t.Fatalf("empty url should skip OIDC probe (no AuthenticationReady), got %+v", found)
+	}
+}
+
 func TestReconcileValidation_OIDCWithCustomCA(t *testing.T) {
 	t.Run("custom CA", func(t *testing.T) {
 		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
