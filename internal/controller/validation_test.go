@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -462,7 +463,7 @@ func TestReconcileValidation_OIDCJWKS(t *testing.T) {
 	}
 }
 
-func TestReconcileValidation_OIDCEmptyURLSkipsProbe(t *testing.T) {
+func TestReconcileValidation_OIDCEmptyURLSetsConfigMissing(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec:       bundledNoKafkaSpec(),
@@ -477,8 +478,14 @@ func TestReconcileValidation_OIDCEmptyURLSkipsProbe(t *testing.T) {
 		t.Errorf("empty url must not block the pipeline, got %+v", result)
 	}
 	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
-	if found != nil {
-		t.Fatalf("empty url should skip OIDC probe (no AuthenticationReady), got %+v", found)
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("AuthenticationReady=%v, want False OIDCConfigMissing", found)
+	}
+	if found.Reason != "OIDCConfigMissing" {
+		t.Errorf("reason = %q, want OIDCConfigMissing", found.Reason)
+	}
+	if !strings.Contains(found.Message, "spec.auth.keycloak.url") {
+		t.Errorf("message should name spec.auth.keycloak.url, got %q", found.Message)
 	}
 }
 

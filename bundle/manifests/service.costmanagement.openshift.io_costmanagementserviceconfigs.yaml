@@ -1,9 +1,9 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  creationTimestamp: null
   name: costmanagementserviceconfigs.service.costmanagement.openshift.io
 spec:
   group: service.costmanagement.openshift.io
@@ -47,6 +47,9 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              Nested CEL on KeycloakSpec does not run when spec.auth or spec.auth.keycloak
+              is omitted, so the required-url rule lives here as well.
             properties:
               auth:
                 properties:
@@ -174,9 +177,10 @@ spec:
                       url:
                         description: |-
                           URL is required. Full URL of the Keycloak instance used for JWKS fetch
-                          (and issuer when issuerURL is unset). Prefer an in-cluster http(s)
-                          Service URL so Envoy can reach JWKS without depending on the OpenShift
-                          router. The operator never deploys or auto-detects Keycloak.
+                          (and issuer when issuerURL is unset). Must start with http:// or https://.
+                          Prefer an in-cluster Service URL so Envoy can reach JWKS without
+                          depending on the OpenShift router. The operator never deploys or
+                          auto-detects Keycloak.
                           Example: http://keycloak-service.keycloak.svc.cluster.local:8080
                         pattern: ^[^\x00-\x1f\x7f]*$
                         type: string
@@ -190,6 +194,9 @@ spec:
                     - message: url is required (JWKS fetch URL); operator does not
                         auto-detect Keycloak
                       rule: has(self.url) && size(self.url) > 0
+                    - message: url must start with http:// or https://
+                      rule: '!has(self.url) || size(self.url) == 0 || self.url.startsWith(''http://'')
+                        || self.url.startsWith(''https://'')'
                 type: object
               cache:
                 properties:
@@ -2745,6 +2752,11 @@ spec:
                     type: integer
                 type: object
             type: object
+            x-kubernetes-validations:
+            - message: spec.auth.keycloak.url is required (JWKS fetch URL); operator
+                does not auto-detect Keycloak
+              rule: has(self.auth) && has(self.auth.keycloak) && has(self.auth.keycloak.url)
+                && size(self.auth.keycloak.url) > 0
           status:
             properties:
               conditions:
@@ -2863,9 +2875,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: null
-  storedVersions: null

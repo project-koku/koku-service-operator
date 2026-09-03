@@ -121,11 +121,18 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 	)
 }
 
-const keycloakURLRequiredMsg = "JWKS fetch URL required; operator does not auto-detect Keycloak"
+const (
+	keycloakURLRequiredMsg = "JWKS fetch URL required; operator does not auto-detect Keycloak"
+	keycloakURLSchemeMsg   = "must start with http:// or https://"
+)
 
 func validateKeycloakURL(path *field.Path, url string) field.ErrorList {
-	if strings.TrimSpace(url) == "" {
+	trimmed := strings.TrimSpace(url)
+	if trimmed == "" {
 		return field.ErrorList{field.Required(path, keycloakURLRequiredMsg)}
+	}
+	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
+		return field.ErrorList{field.Invalid(path, url, keycloakURLSchemeMsg)}
 	}
 	return nil
 }

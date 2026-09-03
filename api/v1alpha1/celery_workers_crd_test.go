@@ -85,30 +85,62 @@ func TestKeycloakURLRequiredCEL(t *testing.T) {
 				t.Error("keycloak.namespace must not appear on the CRD")
 			}
 
-			found := false
-			for _, rule := range kc.XValidations {
-				if !strings.Contains(rule.Rule, "self.url") {
-					continue
-				}
-				found = true
-				if !strings.Contains(rule.Rule, "has(self.url)") || !strings.Contains(rule.Rule, "size(self.url)") {
-					t.Errorf("url CEL rule should require has(self.url) && size(self.url) > 0, got %q", rule.Rule)
-				}
-				if !strings.Contains(rule.Message, "url") {
-					t.Errorf("CEL message should name url, got %q", rule.Message)
-				}
-				if !strings.Contains(rule.Message, "JWKS") {
-					t.Errorf("CEL message should mention JWKS, got %q", rule.Message)
-				}
-				if !strings.Contains(rule.Message, "auto-detect") {
-					t.Errorf("CEL message should say operator does not auto-detect Keycloak, got %q", rule.Message)
-				}
+			nestedURL := findCELRule(kc.XValidations, "has(self.url)", "size(self.url)")
+			if nestedURL == nil {
+				t.Fatal("missing KeycloakSpec x-kubernetes-validations rule requiring non-empty url")
 			}
-			if !found {
-				t.Fatal("missing x-kubernetes-validations rule requiring non-empty url on keycloak")
+			if !strings.Contains(nestedURL.Message, "url") {
+				t.Errorf("CEL message should name url, got %q", nestedURL.Message)
+			}
+			if !strings.Contains(nestedURL.Message, "JWKS") {
+				t.Errorf("CEL message should mention JWKS, got %q", nestedURL.Message)
+			}
+			if !strings.Contains(nestedURL.Message, "auto-detect") {
+				t.Errorf("CEL message should say operator does not auto-detect Keycloak, got %q", nestedURL.Message)
+			}
+
+			scheme := findCELRule(kc.XValidations, "startsWith('http://')", "startsWith('https://')")
+			if scheme == nil {
+				t.Fatal("missing KeycloakSpec CEL rule requiring url to start with http:// or https://")
+			}
+
+			// Nested KeycloakSpec CEL does not run when spec.auth.keycloak is
+			// omitted. The parent spec rule must fail that case.
+			spec := navigateSchema(t, schema, "spec")
+			parent := findCELRule(spec.XValidations, "has(self.auth.keycloak)", "self.auth.keycloak.url")
+			if parent == nil {
+				t.Fatal("missing spec-level CEL rule requiring auth.keycloak (omitted-keycloak must fail)")
+			}
+			if !strings.Contains(parent.Rule, "has(self.auth)") {
+				t.Errorf("parent CEL must require has(self.auth) so omitting auth fails, got %q", parent.Rule)
+			}
+			if !strings.Contains(parent.Rule, "size(self.auth.keycloak.url)") {
+				t.Errorf("parent CEL must require non-empty auth.keycloak.url, got %q", parent.Rule)
+			}
+			if !strings.Contains(parent.Message, "JWKS") {
+				t.Errorf("parent CEL message should mention JWKS, got %q", parent.Message)
+			}
+			if !strings.Contains(parent.Message, "auto-detect") {
+				t.Errorf("parent CEL message should say operator does not auto-detect Keycloak, got %q", parent.Message)
 			}
 		})
 	}
+}
+
+func findCELRule(rules []apiextensionsv1.ValidationRule, mustContain ...string) *apiextensionsv1.ValidationRule {
+	for i := range rules {
+		ok := true
+		for _, s := range mustContain {
+			if !strings.Contains(rules[i].Rule, s) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return &rules[i]
+		}
+	}
+	return nil
 }
 
 func storedOpenAPIV3Schema(crd *apiextensionsv1.CustomResourceDefinition) *apiextensionsv1.JSONSchemaProps {
