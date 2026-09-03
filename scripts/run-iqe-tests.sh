@@ -49,9 +49,19 @@ cleanup() {
         rm -f "${TEMP_PULL_SECRET_FILE}"
     fi
 
-    # Clean up pod if not keeping it and it exists
+    # Clean up pod + the additive masu NetworkPolicy (unless keeping the pod for
+    # debugging — the policy must stay while a kept pod is still calling masu:8000).
     if [[ "${KEEP_POD:-false}" != "true" ]] && [[ -n "${NAMESPACE:-}" ]]; then
         kubectl delete pod iqe-cost-tests -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null || true
+        if [[ -n "${HELM_RELEASE_NAME:-}" ]]; then
+            kubectl delete networkpolicy "${HELM_RELEASE_NAME}-masu-iqe" -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null || true
+        fi
+    fi
+
+    # Remove the kubectl->oc compat dir created by the Prow shim (if any).
+    # Done last, after the final kubectl call above, so the symlink stays usable.
+    if [[ -n "${_kubectl_compat_dir:-}" ]] && [[ -d "${_kubectl_compat_dir}" ]]; then
+        rm -rf "${_kubectl_compat_dir}"
     fi
 
     exit $exit_code
@@ -678,13 +688,17 @@ fi
 
 # Pre-seed exchange rates so currency-filtered tests have valid rates available.
 # The EnabledCurrency table is populated by koku migration 0014_enabled_currency;
-# CURRENCY_URL must be set (via Helm value) for update_exchange_rates to fetch rates.
-# The get_daily_currency_rates Celery task runs on a schedule and may not have
-# executed yet on fresh/ephemeral deployments.
+# CURRENCY_URL must be set (CMSC spec.costManagement.api.env) for
+# update_exchange_rates to fetch rates. The get_daily_currency_rates Celery task
+# runs on a schedule and may not have executed yet on fresh/ephemeral deployments.
+#
+# Exec into the masu pod and curl localhost:8000 so the request never leaves the
+# pod: the operator's MasuNetworkPolicy only permits Prometheus on :9000, so any
+# off-pod caller to masu:8000 is denied. localhost traffic bypasses NetworkPolicy.
 echo ""
 echo "Seeding exchange rates via masu internal API..."
-MASU_INTERNAL_URL="http://${MASU_HOSTNAME}:${MASU_PORT}/api/cost-management/v1"
-EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" deploy/${HELM_RELEASE_NAME}-koku-api -c koku-api -- \
+MASU_INTERNAL_URL="http://localhost:${MASU_PORT}/api/cost-management/v1"
+EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- \
     curl -sf --max-time 20 "${MASU_INTERNAL_URL}/update_exchange_rates/" 2>/dev/null || echo "")
 if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
     RATE_COUNT=$(echo "$EXCHANGE_RATE_RESPONSE" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('updated_exchange_rates',{})))" 2>/dev/null || echo "0")
@@ -692,6 +706,43 @@ if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
 else
     echo "⚠ WARNING: Could not seed exchange rates. Currency-filtered tests may fail."
 fi
+
+# Additive, harness-owned NetworkPolicy that permits IQE -> masu:8000. The
+# operator's MasuNetworkPolicy (COST-8060) only allows Prometheus on :9000, so
+# masu's HTTP API on :8000 is default-denied. NetworkPolicies are additive, so
+# this sits beside the operator policy without modifying it and is removed in
+# cleanup(). Peers: the iqe-tests pod (in-cluster run) and the OpenShift router
+# (local Route path). Needed for tag setup (/enabled_tags/, gated by IQE_TEST_RUN).
+echo ""
+echo "Applying additive masu NetworkPolicy (${HELM_RELEASE_NAME}-masu-iqe)..."
+cat <<EOF | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ${HELM_RELEASE_NAME}-masu-iqe
+  namespace: ${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: cost-processor
+      app.kubernetes.io/instance: ${HELM_RELEASE_NAME}
+      app.kubernetes.io/name: ${HELM_RELEASE_NAME}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: iqe-tests
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-ingress
+      ports:
+        - port: ${MASU_PORT}
+          protocol: TCP
+EOF
 
 echo ""
 echo "Creating IQE test pod..."

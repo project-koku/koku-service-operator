@@ -51,11 +51,18 @@ spec:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
         tag: "768be82"
       replicas: 1
+      # Live exchange rates for IQE smoke (applied to all koku containers).
+      # Leave unset for airgapped on-prem.
+      env:
+        CURRENCY_URL: "https://open.er-api.com/v6/latest/USD"
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
         tag: "768be82"
       replicas: 1
+      # Registers masu test-only routes (/enabled_tags/) for IQE. Lab/CI only.
+      env:
+        IQE_TEST_RUN: "True"
     listener:
       replicas: 1
     celery:
