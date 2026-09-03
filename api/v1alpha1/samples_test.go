@@ -69,6 +69,14 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_DefaultLeavesKafkaBootstrapBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Kafka.BootstrapServers != "" {
+		t.Fatalf("default sample kafka.bootstrapServers = %q, want empty string", cfg.Spec.Kafka.BootstrapServers)
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)

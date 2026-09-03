@@ -98,7 +98,7 @@ metadata:
               }
             },
             "kafka": {
-              "bootstrapServers": "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+              "bootstrapServers": ""
             },
             "kruize": {
               "image": {
@@ -156,7 +156,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-08-21T19:45:45Z"
+    createdAt: "2026-08-26T12:45:02Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1

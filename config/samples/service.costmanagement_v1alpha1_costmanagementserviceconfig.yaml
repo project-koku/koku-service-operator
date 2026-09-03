@@ -25,7 +25,7 @@ spec:
       size: 5Gi
 
   kafka:
-    bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    bootstrapServers: ""
 
   ingress:
     image:

@@ -129,9 +129,10 @@ bootstrap (for example
 Ingress publishes upload announcements here; the Listener consumes it. Create
 the topic before applying the CR. The operator does not create KafkaTopic CRs.
 
-Other topics used by the lab fixture (`hccm.ros.events`,
-`rosocp.kruize.recommendations`, `platform.sources.event-stream`,
-`platform.payload-status`) are unused on the Cost-only path.
+Additional topics used only on the ROS-enabled operator path
+(`hccm.ros.events`, `rosocp.kruize.recommendations`), plus the
+Sources-listener topic `platform.sources.event-stream`, are unused on the
+Cost-only path. `platform.payload-status` is also unused there.
 
 `spec.kafka.securityProtocol` is one of `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT`,
 `SASL_SSL` (default `PLAINTEXT`).
