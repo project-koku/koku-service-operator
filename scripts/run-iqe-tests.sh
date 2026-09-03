@@ -303,9 +303,9 @@ S3_ACCESS_KEY=$(kubectl get secret "$S3_SECRET_NAME" -n "$NAMESPACE" -o jsonpath
 S3_SECRET_KEY=$(kubectl get secret "$S3_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.secret-key}' 2>/dev/null | base64 -d || echo "")
 
 # Get S3 endpoint and bucket names from MASU pod
-S3_ENDPOINT=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv S3_ENDPOINT 2>/dev/null || echo "")
-S3_BUCKET_NAME=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv S3_BUCKET_NAME 2>/dev/null || echo "koku-data")
-S3_ROS_BUCKET=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv REQUESTED_ROS_BUCKET 2>/dev/null || echo "ros-data")
+S3_ENDPOINT=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv S3_ENDPOINT 2>/dev/null || echo "")
+S3_BUCKET_NAME=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv S3_BUCKET_NAME 2>/dev/null || echo "koku-data")
+S3_ROS_BUCKET=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv REQUESTED_ROS_BUCKET 2>/dev/null || echo "ros-data")
 
 # Determine S3 port and SSL from endpoint
 if [[ "$S3_ENDPOINT" =~ :([0-9]+)$ ]]; then
@@ -698,7 +698,7 @@ fi
 echo ""
 echo "Seeding exchange rates via masu internal API..."
 MASU_INTERNAL_URL="http://localhost:${MASU_PORT}/api/cost-management/v1"
-EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- \
+EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- \
     curl -sf --max-time 20 "${MASU_INTERNAL_URL}/update_exchange_rates/" 2>/dev/null || echo "")
 if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
     RATE_COUNT=$(echo "$EXCHANGE_RATE_RESPONSE" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('updated_exchange_rates',{})))" 2>/dev/null || echo "0")
@@ -707,12 +707,13 @@ else
     echo "⚠ WARNING: Could not seed exchange rates. Currency-filtered tests may fail."
 fi
 
-# Additive, harness-owned NetworkPolicy that permits IQE -> masu:8000. The
-# operator's MasuNetworkPolicy (COST-8060) only allows Prometheus on :9000, so
-# masu's HTTP API on :8000 is default-denied. NetworkPolicies are additive, so
-# this sits beside the operator policy without modifying it and is removed in
-# cleanup(). Peers: the iqe-tests pod (in-cluster run) and the OpenShift router
-# (local Route path). Needed for tag setup (/enabled_tags/, gated by IQE_TEST_RUN).
+# Additive, harness-owned NetworkPolicy that permits the in-cluster IQE pod to
+# reach masu:8000. The operator's MasuNetworkPolicy (COST-8060) only allows
+# Prometheus on :9000, so masu's HTTP API on :8000 is default-denied.
+# NetworkPolicies are additive, so this sits beside the operator policy without
+# modifying it and is removed in cleanup(). Scoped to the iqe-tests pod, which
+# reaches masu over Service DNS. Needed for tag setup (/enabled_tags/, gated by
+# IQE_TEST_RUN).
 echo ""
 echo "Applying additive masu NetworkPolicy (${HELM_RELEASE_NAME}-masu-iqe)..."
 cat <<EOF | kubectl apply -f -
@@ -733,12 +734,6 @@ spec:
         - podSelector:
             matchLabels:
               app: iqe-tests
-        - namespaceSelector:
-            matchLabels:
-              network.openshift.io/policy-group: ingress
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openshift-ingress
       ports:
         - port: ${MASU_PORT}
           protocol: TCP
