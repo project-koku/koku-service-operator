@@ -65,7 +65,11 @@ type appResourceVerb struct {
 // CostManagementSeedPython returns the Django shell block that seeds
 // cost-management/sources permissions and roles from rbac-config snapshots.
 func CostManagementSeedPython() (string, error) {
-	perms, err := costManagementPermissionTuples()
+	cmPerms, err := costManagementPermissionTuples()
+	if err != nil {
+		return "", err
+	}
+	srcPerms, err := sourcesPermissionTuples()
 	if err != nil {
 		return "", err
 	}
@@ -80,17 +84,9 @@ from management.models import Permission, Role, Access
 
 public_tenant = Tenant.objects.get(tenant_name='public')
 
-cm_perms = [
 `)
-	for i, p := range perms {
-		fmt.Fprintf(&b, "    (%q, %q)", p.resource, p.verb)
-		if i < len(perms)-1 {
-			b.WriteString(",\n")
-		}
-	}
+	writePermissionList(&b, "cm_perms", cmPerms)
 	b.WriteString(`
-]
-
 perm_count = 0
 for res, verb in cm_perms:
     _, created = Permission.objects.get_or_create(
@@ -100,25 +96,22 @@ for res, verb in cm_perms:
     if created:
         perm_count += 1
 
-_, created = Permission.objects.get_or_create(
-    application="sources", resource_type="*", verb="*",
-    defaults={"permission": "sources:*:*", "tenant": public_tenant}
-)
-if created:
-    perm_count += 1
+`)
+	writePermissionList(&b, "src_perms", srcPerms)
+	b.WriteString(`
+for res, verb in src_perms:
+    _, created = Permission.objects.get_or_create(
+        application="sources", resource_type=res, verb=verb,
+        defaults={"permission": f"sources:{res}:{verb}", "tenant": public_tenant}
+    )
+    if created:
+        perm_count += 1
 print(f"Seeded {perm_count} permissions")
 
 roles = [
 `)
 	for i, r := range roles {
-		fmt.Fprintf(&b, "    (%q, %q, %t, %t, [", r.name, r.description, r.adminDefault, r.platformDefault)
-		for j, a := range r.access {
-			if j > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "(%q, %q, %q)", a.app, a.resource, a.verb)
-		}
-		b.WriteString("])")
+		b.WriteString("    " + roleTuplePython(r))
 		if i < len(roles)-1 {
 			b.WriteString(",\n")
 		}
@@ -144,12 +137,51 @@ print("RBAC seeding complete.")`)
 	return b.String(), nil
 }
 
+func writePermissionList(b *strings.Builder, name string, perms []resourceVerb) {
+	fmt.Fprintf(b, "%s = [\n", name)
+	for i, p := range perms {
+		fmt.Fprintf(b, "    (%q, %q)", p.resource, p.verb)
+		if i < len(perms)-1 {
+			b.WriteString(",\n")
+		}
+	}
+	b.WriteString("\n]\n")
+}
+
+func pyBool(v bool) string {
+	if v {
+		return "True"
+	}
+	return "False"
+}
+
+func roleTuplePython(r roleSeed) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "(%q, %q, %s, %s, [", r.name, r.description, pyBool(r.adminDefault), pyBool(r.platformDefault))
+	for j, a := range r.access {
+		if j > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "(%q, %q, %q)", a.app, a.resource, a.verb)
+	}
+	b.WriteString("])")
+	return b.String()
+}
+
 func costManagementPermissionTuples() ([]resourceVerb, error) {
 	raw, err := embeddedFS.ReadFile("data/cost-management.permissions.json")
 	if err != nil {
 		return nil, err
 	}
 	return parsePermissionTuplesInFileOrder(raw, "cost-management")
+}
+
+func sourcesPermissionTuples() ([]resourceVerb, error) {
+	raw, err := embeddedFS.ReadFile("data/sources.permissions.json")
+	if err != nil {
+		return nil, err
+	}
+	return parsePermissionTuplesInFileOrder(raw, "sources")
 }
 
 func parsePermissionTuplesInFileOrder(raw []byte, application string) ([]resourceVerb, error) {
@@ -173,7 +205,7 @@ func parsePermissionTuplesInFileOrder(raw []byte, application string) ([]resourc
 			out = append(out, resourceVerb{resource: res, verb: v.Verb})
 		}
 	}
-	if application == "cost-management" && len(out) == 0 {
+	if len(out) == 0 {
 		return nil, fmt.Errorf("no permissions parsed for %s", application)
 	}
 	return out, nil
@@ -255,7 +287,9 @@ func splitPermission(permission string) (app, resource, verb string, err error) 
 }
 
 func upstreamHTTPClient() *http.Client {
-	return &http.Client{Timeout: upstreamFetchTimeout}
+	client := *http.DefaultClient
+	client.Timeout = upstreamFetchTimeout
+	return &client
 }
 
 // EmbeddedFile returns the bytes of an embedded rbac-config snapshot file.

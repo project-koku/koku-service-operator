@@ -13,7 +13,9 @@ import (
 func TestRBACMigrationScriptSeedsCostManagementAndSources(t *testing.T) {
 	script := rbacMigrationScript()
 	for _, want := range []string{
-		"sources:*:*",
+		"src_perms",
+		`f"sources:{res}:{verb}"`,
+		`("sources", "*", "*")`,
 		"Cost Administrator",
 		"Sources administrator",
 		"admin_default",
