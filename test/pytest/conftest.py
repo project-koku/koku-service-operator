@@ -52,7 +52,7 @@ install_route_dns_retries()
 
 # Fallback identity values when Keycloak is unreachable.
 # Canonical source: jwtAuth.realmUsers in cost-onprem/values.yaml.
-_DEFAULT_ORG_ID = "org1234567"
+_DEFAULT_ORG_ID = "1234567"
 _DEFAULT_ACCOUNT_NUMBER = "7890123"
 
 # OAuth ``scope`` string for password grant. Do **not** include the literal token
@@ -1011,10 +1011,11 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
 def _ensure_keycloak_password_grant_lab_users(
     cluster_config: ClusterConfig,
 ) -> None:
-    """Keep ``admin`` / ``viewer`` and the ``org-admin`` realm role aligned with tests.
+    """Keep ``admin`` / ``viewer``, org-admin role, and viewer org-group membership aligned.
 
     Ephemeral lab clusters can drift (missing realm role on admin, wrong viewer
-    password). Provisioning runs once per session after ``org_id`` is resolved.
+    password, viewer not in ``org-{org_id}``). Provisioning runs once per session
+    after ``org_id`` is resolved.
 
     Detects Keycloak and gateway inline (instead of depending on fixtures that
     call pytest.skip) so that offline tests (helm template, lint) can run

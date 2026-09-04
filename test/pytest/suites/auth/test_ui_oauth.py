@@ -160,15 +160,10 @@ class TestUIOAuthFlow:
 
         access_token = response.json().get("access_token")
         payload = decode_jwt_payload(access_token)
-        
-        # Check required claims
+
         assert "preferred_username" in payload, "JWT missing preferred_username"
-        
-        # These are warnings, not failures (may not be configured)
-        if "org_id" not in payload:
-            pytest.skip("JWT missing org_id claim (may need Keycloak mapper)")
-        if "account_number" not in payload:
-            pytest.skip("JWT missing account_number claim (may need Keycloak mapper)")
+        assert "org_id" in payload, "JWT missing org_id claim"
+        assert "account_number" in payload, "JWT missing account_number claim"
 
 
 @pytest.mark.auth

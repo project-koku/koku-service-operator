@@ -115,11 +115,16 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-hack
-test-hack: ## Run no-cluster hack/ script tests (demo-preprod helpers).
+test-hack: ## Run no-cluster hack/ script tests (demo-preprod, deploy-test-operator).
 	./hack/demo-preprod_test.sh
+	./hack/deploy-test-operator_test.sh
 	./hack/ci/e2e_test.sh
 	./scripts/pytest_markexpr_test.sh
 	./scripts/deploy-rhbk_test.sh
+
+.PHONY: check-rbac-seed
+check-rbac-seed: ## Verify embedded RBAC seed snapshots match project-kessel/rbac-config at the pinned ref.
+	RBAC_SEED_SKIP_UPSTREAM=0 go test ./internal/resources/rbac_seed/... -run TestEmbeddedMatchesUpstreamRbacConfig -count=1 -timeout 3m
 
 # Statement coverage across internal/controller + internal/resources (coverpkg),
 # not make test's per-package cover.out. Override: make coverage-gate COVERAGE_MIN=84.0
@@ -166,6 +171,14 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: test-e2e-cmsc
+test-e2e-cmsc: ## Run COST-7698 operator lifecycle e2e (requires E2E_CLUSTER=1 and reconciled stack)
+	@if [ "$${E2E_CLUSTER:-}" != "1" ]; then \
+		echo "Set E2E_CLUSTER=1 (see docs/development/cmsc-e2e.md)"; \
+		exit 1; \
+	fi
+	go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E -v -ginkgo.v -timeout 2h
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

@@ -342,7 +342,10 @@ func UIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Service {
 }
 
 // UIRoute builds the OpenShift Route that exposes the UI externally.
-// TLS is passthrough since the oauth-proxy terminates it.
+// TLS is reencrypt (chart parity): the router presents a valid *.apps cert to
+// the browser, then re-encrypts to oauth-proxy on 8443 (service CA). Passthrough
+// would expose the service-CA cert on the public hostname, so OIDC callback
+// from Keycloak never completes in real browsers / Playwright.
 func UIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
 	domain := clusterDomain(cfg)
 	if domain == "" {
@@ -367,7 +370,7 @@ func UIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstru
 	}, "spec", "to")
 	_ = unstructured.SetNestedField(route.Object, "https", "spec", "port", "targetPort")
 	_ = unstructured.SetNestedMap(route.Object, map[string]any{
-		"termination":                   "passthrough",
+		"termination":                   "reencrypt",
 		"insecureEdgeTerminationPolicy": "Redirect",
 	}, "spec", "tls")
 	return route

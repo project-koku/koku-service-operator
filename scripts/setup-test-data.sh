@@ -455,7 +455,7 @@ def main():
             koku_api_url,
             jwt_token.identity_header,
             cluster_id,
-            "org1234567",
+            "1234567",
             source_name,
         )
         

@@ -77,6 +77,14 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 from conftest import ClusterConfig, KeycloakConfig
 from utils import get_route_url
 
+# Make cost_validation_data visible to UI tests. That fixture lives in
+# suites/cost_management/conftest.py, which pytest does not load for -m ui.
+# Rebind (don't `from … import` the fixture) so linters see a used name and
+# pytest still discovers it here without pytest_plugins (pytest 9 double-register).
+from suites.cost_management import conftest as _cost_management_conftest
+
+cost_validation_data = _cost_management_conftest.cost_validation_data
+
 
 # =============================================================================
 # Reporting Configuration

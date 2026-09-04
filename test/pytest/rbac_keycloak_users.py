@@ -95,11 +95,17 @@ def ensure_realm_user_with_password(
     }
 
     user_id = _realm_user_id(base, realm, admin_token, username)
+    # firstName/lastName are required by RHBK's default user profile.
+    # Without them Keycloak interrupts OIDC with VERIFY_PROFILE
+    # ("Account is not fully set up") and UI tests never reach /oauth2/callback.
     body = {
         "username": username,
         "enabled": True,
         "email": email,
         "emailVerified": True,
+        "firstName": username.capitalize(),
+        "lastName": "User",
+        "requiredActions": [],
         "attributes": {
             "org_id": [org_id],
             "account_number": [account_number],
@@ -250,6 +256,97 @@ def _list_user_realm_roles(
             f"Keycloak list realm roles for user failed: {r.status_code} {r.text[:300]}"
         )
     return r.json()
+
+
+def _org_group_name(org_id: str) -> str:
+    """Match deploy-rhbk.sh ``ORG_GROUP_PREFIX`` default (``org-``)."""
+    return f"org-{org_id}"
+
+
+def _find_group_id_by_name(
+    base: str,
+    realm: str,
+    admin_token: str,
+    name: str,
+) -> Optional[str]:
+    r = _http.get(
+        f"{base}/admin/realms/{realm}/groups",
+        params={"search": name, "exact": "true"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+        verify=False,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return None
+    for group in r.json() or []:
+        if group.get("name") == name:
+            return group.get("id")
+    return None
+
+
+def _ensure_org_group(
+    base: str,
+    realm: str,
+    admin_token: str,
+    org_id: str,
+    account_number: str,
+) -> str:
+    """Return the id of ``org-{org_id}``, creating it with org attributes if missing.
+
+    RHBK's default user profile often strips unmanaged user attributes, so JWT
+    ``org_id`` / ``account_number`` come from this group's attributes — the same
+    path ``deploy-rhbk.sh`` uses for Helm lab users.
+    """
+    name = _org_group_name(org_id)
+    group_id = _find_group_id_by_name(base, realm, admin_token, name)
+    if group_id:
+        return group_id
+
+    headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+    r = _http.post(
+        f"{base}/admin/realms/{realm}/groups",
+        json={
+            "name": name,
+            "attributes": {
+                "org_id": [org_id],
+                "account_number": [account_number],
+            },
+        },
+        headers=headers,
+        verify=False,
+        timeout=30,
+    )
+    if r.status_code not in (201, 204, 409):
+        raise RuntimeError(
+            f"Keycloak POST group {name!r} failed: {r.status_code} {r.text[:300]}"
+        )
+    group_id = _find_group_id_by_name(base, realm, admin_token, name)
+    if not group_id:
+        raise RuntimeError(f"Could not resolve Keycloak group id for {name!r}")
+    return group_id
+
+
+def _add_user_to_group(
+    base: str,
+    realm: str,
+    admin_token: str,
+    user_id: str,
+    group_id: str,
+) -> None:
+    r = _http.put(
+        f"{base}/admin/realms/{realm}/users/{user_id}/groups/{group_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        verify=False,
+        timeout=30,
+    )
+    if r.status_code not in (204, 200):
+        raise RuntimeError(
+            f"Keycloak PUT user {user_id} into group {group_id} failed: "
+            f"{r.status_code} {r.text[:300]}"
+        )
 
 
 def _set_user_has_realm_role(
@@ -460,6 +557,11 @@ def ensure_password_grant_lab_users_with_org_admin(
     Lab clusters sometimes lose Keycloak realm role mappings after restores or
     partial installs. Tests expect ``admin`` to carry the ``org-admin`` realm role
     and ``viewer`` to authenticate with password ``viewer`` without that role.
+
+    ``viewer`` is also added to the top-level ``org-{org_id}`` group (not the
+    ``org-admin`` subgroup). Operator ``deploy-rhbk.sh`` only provisions admin
+    in that group; without membership the UI client's JWT lacks ``org_id`` and
+    Envoy returns 401 on ``/user-access/`` instead of a permission 403.
     """
     token = fetch_keycloak_master_admin_token(keycloak_base_url, keycloak_namespace)
     if not token:
@@ -517,3 +619,6 @@ def ensure_password_grant_lab_users_with_org_admin(
     org_admin_role = _get_or_create_realm_role(base, realm, token, "org-admin")
     _set_user_has_realm_role(base, realm, token, admin_uid, org_admin_role, want=True)
     _set_user_has_realm_role(base, realm, token, viewer_uid, org_admin_role, want=False)
+
+    org_group_id = _ensure_org_group(base, realm, token, org_id, account_number)
+    _add_user_to_group(base, realm, token, viewer_uid, org_group_id)
