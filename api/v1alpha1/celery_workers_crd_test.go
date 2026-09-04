@@ -104,6 +104,14 @@ func TestKeycloakURLRequiredCEL(t *testing.T) {
 				t.Fatal("missing KeycloakSpec CEL rule requiring url to start with http:// or https://")
 			}
 
+			host := findCELRule(kc.XValidations, "matches('^https?://[^/?#]+')")
+			if host == nil {
+				t.Fatal("missing KeycloakSpec CEL rule requiring url to include a host")
+			}
+			if !strings.Contains(host.Message, "host") {
+				t.Errorf("host CEL message should name host, got %q", host.Message)
+			}
+
 			// Nested KeycloakSpec CEL does not run when spec.auth.keycloak is
 			// omitted. The parent spec rule must fail that case.
 			spec := navigateSchema(t, schema, "spec")

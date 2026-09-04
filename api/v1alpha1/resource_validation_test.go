@@ -79,11 +79,15 @@ func TestValidateKeycloakURL(t *testing.T) {
 		wantErr         bool
 		wantRequiredMsg bool
 		wantSchemeMsg   bool
+		wantHostMsg     bool
 	}{
 		{name: "empty", url: "", wantErr: true, wantRequiredMsg: true},
 		{name: "whitespace", url: "   ", wantErr: true, wantRequiredMsg: true},
 		{name: "missing scheme", url: "keycloak.example.com", wantErr: true, wantSchemeMsg: true},
+		{name: "http scheme with no host", url: "http://", wantErr: true, wantHostMsg: true},
+		{name: "https scheme with no host", url: "https://", wantErr: true, wantHostMsg: true},
 		{name: "valid Service URL", url: "http://keycloak.example.svc:8080", wantErr: false},
+		{name: "valid https URL", url: "https://keycloak.example.com", wantErr: false},
 	}
 
 	for _, tc := range tests {
@@ -119,6 +123,11 @@ func TestValidateKeycloakURL(t *testing.T) {
 			if tc.wantSchemeMsg {
 				if !strings.Contains(got, "http://") || !strings.Contains(got, "https://") {
 					t.Errorf("error should require http:// or https:// prefix, got %q", got)
+				}
+			}
+			if tc.wantHostMsg {
+				if !strings.Contains(got, "host") {
+					t.Errorf("error should require a host, got %q", got)
 				}
 			}
 		})

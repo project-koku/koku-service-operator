@@ -287,12 +287,13 @@ type EnvoySpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.audiences) || size(self.audiences) > 0",message="audiences must not be empty when set"
 // +kubebuilder:validation:XValidation:rule="has(self.url) && size(self.url) > 0",message="url is required (JWKS fetch URL); operator does not auto-detect Keycloak"
 // +kubebuilder:validation:XValidation:rule="!has(self.url) || size(self.url) == 0 || self.url.startsWith('http://') || self.url.startsWith('https://')",message="url must start with http:// or https://"
+// +kubebuilder:validation:XValidation:rule="!has(self.url) || size(self.url) == 0 || self.url.matches('^https?://[^/?#]+')",message="url must include a host"
 type KeycloakSpec struct {
 	// URL is required. Full URL of the Keycloak instance used for JWKS fetch
-	// (and issuer when issuerURL is unset). Must start with http:// or https://.
-	// Prefer an in-cluster Service URL so Envoy can reach JWKS without
-	// depending on the OpenShift router. The operator never deploys or
-	// auto-detects Keycloak.
+	// (and issuer when issuerURL is unset). Must start with http:// or https://
+	// and include a host. Prefer an in-cluster Service URL so Envoy can reach
+	// JWKS without depending on the OpenShift router. The operator never
+	// deploys or auto-detects Keycloak.
 	// Example: http://keycloak-service.keycloak.svc.cluster.local:8080
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]*$`
 	URL string `json:"url,omitempty"`

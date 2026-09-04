@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -124,15 +125,24 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 const (
 	keycloakURLRequiredMsg = "JWKS fetch URL required; operator does not auto-detect Keycloak"
 	keycloakURLSchemeMsg   = "must start with http:// or https://"
+	keycloakURLHostMsg     = "must include a host (http:// and https:// with no host are not valid)"
 )
 
-func validateKeycloakURL(path *field.Path, url string) field.ErrorList {
-	trimmed := strings.TrimSpace(url)
+func validateKeycloakURL(fldPath *field.Path, raw string) field.ErrorList {
+	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return field.ErrorList{field.Required(path, keycloakURLRequiredMsg)}
+		return field.ErrorList{field.Required(fldPath, keycloakURLRequiredMsg)}
 	}
 	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
-		return field.ErrorList{field.Invalid(path, url, keycloakURLSchemeMsg)}
+		return field.ErrorList{field.Invalid(fldPath, raw, keycloakURLSchemeMsg)}
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return field.ErrorList{field.Invalid(fldPath, raw, keycloakURLHostMsg)}
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return field.ErrorList{field.Invalid(fldPath, raw, keycloakURLSchemeMsg)}
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ filter requires. Realm, clients, and JWT claims must match the CR.
 
 | Field | Required | Purpose |
 |-------|----------|---------|
-| `spec.auth.keycloak.url` | Yes | In-cluster base URL used to fetch JWKS. Prefer a Service URL so Envoy does not depend on the OpenShift router. Must start with `http://` or `https://`. Example: `http://keycloak-service.keycloak.svc:8080` |
+| `spec.auth.keycloak.url` | Yes | URL reachable by Envoy to fetch JWKS. Prefer an in-cluster Service URL so Envoy does not depend on the OpenShift router. Must start with `http://` or `https://` and include a host. Example: `http://keycloak-service.keycloak.svc:8080` |
 | `spec.auth.keycloak.issuerURL` | No | Token `iss` value. Must use `https://` when set. Set this to the public Route URL when RHBK issues tokens with that `iss` even if clients talk to the in-cluster Service. When empty, issuer is derived from `url` + realm |
 | `spec.auth.keycloak.realm` | No | Default `kubernetes` |
 | `spec.auth.keycloak.audiences` | No | Default `cost-management-operator`, `cost-management-ui` |
@@ -24,8 +24,9 @@ They are often different on OpenShift: HTTP Service for JWKS, HTTPS Route for
 `iss`.
 
 Admission rejects a missing `spec.auth.keycloak` block, an empty or
-whitespace-only `url`, and a `url` that does not start with `http://` or
-`https://`. A failed JWKS probe sets `AuthenticationReady=False`. An empty
+whitespace-only `url`, a `url` that does not start with `http://` or
+`https://`, and a `url` with no host (for example `http://`). A failed JWKS
+probe sets `AuthenticationReady=False`. An empty
 `url` that reaches reconcile (tests that bypass admission) sets
 `AuthenticationReady=False` with reason `OIDCConfigMissing`. That does not by
 itself block `GatewayReady`.
@@ -204,3 +205,10 @@ CronJob. It is not required for the JWT gateway.
 
 `spec.auth.keycloak.namespace` is removed. If a live CR still sets that field,
 delete it before upgrading the CRD.
+
+Older operator versions silently defaulted `spec.auth.keycloak.url` to
+`https://keycloak.keycloak.svc.cluster.local` when the field was empty. That
+default is gone. If a live CR has no `spec.auth.keycloak.url`, the gateway
+will break after upgrade until you set the field. Patch
+`spec.auth.keycloak.url` before or during the CRD upgrade, same as the
+namespace field.

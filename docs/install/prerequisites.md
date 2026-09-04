@@ -202,7 +202,7 @@ client, mapper, and claim setup: [keycloak.md](keycloak.md).
 
 | Spec field | Purpose |
 |------------|---------|
-| `spec.auth.keycloak.url` | **Required.** In-cluster base URL used to fetch JWKS (prefer a Service URL so Envoy does not depend on the router) |
+| `spec.auth.keycloak.url` | **Required.** URL reachable by Envoy to fetch JWKS. Prefer an in-cluster Service URL so Envoy does not depend on the router |
 | `spec.auth.keycloak.issuerURL` | Token `iss` value. Set this to the public Route URL when RHBK issues tokens with that `iss` even if clients talk to the in-cluster Service |
 | `spec.auth.keycloak.realm` | Default `kubernetes` |
 | `spec.auth.keycloak.audiences` | Default `cost-management-operator`, `cost-management-ui` |
