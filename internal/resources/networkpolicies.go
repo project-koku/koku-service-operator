@@ -240,6 +240,22 @@ func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *netwo
 		"cost-management-api",
 		"cost-processor",
 		"cost-management-migration",
+		// Listener and Celery check Django migrations over Postgres at
+		// startup (koku.database.check_migrations). Omitting them makes
+		// check_migrations() return False on OperationalError, so workers
+		// loop on "Migrations not done. Sleeping" and never process uploads.
+		"listener",
+		"cost-scheduler",
+		"cost-worker-celery",
+		"cost-worker-priority",
+		"cost-worker-summary",
+		"cost-worker-ocp",
+		"cost-worker-cost-model",
+		"cost-worker-refresh",
+		"cost-worker-hcs",
+		"cost-worker-download",
+		"cost-worker-subs-extraction",
+		"cost-worker-subs-transmission",
 		"rbac-api",
 		"rbac-worker",
 		"rbac-migration",

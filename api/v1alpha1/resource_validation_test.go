@@ -70,11 +70,76 @@ func TestValidateResourceRequirements(t *testing.T) {
 	})
 }
 
+func TestValidateKeycloakURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		url             string
+		wantErr         bool
+		wantRequiredMsg bool
+		wantSchemeMsg   bool
+		wantHostMsg     bool
+	}{
+		{name: "empty", url: "", wantErr: true, wantRequiredMsg: true},
+		{name: "whitespace", url: "   ", wantErr: true, wantRequiredMsg: true},
+		{name: "missing scheme", url: "keycloak.example.com", wantErr: true, wantSchemeMsg: true},
+		{name: "http scheme with no host", url: "http://", wantErr: true, wantHostMsg: true},
+		{name: "https scheme with no host", url: "https://", wantErr: true, wantHostMsg: true},
+		{name: "valid Service URL", url: "http://keycloak.example.svc:8080", wantErr: false},
+		{name: "valid https URL", url: "https://keycloak.example.com", wantErr: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &CostManagementServiceConfig{}
+			cfg.Name = "test"
+			cfg.Spec.Auth.Keycloak.URL = tc.url
+
+			err := cfg.validateCostManagementServiceConfig()
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("valid url must not fail this check: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			got := err.Error()
+			if !strings.Contains(got, "spec.auth.keycloak.url") {
+				t.Errorf("error should name spec.auth.keycloak.url, got %q", got)
+			}
+			if tc.wantRequiredMsg {
+				if !strings.Contains(got, "JWKS fetch URL") {
+					t.Errorf("error should mention JWKS fetch URL, got %q", got)
+				}
+				if !strings.Contains(got, "auto-detect") {
+					t.Errorf("error should say operator does not auto-detect Keycloak, got %q", got)
+				}
+			}
+			if tc.wantSchemeMsg {
+				if !strings.Contains(got, "http://") || !strings.Contains(got, "https://") {
+					t.Errorf("error should require http:// or https:// prefix, got %q", got)
+				}
+			}
+			if tc.wantHostMsg {
+				if !strings.Contains(got, "host") {
+					t.Errorf("error should require a host, got %q", got)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateCostManagementServiceConfigResources(t *testing.T) {
 	t.Parallel()
 
 	cfg := &CostManagementServiceConfig{}
 	cfg.Name = "test"
+	cfg.Spec.Auth.Keycloak.URL = "http://keycloak.example.svc:8080"
 	cfg.Spec.CostManagement.API.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceMemory: resource.MustParse("1Gi"),

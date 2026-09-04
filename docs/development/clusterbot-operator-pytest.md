@@ -248,7 +248,7 @@ oc patch cmsc cost-onprem -n cost-onprem --type merge -p "{
     },
     \"auth\": {
       \"keycloak\": {
-        \"url\": \"http://keycloak-service.keycloak.svc:8080\",
+        \"url\": \"https://keycloak.keycloak.svc.cluster.local:8443\",
         \"issuerURL\": \"${KEYCLOAK_URL}\"
       }
     }
@@ -265,7 +265,7 @@ Why these patches (sample defaults are ODF/CRC, not cluster-bot S4):
 |-------|----------------|-------------------|
 | `objectStorage.endpoint` | ODF `s3.openshift-storage.svc` | S4 in `s4-test` |
 | `objectStorage.s3.region` | unset | `us-east-1` (SigV4 with S4) |
-| `auth.keycloak.url` | `https://keycloak...:443` | RHBK in-cluster HTTP `:8080` |
+| `auth.keycloak.url` | `https://keycloak...:8443` | RHBK in-cluster HTTPS `:8443` |
 | `auth.keycloak.issuerURL` | commented | public Route host (tokens use this iss) |
 
 Watch reconcile (~10–20 min):

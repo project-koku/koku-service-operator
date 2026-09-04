@@ -36,7 +36,7 @@ def forge_jwt(claims: Dict[str, Any], *, algorithm: str = "RS256") -> str:
 def forge_expired_jwt(
     *,
     sub: str = "forge-expired",
-    org_id: str = "org1234567",
+    org_id: str = "1234567",
     account_number: str = "7890123",
     skew_seconds: int = 3600,
 ) -> str:
@@ -53,7 +53,7 @@ def forge_expired_jwt(
 
 def forge_jwt_missing_sub(
     *,
-    org_id: str = "org1234567",
+    org_id: str = "1234567",
     ttl_seconds: int = 300,
 ) -> str:
     """JWT without ``sub`` (and without other required identity claims)."""

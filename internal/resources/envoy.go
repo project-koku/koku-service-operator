@@ -23,7 +23,9 @@ const (
 	defaultKeycloakRealm = "kubernetes"
 )
 
-// KeycloakURL returns the Keycloak base URL from the CR.
+// KeycloakURL returns the Keycloak base URL from the CR, with trailing slashes
+// trimmed. Empty when spec.auth.keycloak.url is unset or whitespace-only.
+// The operator does not auto-detect Keycloak.
 func KeycloakURL(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if u := strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL); u != "" {
 		return strings.TrimRight(u, "/")

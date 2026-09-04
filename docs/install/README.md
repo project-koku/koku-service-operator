@@ -15,6 +15,7 @@ namespace** as the CR (OwnNamespace). See [quickstart.md](quickstart.md#install-
 | Guide | Use when |
 |-------|----------|
 | [Prerequisites](prerequisites.md) | You need the external services, buckets, Kafka topic, and Secret key names |
+| [Keycloak](keycloak.md) | You need realm, clients, audience mappers, and JWT claims for Envoy |
 | [Quickstart](quickstart.md) | Prerequisites and the operator are ready; you want a working CR in under 30 minutes |
 | [Production](production.md) | You are sizing, hardening TLS, and planning backup for a lasting deploy |
 | [Uninstall](uninstall.md) | You need to remove a CR, the operator, or the namespace without getting stuck in `Terminating` |

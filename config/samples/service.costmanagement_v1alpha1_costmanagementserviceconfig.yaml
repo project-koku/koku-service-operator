@@ -108,6 +108,10 @@ spec:
       # external Keycloak/RHBK identity provider for JWKS discovery.
       # Prefer a cluster-reachable Service URL when available.
       url: ""
+      # Required JWKS fetch URL (prefer in-cluster Service). When RHBK sets a
+      # public hostname, tokens use that URL as iss — set issuerURL to match.
+      # For CRC + RHBK/BYOI, override to
+      # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       # tls:
       #   caCertSecretName: "keycloak-ca"

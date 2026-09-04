@@ -62,7 +62,8 @@ Replace at least:
 - `spec.cache.host` / `auth.secretName`
 - `spec.kafka.bootstrapServers`
 - `spec.objectStorage.endpoint` / `secretName`
-- `spec.auth.keycloak.url` (and `issuerURL` if token `iss` is the public Route)
+- `spec.auth.keycloak.url` (required; see [keycloak.md](keycloak.md))
+- `spec.auth.keycloak.issuerURL` if token `iss` is the public Route
 - Image `repository` / `tag` values for your environment
 
 Leave `spec.database.deploy` and `spec.cache.deploy` **false**. Leave

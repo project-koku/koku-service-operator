@@ -11,7 +11,7 @@ Management. The operator currently still validates unused Secret keys
 (`postgres-user`, `ros-*`, `kruize-*`) even when ROS is off.
 
 Companion guides: [quickstart](quickstart.md), [production](production.md),
-[CMMO](cmmo.md).
+[Keycloak](keycloak.md), [CMMO](cmmo.md).
 
 ## What you need
 
@@ -137,7 +137,7 @@ Kafka is always external. `spec.kafka.bootstrapServers` is **required** (no
 CRD default). Set it to the AMQ Streams bootstrap (for example
 `cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092`).
 
-**Required topic (Cost / beta):** `platform.upload.announce`  
+**Required topic (Cost / beta):** `platform.upload.announce`
 Ingress publishes upload announcements here; the Listener consumes it. Create
 the topic before applying the CR. The operator does not create KafkaTopic CRs.
 
@@ -206,15 +206,17 @@ not block the rest of the pipeline, but uploads will not work.
 
 ## OIDC (Keycloak / RHBK)
 
-The operator never deploys Keycloak. Configure a realm (samples use
-`kubernetes`) and JWT audiences that match Envoy:
+The operator never deploys Keycloak. `spec.auth.keycloak.url` is **required**
+(JWKS fetch URL; the operator does not auto-detect Keycloak). Configure a
+realm (default `kubernetes`) and JWT audiences that match Envoy. Full realm,
+client, mapper, and claim setup: [keycloak.md](keycloak.md).
 
 - `cost-management-operator`
 - `cost-management-ui`
 
 | Spec field | Purpose |
 |------------|---------|
-| `spec.auth.keycloak.url` | **Required.** In-cluster base URL used to fetch JWKS (prefer a Service URL so Envoy does not depend on the router). Must be `http://` or `https://` |
+| `spec.auth.keycloak.url` | **Required.** URL reachable by Envoy to fetch JWKS. Prefer an in-cluster Service URL so Envoy does not depend on the router |
 | `spec.auth.keycloak.issuerURL` | Token `iss` value. Set this to the public Route URL when RHBK issues tokens with that `iss` even if clients talk to the in-cluster Service |
 | `spec.auth.keycloak.realm` | Default `kubernetes` |
 | `spec.auth.keycloak.audiences` | Default `cost-management-operator`, `cost-management-ui` |

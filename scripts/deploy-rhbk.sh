@@ -834,14 +834,14 @@ create_kubernetes_realm() {
     fi
 
     # Derive operator client org_id from first orgAdmin realmUser entry
-    local OPERATOR_ORG_ID="org1234567"
+    local OPERATOR_ORG_ID="1234567"
     local OPERATOR_ACCOUNT_NUMBER="7890123"
     local _users_json
     _users_json=$(get_realm_users_json 2>/dev/null) || _users_json='[]'
     local _admin_entry
     _admin_entry=$(echo "$_users_json" | jq -c '[.[] | select(.orgAdmin == true)] | .[0] // empty')
     if [ -n "$_admin_entry" ]; then
-        OPERATOR_ORG_ID=$(echo "$_admin_entry" | jq -r '.orgId // "org1234567"')
+        OPERATOR_ORG_ID=$(echo "$_admin_entry" | jq -r '.orgId // "1234567"')
         OPERATOR_ACCOUNT_NUMBER=$(echo "$_admin_entry" | jq -r '.accountNumber // "7890123"')
     fi
     echo_info "Operator client identity: org_id=$OPERATOR_ORG_ID, account_number=$OPERATOR_ACCOUNT_NUMBER"
@@ -1690,7 +1690,7 @@ json.dump(users, sys.stdout)
 
     # Default: single admin user matching historical behavior
     cat <<'DEFAULT_USERS'
-[{"username":"admin","password":"admin","email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"org1234567","accountNumber":"7890123","orgAdmin":true}]
+[{"username":"admin","password":"admin","email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"1234567","accountNumber":"7890123","orgAdmin":true}]
 DEFAULT_USERS
 }
 
@@ -1706,7 +1706,7 @@ create_or_update_user() {
     local email=$(echo "$user_json" | jq -r '.email // (.username + "@noreply.local")')
     local first_name=$(echo "$user_json" | jq -r '.firstName // "User"')
     local last_name=$(echo "$user_json" | jq -r '.lastName // ""')
-    local org_id=$(echo "$user_json" | jq -r '.orgId // "org1234567"')
+    local org_id=$(echo "$user_json" | jq -r '.orgId // "1234567"')
     local account_number=$(echo "$user_json" | jq -r '.accountNumber // "7890123"')
 
     echo_info "Creating user '$username' (org_id=$org_id)..."
@@ -1938,7 +1938,7 @@ create_org_groups() {
 
     # Discover distinct orgIds and their account numbers
     local orgs_json
-    orgs_json=$(echo "$USERS_JSON" | jq -c '[group_by((.orgId // "org1234567")) | .[] | {orgId: (.[0].orgId // "org1234567"), accountNumber: (.[0].accountNumber // "7890123")}]')
+    orgs_json=$(echo "$USERS_JSON" | jq -c '[group_by((.orgId // "1234567")) | .[] | {orgId: (.[0].orgId // "1234567"), accountNumber: (.[0].accountNumber // "7890123")}]')
 
     local org_count
     org_count=$(echo "$orgs_json" | jq 'length')
@@ -2042,7 +2042,7 @@ create_org_groups() {
         local u=0
         while [ $u -lt "$user_count" ]; do
             local u_org u_name u_admin
-            u_org=$(echo "$USERS_JSON" | jq -r ".[$u].orgId // \"org1234567\"")
+            u_org=$(echo "$USERS_JSON" | jq -r ".[$u].orgId // \"1234567\"")
             u_name=$(echo "$USERS_JSON" | jq -r ".[$u].username")
             u_admin=$(echo "$USERS_JSON" | jq -r ".[$u].orgAdmin // false")
 
@@ -2142,7 +2142,7 @@ display_summary() {
     while [ $u -lt "$u_count" ]; do
         local u_name u_org u_acct u_admin
         u_name=$(echo "$USERS_JSON" | jq -r ".[$u].username")
-        u_org=$(echo "$USERS_JSON" | jq -r ".[$u].orgId // \"org1234567\"")
+        u_org=$(echo "$USERS_JSON" | jq -r ".[$u].orgId // \"1234567\"")
         u_acct=$(echo "$USERS_JSON" | jq -r ".[$u].accountNumber // \"7890123\"")
         u_admin=$(echo "$USERS_JSON" | jq -r ".[$u].orgAdmin // false")
         local role_info=""
@@ -2154,7 +2154,7 @@ display_summary() {
     echo_info "  Organization Groups (for multi-org RBAC sync):"
     local ORG_GROUP_PREFIX="${ORG_GROUP_PREFIX:-org-}"
     local orgs_json
-    orgs_json=$(echo "$USERS_JSON" | jq -c "[group_by((.orgId // \"org1234567\")) | .[] | (.[0].orgId // \"org1234567\")]" 2>/dev/null) || orgs_json='[]'
+    orgs_json=$(echo "$USERS_JSON" | jq -c "[group_by((.orgId // \"1234567\")) | .[] | (.[0].orgId // \"1234567\")]" 2>/dev/null) || orgs_json='[]'
     local org_list
     org_list=$(echo "$orgs_json" | jq -r '.[]' 2>/dev/null)
     for org_id in $org_list; do

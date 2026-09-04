@@ -1,0 +1,18 @@
+{
+  "roles": [
+    {
+      "name": "Sources administrator",
+      "display_name": "Cloud administrator",
+      "description": "Perform any available operation on any source.",
+      "system": true,
+      "platform_default": false,
+      "admin_default": true,
+      "version": 5,
+      "access": [
+        {
+          "permission": "sources:*:*"
+        }
+      ]
+    }
+  ]
+}

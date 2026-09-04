@@ -38,7 +38,8 @@ oc -n "$NAMESPACE" get route -l app.kubernetes.io/component=gateway \
 
 Create a confidential client in the same realm the Cost Management CR uses
 (samples: `kubernetes`) with the **client credentials** grant. The access token
-must be accepted by Envoy (audience in `spec.auth.keycloak.audiences`).
+must be accepted by Envoy (audience in `spec.auth.keycloak.audiences`). Realm
+and claim setup: [keycloak.md](keycloak.md).
 
 On **each reporting cluster**, store that client in a Secret. CMMO’s field
 names use underscores:
