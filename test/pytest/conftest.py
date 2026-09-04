@@ -52,7 +52,7 @@ install_route_dns_retries()
 
 # Fallback identity values when Keycloak is unreachable.
 # Canonical source: jwtAuth.realmUsers in cost-onprem/values.yaml.
-_DEFAULT_ORG_ID = "org1234567"
+_DEFAULT_ORG_ID = "1234567"
 _DEFAULT_ACCOUNT_NUMBER = "7890123"
 
 # OAuth ``scope`` string for password grant. Do **not** include the literal token

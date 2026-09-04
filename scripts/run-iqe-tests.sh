@@ -348,7 +348,7 @@ OAUTH_URL="https://${KEYCLOAK_HOST}/realms/kubernetes/protocol/openid-connect"
 # Get org_id and account_number from Keycloak admin user.
 # Canonical source of truth: jwtAuth.realmUsers in values.yaml — these values
 # are provisioned into Keycloak by deploy-rhbk.sh and read back here dynamically.
-ORG_ID="org1234567"
+ORG_ID="1234567"
 ACCOUNT_NUMBER="7890123"
 if [ -n "$KEYCLOAK_HOST" ]; then
     KEYCLOAK_ADMIN_USER=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "")
@@ -738,6 +738,109 @@ spec:
         - port: ${MASU_PORT}
           protocol: TCP
 EOF
+
+# -----------------------------------------------------------------------------
+# Pre-provision the koku tenant schema for the IQE test org.
+# -----------------------------------------------------------------------------
+# koku creates a customer's tenant schema lazily, and only on a *write* request
+# (IdentityHeaderMiddleware.create_customer persists on non-GET/HEAD). IQE's
+# session-scoped autouse fixtures issue GETs first — notably the data-retention
+# settings fixture (GET /account-settings/data-retention/) — which resolve to
+# the tenant schema but never create it. Without the schema, the retention view
+# raises UndefinedTable on tenant_settings and returns 503, erroring the entire
+# IQE session.
+#
+# The schema name is derived exactly as koku does (create_schema_name(org_id) =
+# "org<org_id>"). ORG_ID must be a bare numeric (e.g. 1234567) so this yields
+# the expected "org1234567" — not the doubled "orgorg1234567" produced when the
+# identity's org_id is already "org"-prefixed.
+#
+# Creating the tenant also builds template0 (running all migrations once) and
+# clones it, pre-empting the "gateway timeout on first source create" that
+# otherwise occurs when the clone runs inline during the first ingest test.
+# Idempotent: get_or_create + create_schema(check_if_exists=True).
+KOKU_SCHEMA="org${ORG_ID}"
+echo ""
+echo "Pre-provisioning koku tenant schema '${KOKU_SCHEMA}' (org_id=${ORG_ID})..."
+KOKU_PROVISION_SCRIPT="$(cat <<PYEOF
+from api.iam.models import Customer, Tenant
+from api.iam.serializers import create_schema_name
+org_id = "${ORG_ID}"
+account = "${ACCOUNT_NUMBER}"
+schema = create_schema_name(org_id)
+cust, c_created = Customer.objects.get_or_create(
+    org_id=org_id, defaults={"account_id": account, "schema_name": schema})
+tenant, t_created = Tenant.objects.get_or_create(schema_name=schema)
+tenant.create_schema(check_if_exists=True)
+print(f"koku tenant provisioned: schema={schema} customer_created={c_created} tenant_created={t_created}")
+PYEOF
+)"
+if kubectl exec --request-timeout=300s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-koku-api" -c koku-api -- \
+        python /opt/koku/koku/manage.py shell -c "${KOKU_PROVISION_SCRIPT}"; then
+    echo "✓ koku tenant schema '${KOKU_SCHEMA}' ready"
+else
+    echo "⚠ WARNING: Could not pre-provision koku tenant schema '${KOKU_SCHEMA}'."
+    echo "  The data-retention session fixture may 503 and error the IQE run."
+fi
+
+# -----------------------------------------------------------------------------
+# Grant RBAC roles to the IQE service account principal.
+# -----------------------------------------------------------------------------
+# IQE authenticates via client_credentials as ${KEYCLOAK_CLIENT_ID}; koku sees
+# the principal as "cost-mgmt-operator" (the operator client's hardcoded
+# preferred_username mapper) with is_org_admin=false. Without explicit RBAC it
+# cannot create sources or write cost data, so the ingest smoke tests fail.
+# Grants Cost Administrator (cost-management:*:*) + Sources administrator
+# (sources:*:*); the latter is required for source-create writes. Mirrors the
+# e2e-pytest _rbac_bootstrap fixture (test/pytest/conftest.py). Idempotent.
+echo ""
+echo "Granting RBAC roles to IQE service account (org_id=${ORG_ID})..."
+RBAC_BOOTSTRAP_SCRIPT="$(cat <<PYEOF
+from api.models import Tenant
+from management.models import Group, Policy, Role, Principal
+from django.core.cache import cache
+
+sa_usernames = ["cost-mgmt-operator", "service-account-${KEYCLOAK_CLIENT_ID}", "admin"]
+org_id = "${ORG_ID}"
+acct_number = "${ACCOUNT_NUMBER}"
+
+public_tenant = Tenant.objects.get(tenant_name="public")
+role_names = ["Cost Administrator", "Sources administrator"]
+roles = [Role.objects.filter(name=n, tenant=public_tenant).first() for n in role_names]
+roles = [r for r in roles if r]
+if not roles:
+    print("RBAC bootstrap: no target roles found; skipping")
+else:
+    tenant, created = Tenant.objects.get_or_create(
+        org_id=org_id, defaults={"tenant_name": "acct" + acct_number, "ready": True})
+    grp, _ = Group.objects.get_or_create(
+        name="CI Test Admin", tenant=tenant,
+        defaults={"admin_default": False, "system": True,
+                  "description": "CI service account admin access"})
+    policy, _ = Policy.objects.get_or_create(
+        name="CI Test Admin Policy", tenant=tenant, group=grp)
+    for r in roles:
+        policy.roles.add(r)
+    for sa_name in sa_usernames:
+        principal, _ = Principal.objects.get_or_create(
+            username=sa_name, tenant=tenant, defaults={"type": "user"})
+        grp.principals.add(principal)
+    cache.clear()
+    print(f"RBAC bootstrap: granted {[r.name for r in roles]} to {sa_usernames} for org_id={org_id}")
+PYEOF
+)"
+if kubectl exec --request-timeout=120s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-rbac-api" -- \
+        python /opt/rbac/rbac/manage.py shell -c "${RBAC_BOOTSTRAP_SCRIPT}"; then
+    echo "✓ RBAC roles granted"
+else
+    echo "⚠ WARNING: RBAC role grant failed. Source-create and ingest tests may fail."
+fi
+
+# RBAC V2 tenant bootstrap (TenantMapping, workspaces, role bindings). Without
+# this RBAC can return 400 on /access/ queries. Mirrors e2e-pytest.
+kubectl exec --request-timeout=120s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-rbac-api" -- \
+    python /opt/rbac/rbac/manage.py bootstrap_tenants --org-id "${ORG_ID}" --force \
+    || echo "⚠ WARNING: RBAC V2 bootstrap_tenants failed; /access/ queries may 400."
 
 echo ""
 echo "Creating IQE test pod..."

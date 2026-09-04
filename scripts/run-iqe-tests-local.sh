@@ -471,7 +471,7 @@ extract_cluster_config() {
     export DYNACONF_users__cost_onprem_user__auth__client_id="$DYNACONF_ONPREM_CLIENT_ID"
     export DYNACONF_users__cost_onprem_user__auth__client_secret="$DYNACONF_ONPREM_CLIENT_SECRET"
     # Read org_id and account_number from Keycloak (canonical source: jwtAuth.realmUsers)
-    local iqe_org_id="org1234567"
+    local iqe_org_id="1234567"
     local iqe_acct="7890123"
     local kc_host
     kc_host=$(kubectl get route keycloak -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
