@@ -76,7 +76,10 @@ HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-cost-onprem}"
 IQE_MARKER="${IQE_MARKER:-cost_ocp_on_prem}"
 
 # IQE_FILTER is built after argument parsing (see below)
-IQE_TIMEOUT="${IQE_TIMEOUT:-14400}"
+# Default 90m: must stay UNDER the ci-operator step timeout (2h) so this script's own
+# poll-loop timeout fires first and collects junit/artifacts before a hard SIGKILL
+# (which loses everything, since koso-sanitize buffers piped output until EOF).
+IQE_TIMEOUT="${IQE_TIMEOUT:-5400}"
 IQE_IMAGE="${IQE_IMAGE:-quay.io/cloudservices/iqe-tests:cost-management}"
 KEEP_POD=false
 KEYCLOAK_SECRET_NS="${KEYCLOAK_SECRET_NS:-keycloak}"
@@ -892,6 +895,14 @@ spec:
       echo "DYNACONF_ONPREM_CLIENT_ID: \${DYNACONF_ONPREM_CLIENT_ID}"
       echo "DYNACONF_ONPREM_OAUTH_URL: \${DYNACONF_ONPREM_OAUTH_URL}"
       echo ""
+
+      # nise (the data generator) uploads generated payloads over HTTPS and verifies
+      # TLS against a hardcoded /tmp/router-ca.crt (baked into nise/the cost_onprem
+      # IQE config; it ignores REQUESTS_CA_BUNDLE). Stage the mounted ingress/router
+      # CA bundle there so uploads succeed; otherwise every ingest test fails to upload
+      # and then polls "No stats" until the CI step's 2h timeout SIGKILLs the run.
+      cp /etc/pki/tls/certs/ca-bundle.crt /tmp/router-ca.crt 2>/dev/null || \
+        echo "WARNING: could not stage /tmp/router-ca.crt; nise uploads may fail TLS verification"
 
       echo "Running IQE tests with marker: ${IQE_MARKER}"
       # --force-default-user is required because the cost_onprem config's Jinja templates
