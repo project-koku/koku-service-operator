@@ -779,8 +779,9 @@ if kubectl exec --request-timeout=300s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_
         python /opt/koku/koku/manage.py shell -c "${KOKU_PROVISION_SCRIPT}"; then
     echo "✓ koku tenant schema '${KOKU_SCHEMA}' ready"
 else
-    echo "⚠ WARNING: Could not pre-provision koku tenant schema '${KOKU_SCHEMA}'."
-    echo "  The data-retention session fixture may 503 and error the IQE run."
+    echo "⚠ ERROR: Could not pre-provision koku tenant schema '${KOKU_SCHEMA}'."
+    echo "  The data-retention session fixture will 503 and error the IQE run; aborting."
+    exit 1
 fi
 
 # -----------------------------------------------------------------------------
@@ -833,14 +834,15 @@ if kubectl exec --request-timeout=120s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_
         python /opt/rbac/rbac/manage.py shell -c "${RBAC_BOOTSTRAP_SCRIPT}"; then
     echo "✓ RBAC roles granted"
 else
-    echo "⚠ WARNING: RBAC role grant failed. Source-create and ingest tests may fail."
+    echo "⚠ ERROR: RBAC role grant failed. Source-create and ingest tests will fail; aborting."
+    exit 1
 fi
 
 # RBAC V2 tenant bootstrap (TenantMapping, workspaces, role bindings). Without
 # this RBAC can return 400 on /access/ queries. Mirrors e2e-pytest.
 kubectl exec --request-timeout=120s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-rbac-api" -- \
     python /opt/rbac/rbac/manage.py bootstrap_tenants --org-id "${ORG_ID}" --force \
-    || echo "⚠ WARNING: RBAC V2 bootstrap_tenants failed; /access/ queries may 400."
+    || { echo "⚠ ERROR: RBAC V2 bootstrap_tenants failed; /access/ queries will 400; aborting."; exit 1; }
 
 echo ""
 echo "Creating IQE test pod..."
