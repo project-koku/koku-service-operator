@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run IQE cost-management tests against a deployed cost-onprem chart
+# Run IQE cost-management tests against a deployed cost-onprem operator
 #
 # Usage:
 #   ./scripts/run-iqe-tests.sh [OPTIONS]
@@ -21,6 +21,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Prow CLI: the in-cluster e2e image ships `oc`, not `kubectl`, but this script
+# uses kubectl for all cluster access. Symlink oc -> kubectl onto PATH so the
+# existing kubectl calls work unchanged. Locally kubectl is usually present, so
+# this is a no-op there. (Mirrors the shim in run-pytest.sh.)
+if ! command -v kubectl >/dev/null 2>&1; then
+    if ! command -v oc >/dev/null 2>&1; then
+        echo "ERROR: neither kubectl nor oc found on PATH" >&2
+        exit 1
+    fi
+    _kubectl_compat_dir="$(mktemp -d "${TMPDIR:-/tmp}/koku-kubectl-compat.XXXXXX")"
+    ln -sf "$(command -v oc)" "${_kubectl_compat_dir}/kubectl"
+    export PATH="${_kubectl_compat_dir}:${PATH}"
+    echo "kubectl not on PATH; using oc via ${_kubectl_compat_dir}/kubectl"
+fi
+
 # Source shared filter configuration
 # shellcheck source=lib/iqe-filters.sh
 source "${SCRIPT_DIR}/lib/iqe-filters.sh"
@@ -28,17 +43,27 @@ source "${SCRIPT_DIR}/lib/iqe-filters.sh"
 # Cleanup function for exit trap
 cleanup() {
     local exit_code=$?
-    
+
     # Clean up temporary files
     if [[ -n "${TEMP_PULL_SECRET_FILE:-}" ]] && [[ -f "${TEMP_PULL_SECRET_FILE}" ]]; then
         rm -f "${TEMP_PULL_SECRET_FILE}"
     fi
-    
-    # Clean up pod if not keeping it and it exists
+
+    # Clean up pod + the additive masu NetworkPolicy (unless keeping the pod for
+    # debugging — the policy must stay while a kept pod is still calling masu:8000).
     if [[ "${KEEP_POD:-false}" != "true" ]] && [[ -n "${NAMESPACE:-}" ]]; then
         kubectl delete pod iqe-cost-tests -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null || true
+        if [[ -n "${HELM_RELEASE_NAME:-}" ]]; then
+            kubectl delete networkpolicy "${HELM_RELEASE_NAME}-masu-iqe" -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null || true
+        fi
     fi
-    
+
+    # Remove the kubectl->oc compat dir created by the Prow shim (if any).
+    # Done last, after the final kubectl call above, so the symlink stays usable.
+    if [[ -n "${_kubectl_compat_dir:-}" ]] && [[ -d "${_kubectl_compat_dir}" ]]; then
+        rm -rf "${_kubectl_compat_dir}"
+    fi
+
     exit $exit_code
 }
 
@@ -62,7 +87,7 @@ NISE_VERSION="${NISE_VERSION:-}"
 
 show_help() {
     cat << EOF
-Run IQE cost-management tests against a deployed cost-onprem chart
+Run IQE cost-management tests against a deployed cost-onprem operator
 
 Usage: $(basename "$0") [OPTIONS]
 
@@ -269,7 +294,7 @@ else
     fi
 fi
 
-# Get S3 credentials from the deployed chart
+# Get S3 credentials from the deployed operator
 S3_SECRET_NAME="${HELM_RELEASE_NAME}-storage-credentials"
 echo ""
 echo "Extracting configuration from cluster..."
@@ -278,9 +303,9 @@ S3_ACCESS_KEY=$(kubectl get secret "$S3_SECRET_NAME" -n "$NAMESPACE" -o jsonpath
 S3_SECRET_KEY=$(kubectl get secret "$S3_SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.secret-key}' 2>/dev/null | base64 -d || echo "")
 
 # Get S3 endpoint and bucket names from MASU pod
-S3_ENDPOINT=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv S3_ENDPOINT 2>/dev/null || echo "")
-S3_BUCKET_NAME=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv S3_BUCKET_NAME 2>/dev/null || echo "koku-data")
-S3_ROS_BUCKET=$(kubectl exec -n "$NAMESPACE" deploy/${HELM_RELEASE_NAME}-koku-masu -c masu -- printenv REQUESTED_ROS_BUCKET 2>/dev/null || echo "ros-data")
+S3_ENDPOINT=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv S3_ENDPOINT 2>/dev/null || echo "")
+S3_BUCKET_NAME=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv S3_BUCKET_NAME 2>/dev/null || echo "koku-data")
+S3_ROS_BUCKET=$(kubectl exec -n "$NAMESPACE" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- printenv REQUESTED_ROS_BUCKET 2>/dev/null || echo "ros-data")
 
 # Determine S3 port and SSL from endpoint
 if [[ "$S3_ENDPOINT" =~ :([0-9]+)$ ]]; then
@@ -335,7 +360,7 @@ if [ -n "$KEYCLOAK_HOST" ]; then
             -d "grant_type=password" \
             -d "username=${KEYCLOAK_ADMIN_USER}" \
             -d "password=${KEYCLOAK_ADMIN_PASS}" 2>/dev/null | jq -r '.access_token // empty')
-        
+
         if [ -n "$ADMIN_TOKEN" ]; then
             # Find the first user with the org-admin realm role
             admin_username="admin"
@@ -463,7 +488,7 @@ echo "  Keycloak Client ID: ${KEYCLOAK_CLIENT_ID}"
 
 # Validate required configuration
 if [ -z "$KOKU_HOSTNAME" ]; then
-    echo "ERROR: Could not find Koku API route. Is the chart deployed?"
+    echo "ERROR: Could not find Koku API route. Is the operator deployed?"
     exit 1
 fi
 
@@ -479,7 +504,7 @@ IQE_REGISTRY=$(echo "${IQE_IMAGE}" | cut -d'/' -f1)
 # Function to sync local credentials to cluster
 sync_local_credentials() {
     local auth_file=""
-    
+
     # Find local auth file (podman uses different location than docker)
     if [ -f "${XDG_RUNTIME_DIR}/containers/auth.json" ]; then
         auth_file="${XDG_RUNTIME_DIR}/containers/auth.json"
@@ -488,7 +513,7 @@ sync_local_credentials() {
     elif [ -f "$HOME/.config/containers/auth.json" ]; then
         auth_file="$HOME/.config/containers/auth.json"
     fi
-    
+
     if [ -z "$auth_file" ]; then
         echo "ERROR: No local container registry credentials found."
         echo "       Expected locations:"
@@ -502,7 +527,7 @@ sync_local_credentials() {
         echo "         docker login ${IQE_REGISTRY}"
         return 1
     fi
-    
+
     # Check if the auth file contains credentials for the IQE registry
     if ! grep -q "${IQE_REGISTRY}" "$auth_file" 2>/dev/null; then
         echo "ERROR: Local credentials file does not contain ${IQE_REGISTRY}"
@@ -510,9 +535,9 @@ sync_local_credentials() {
         echo "         podman login ${IQE_REGISTRY}"
         return 1
     fi
-    
+
     echo "Found local credentials at: $auth_file"
-    
+
     # Create or update the pull secret in the namespace
     echo "Creating pull secret 'iqe-pull-secret' in namespace ${NAMESPACE}..."
     kubectl create secret generic iqe-pull-secret \
@@ -520,14 +545,14 @@ sync_local_credentials() {
         --type=kubernetes.io/dockerconfigjson \
         -n "${NAMESPACE}" \
         --dry-run=client -o yaml | kubectl apply -f -
-    
+
     # Link the secret to the default service account
     echo "Linking pull secret to default service account..."
     kubectl patch serviceaccount default -n "${NAMESPACE}" \
         -p '{"imagePullSecrets": [{"name": "iqe-pull-secret"}]}' 2>/dev/null || \
     kubectl patch serviceaccount default -n "${NAMESPACE}" \
         --type='json' -p='[{"op": "add", "path": "/imagePullSecrets/-", "value": {"name": "iqe-pull-secret"}}]' 2>/dev/null || true
-    
+
     echo "✓ Local credentials synced to cluster"
     return 0
 }
@@ -557,7 +582,7 @@ if [ "$NAMESPACE_HAS_PULL_SECRET" = "false" ]; then
             break
         fi
     done
-    
+
     if [ -n "$local_auth_file" ]; then
         echo "Found local ${IQE_REGISTRY} credentials, creating iqe-pull-secret..."
         kubectl create secret generic iqe-pull-secret \
@@ -663,13 +688,17 @@ fi
 
 # Pre-seed exchange rates so currency-filtered tests have valid rates available.
 # The EnabledCurrency table is populated by koku migration 0014_enabled_currency;
-# CURRENCY_URL must be set (via Helm value) for update_exchange_rates to fetch rates.
-# The get_daily_currency_rates Celery task runs on a schedule and may not have
-# executed yet on fresh/ephemeral deployments.
+# CURRENCY_URL must be set (CMSC spec.costManagement.api.env) for
+# update_exchange_rates to fetch rates. The get_daily_currency_rates Celery task
+# runs on a schedule and may not have executed yet on fresh/ephemeral deployments.
+#
+# Exec into the masu pod and curl localhost:8000 so the request never leaves the
+# pod: the operator's MasuNetworkPolicy only permits Prometheus on :9000, so any
+# off-pod caller to masu:8000 is denied. localhost traffic bypasses NetworkPolicy.
 echo ""
 echo "Seeding exchange rates via masu internal API..."
-MASU_INTERNAL_URL="http://${MASU_HOSTNAME}:${MASU_PORT}/api/cost-management/v1"
-EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" deploy/${HELM_RELEASE_NAME}-koku-api -c koku-api -- \
+MASU_INTERNAL_URL="http://localhost:${MASU_PORT}/api/cost-management/v1"
+EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- \
     curl -sf --max-time 20 "${MASU_INTERNAL_URL}/update_exchange_rates/" 2>/dev/null || echo "")
 if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
     RATE_COUNT=$(echo "$EXCHANGE_RATE_RESPONSE" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('updated_exchange_rates',{})))" 2>/dev/null || echo "0")
@@ -677,6 +706,38 @@ if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
 else
     echo "⚠ WARNING: Could not seed exchange rates. Currency-filtered tests may fail."
 fi
+
+# Additive, harness-owned NetworkPolicy that permits the in-cluster IQE pod to
+# reach masu:8000. The operator's MasuNetworkPolicy (COST-8060) only allows
+# Prometheus on :9000, so masu's HTTP API on :8000 is default-denied.
+# NetworkPolicies are additive, so this sits beside the operator policy without
+# modifying it and is removed in cleanup(). Scoped to the iqe-tests pod, which
+# reaches masu over Service DNS. Needed for tag setup (/enabled_tags/, gated by
+# IQE_TEST_RUN).
+echo ""
+echo "Applying additive masu NetworkPolicy (${HELM_RELEASE_NAME}-masu-iqe)..."
+cat <<EOF | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ${HELM_RELEASE_NAME}-masu-iqe
+  namespace: ${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: cost-processor
+      app.kubernetes.io/instance: ${HELM_RELEASE_NAME}
+      app.kubernetes.io/name: ${HELM_RELEASE_NAME}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: iqe-tests
+      ports:
+        - port: ${MASU_PORT}
+          protocol: TCP
+EOF
 
 echo ""
 echo "Creating IQE test pod..."
@@ -726,7 +787,7 @@ spec:
       echo "DYNACONF_ONPREM_CLIENT_ID: \${DYNACONF_ONPREM_CLIENT_ID}"
       echo "DYNACONF_ONPREM_OAUTH_URL: \${DYNACONF_ONPREM_OAUTH_URL}"
       echo ""
-      
+
       echo "Running IQE tests with marker: ${IQE_MARKER}"
       # --force-default-user is required because the cost_onprem config's Jinja templates
       # don't evaluate correctly (main.get('ONPREM_*') returns None since DYNACONF_ONPREM_*
@@ -752,11 +813,11 @@ spec:
           -o junit_suite_name=iqe-cost-management-onprem \
           2>&1 | tee /results/test-output.log
       fi
-      
+
       EXIT_CODE=\$?
       echo ""
       echo "Tests completed with exit code: \${EXIT_CODE}"
-      
+
       # Keep pod alive briefly for result collection
       sleep 60
       exit \$EXIT_CODE
@@ -768,13 +829,13 @@ spec:
       value: "cost-management"
     - name: IQE_FILTER
       value: "${IQE_FILTER}"
-    
+
     # Disable vault - on-prem uses inline credentials, not vault secrets
     - name: DYNACONF_IQE_VAULT_LOADER_ENABLED
       value: "false"
     - name: DYNACONF_IQE_VAULT_OIDC_AUTH
       value: "false"
-    
+
     # DYNACONF variables for cost_onprem environment
     # Source values - these SHOULD feed Jinja templates like main.get('ONPREM_*')
     # but Jinja evaluation happens before env vars are merged, so we also set targets
@@ -794,7 +855,7 @@ spec:
       value: "${MASU_HOSTNAME}"
     - name: DYNACONF_ONPREM_MASU_PORT
       value: "${MASU_PORT}"
-    
+
     # Direct target values - bypass Jinja templates that don't evaluate correctly
     - name: DYNACONF_MAIN__HOSTNAME
       value: "${KOKU_HOSTNAME}"
@@ -810,7 +871,7 @@ spec:
       value: "${OAUTH_URL}"
     - name: DYNACONF_HTTP__SSL_VERIFY
       value: "false"
-    
+
     # Service objects configuration
     - name: DYNACONF_SERVICE_OBJECTS__KOKU__CONFIG__HOSTNAME
       value: "${KOKU_HOSTNAME}"
@@ -830,7 +891,7 @@ spec:
       value: "https"
     - name: DYNACONF_SERVICE_OBJECTS__COST_MANAGEMENT_SOURCES__CONFIG__PORT
       value: ""
-    
+
     # User configuration
     # IMPORTANT: Use lowercase for nested keys (auth, identity) because IQE code
     # expects lowercase keys like app_user["auth"], not app_user["AUTH"]
@@ -854,7 +915,7 @@ spec:
       value: "${ACCOUNT_NUMBER}"
     - name: DYNACONF_users__cost_onprem_user__identity__org_id
       value: "${ORG_ID}"
-    
+
     # SSL CA bundle for cluster certificates
     - name: REQUESTS_CA_BUNDLE
       value: "/etc/pki/tls/certs/ca-bundle.crt"
@@ -862,7 +923,7 @@ spec:
       value: "/etc/pki/tls/certs/ca-bundle.crt"
     - name: CURL_CA_BUNDLE
       value: "/etc/pki/tls/certs/ca-bundle.crt"
-    
+
     # S3 Configuration (for IQE fixtures)
     - name: S3_ENDPOINT
       value: "${S3_ENDPOINT}"
@@ -929,7 +990,7 @@ kubectl wait --for=condition=Ready pod/iqe-cost-tests -n "${NAMESPACE}" --timeou
     echo "Pod status:"
     kubectl get pod iqe-cost-tests -n "${NAMESPACE}" -o wide || true
     echo ""
-    
+
     # Check specifically for image pull errors
     POD_STATUS=$(kubectl get pod iqe-cost-tests -n "${NAMESPACE}" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || echo "")
     if [[ "$POD_STATUS" == "ImagePullBackOff" ]] || [[ "$POD_STATUS" == "ErrImagePull" ]]; then
@@ -957,7 +1018,7 @@ kubectl wait --for=condition=Ready pod/iqe-cost-tests -n "${NAMESPACE}" --timeou
             echo ""
         fi
     fi
-    
+
     echo "Pod events:"
     kubectl describe pod iqe-cost-tests -n "${NAMESPACE}" | grep -A 20 "Events:" || true
     echo ""
@@ -979,7 +1040,7 @@ RESULTS_COLLECTED=false
 
 while [ $ELAPSED -lt "$IQE_TIMEOUT" ]; do
     PHASE=$(kubectl get pod iqe-cost-tests -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-    
+
     # Try to collect results while container is still running (before Succeeded state)
     # kubectl cp requires exec access which is lost once pod reaches Succeeded state
     if [ "$RESULTS_COLLECTED" = "false" ]; then
@@ -993,7 +1054,7 @@ while [ $ELAPSED -lt "$IQE_TIMEOUT" ]; do
             kubectl exec iqe-cost-tests -n "${NAMESPACE}" -- cat /results/test-output.log > "${RESULTS_DIR}/iqe_output.log" 2>/dev/null || true
         fi
     fi
-    
+
     if [ "$PHASE" = "Succeeded" ] || [ "$PHASE" = "Failed" ]; then
         echo ""
         echo "IQE pod finished with phase: ${PHASE}"
@@ -1033,9 +1094,9 @@ if [ -f "${RESULTS_DIR}/iqe_junit.xml" ]; then
     FAILURES=$(grep -o 'failures="[0-9]*"' "${RESULTS_DIR}/iqe_junit.xml" | head -1 | grep -o '[0-9]*' || echo "0")
     ERRORS=$(grep -o 'errors="[0-9]*"' "${RESULTS_DIR}/iqe_junit.xml" | head -1 | grep -o '[0-9]*' || echo "0")
     SKIPPED=$(grep -o 'skipped="[0-9]*"' "${RESULTS_DIR}/iqe_junit.xml" | head -1 | grep -o '[0-9]*' || echo "0")
-    
+
     PASSED=$((TESTS - FAILURES - ERRORS - SKIPPED))
-    
+
     echo ""
     echo "========== IQE Test Results =========="
     echo "  Total:    ${TESTS}"
