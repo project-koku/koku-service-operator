@@ -294,8 +294,6 @@ type EnvoySpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.url) && size(self.url) > 0",message="url is required"
-// +kubebuilder:validation:XValidation:rule="!has(self.url) || size(self.url) == 0 || self.url.startsWith('http://') || self.url.startsWith('https://')",message="url must use http or https when set"
 // +kubebuilder:validation:XValidation:rule="!has(self.issuerURL) || size(self.issuerURL) == 0 || self.issuerURL.startsWith('https://')",message="issuerURL must use https when set"
 // +kubebuilder:validation:XValidation:rule="!has(self.audiences) || size(self.audiences) > 0",message="audiences must not be empty when set"
 // +kubebuilder:validation:XValidation:rule="has(self.url) && size(self.url) > 0",message="url is required (JWKS fetch URL); operator does not auto-detect Keycloak"

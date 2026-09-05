@@ -186,11 +186,6 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-validations:
-                    - message: url is required
-                      rule: has(self.url) && size(self.url) > 0
-                    - message: url must use http or https when set
-                      rule: '!has(self.url) || size(self.url) == 0 || self.url.startsWith(''http://'')
-                        || self.url.startsWith(''https://'')'
                     - message: issuerURL must use https when set
                       rule: '!has(self.issuerURL) || size(self.issuerURL) == 0 ||
                         self.issuerURL.startsWith(''https://'')'
