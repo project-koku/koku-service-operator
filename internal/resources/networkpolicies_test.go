@@ -263,6 +263,11 @@ func TestCacheNetworkPolicy(t *testing.T) {
 func TestDatabaseNetworkPolicy(t *testing.T) {
 	wantFrom := []string{
 		"cost-management-api", "cost-processor", "cost-management-migration",
+		"listener", "cost-scheduler",
+		"cost-worker-celery", "cost-worker-priority", "cost-worker-summary",
+		"cost-worker-ocp", "cost-worker-cost-model", "cost-worker-refresh",
+		"cost-worker-hcs", "cost-worker-download",
+		"cost-worker-subs-extraction", "cost-worker-subs-transmission",
 		"rbac-api", "rbac-worker", "rbac-migration", "rbac-admin-bootstrap", "rbac-keycloak-sync",
 		"ros-api", "ros-processor", "ros-recommendation-poller",
 		"ros-housekeeper", "ros-optimization", "ros-migration",

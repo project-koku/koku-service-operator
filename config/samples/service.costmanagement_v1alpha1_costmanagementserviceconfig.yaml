@@ -100,11 +100,11 @@ spec:
         tag: "2.6"
       replicas: 2
     keycloak:
-      # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
-      # hostname, tokens use that URL as iss — set issuerURL to match.
-      # Matches envoy.go defaultKeycloakURL. For CRC + RHBK/BYOI, override to
+      # Required JWKS fetch URL (prefer in-cluster Service). When RHBK sets a
+      # public hostname, tokens use that URL as iss — set issuerURL to match.
+      # For CRC + RHBK/BYOI, override to
       # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
-      url: "https://keycloak.keycloak.svc.cluster.local"
+      url: "https://keycloak.keycloak.svc.cluster.local:8443"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       realm: kubernetes
       audiences:

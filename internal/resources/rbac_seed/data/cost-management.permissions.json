@@ -1,0 +1,93 @@
+{
+    "aws.account": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "aws.organizational_unit": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "azure.subscription_guid": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "gcp.account": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "gcp.project": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "openshift.cluster": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "openshift.node": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "openshift.project": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        }
+    ],
+    "cost_model": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        },
+        {
+            "verb": "write"
+        }
+    ],
+    "settings": [
+        {
+            "verb": "*"
+        },
+        {
+            "verb": "read"
+        },
+        {
+            "verb": "write"
+        }
+    ],
+    "*": [
+        {
+            "verb": "*"
+        }
+    ]
+}

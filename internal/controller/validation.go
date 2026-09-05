@@ -143,7 +143,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 	// G1: Signed ListBuckets against the resolved endpoint (user or discovered).
 	r.validateObjectStorage(ctx, cfg)
 
-	// --- OIDC / Keycloak (non-blocking; skipped when URL not explicitly set) ---
+	// --- OIDC / Keycloak (non-blocking; empty url records OIDCConfigMissing) ---
 	r.validateOIDC(ctx, cfg)
 
 	if !allReady {
@@ -165,6 +165,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 // readiness and invalid custom CA configuration in status.
 func (r *CostManagementServiceConfigReconciler) validateOIDC(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) {
 	if strings.TrimSpace(cfg.Spec.Auth.Keycloak.URL) == "" {
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+			"OIDCConfigMissing", "spec.auth.keycloak.url is required")
 		return
 	}
 

@@ -25,6 +25,16 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+from ros_feature import ROS_DISABLED_SKIP_REASON
+
+
+@pytest.fixture(autouse=True)
+def skip_when_ros_disabled(ros_enabled: bool) -> None:
+    """Skip when spec.ros.enabled is false — this page is onboarding, not ROS."""
+    if not ros_enabled:
+        pytest.skip(ROS_DISABLED_SKIP_REASON)
+
+
 OPTIMIZATIONS_PATH = "/openshift/cost-management/optimizations"
 
 TABLE_SELECTOR = "table, [role='grid'], .pf-c-table, .pf-v6-c-table"

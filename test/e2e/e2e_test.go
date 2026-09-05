@@ -1,3 +1,5 @@
+//go:build !cluster_e2e
+
 /*
 Copyright 2026.
 
