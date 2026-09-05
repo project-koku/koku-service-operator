@@ -63,7 +63,7 @@ func TestReconcileWorkers_IngressReady(t *testing.T) {
 func TestReconcileWorkers_ROSAPINotReady_BlocksProgress(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	c := fakeClientPreservingStatus(scheme)
 	r := &CostManagementServiceConfigReconciler{
 		Client:   c,
@@ -91,7 +91,7 @@ func TestReconcileWorkers_ROSAPINotReady_BlocksProgress(t *testing.T) {
 func TestReconcileWorkers_ROSProcessorNotReady_BlocksProgress(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	c := fakeClientPreservingStatus(scheme)
 	r := &CostManagementServiceConfigReconciler{
 		Client:   c,
@@ -122,7 +122,7 @@ func TestReconcileWorkers_ROSProcessorNotReady_BlocksProgress(t *testing.T) {
 func TestReconcileCoreThenWorkers_ROSAPINotReady_PreservesWaitClock(t *testing.T) {
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	c := fakeClientPreservingStatus(scheme)
 	r := &CostManagementServiceConfigReconciler{
 		Client:   c,

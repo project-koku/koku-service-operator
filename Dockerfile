@@ -1,5 +1,6 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786522985 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.7-1788409979 AS builder
+
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -25,9 +26,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wa
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
+
 WORKDIR /
-COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/wait-for .
+COPY --from=builder /workspace/manager /manager
+COPY --from=builder /workspace/wait-for /wait-for
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

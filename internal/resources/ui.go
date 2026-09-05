@@ -261,7 +261,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 				Spec: corev1.PodSpec{
 					SecurityContext:              nonRootPodSC(),
 					ServiceAccountName:           NameUIServiceAccount(cfg),
-					AutomountServiceAccountToken: boolPtr(false),
+					AutomountServiceAccountToken: new(false),
 					ImagePullSecrets:             imagePullSecrets(cfg),
 					Containers: []corev1.Container{
 						{

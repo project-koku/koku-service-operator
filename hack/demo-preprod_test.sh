@@ -40,15 +40,15 @@ tmp="$(mktemp)"
 cat >"$tmp" <<'EOF'
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wait-for ./cmd/wait-for/
-COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/wait-for .
+COPY --from=builder /workspace/manager /manager
+COPY --from=builder /workspace/wait-for /wait-for
 EOF
 patch_operator_dockerfile "$tmp"
 patched="$(cat "$tmp")"
 assert_contains "$patched" "go build -a -o /tmp/manager cmd/main.go" "build manager to /tmp"
 assert_contains "$patched" "go build -a -o /tmp/wait-for ./cmd/wait-for/" "build wait-for to /tmp"
-assert_contains "$patched" "COPY --from=builder /tmp/manager ." "copy manager from /tmp"
-assert_contains "$patched" "COPY --from=builder /tmp/wait-for ." "copy wait-for from /tmp"
+assert_contains "$patched" "COPY --from=builder /tmp/manager /manager" "copy manager from /tmp"
+assert_contains "$patched" "COPY --from=builder /tmp/wait-for /wait-for" "copy wait-for from /tmp"
 assert_not_contains "$patched" "-o manager cmd/main.go" "no WORKDIR-relative manager output"
 rm -f "$tmp"
 

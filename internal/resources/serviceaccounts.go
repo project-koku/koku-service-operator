@@ -15,7 +15,7 @@ func familyServiceAccount(cfg *costv1alpha1.CostManagementServiceConfig, name, c
 			Namespace: cfg.Namespace,
 			Labels:    Labels(cfg, component),
 		},
-		AutomountServiceAccountToken: boolPtr(false),
+		AutomountServiceAccountToken: new(false),
 	}
 }
 

@@ -78,7 +78,7 @@ func TestReconcileMigration_EmptyRBACImage_DegradedNoJob(t *testing.T) {
 
 func TestReconcileMigration_ROSEnabledEmptyImage_DegradedNoJob(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{}
 
 	result, err := r.reconcileMigration(context.Background(), cfg)
@@ -306,7 +306,7 @@ func TestReconcileMigration_ImageTagChange_RecreatesJob(t *testing.T) {
 
 func TestReconcileMigration_ROSDisabled_SkipsROSMigration(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
-	cfg.Spec.ROS.Enabled = boolPtr(false)
+	cfg.Spec.ROS.Enabled = new(false)
 
 	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
 		t.Fatalf("koku: %v", err)
@@ -328,7 +328,7 @@ func TestReconcileMigration_ROSDisabled_SkipsROSMigration(t *testing.T) {
 
 func TestReconcileMigration_ROSEnabled_IncludesROSMigration(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
-	cfg.Spec.ROS.Enabled = boolPtr(true)
+	cfg.Spec.ROS.Enabled = new(true)
 	cfg.Spec.ROS.Image = costv1alpha1.ImageSpec{
 		Repository: "quay.io/test/ros",
 		Tag:        "v1",
@@ -582,8 +582,8 @@ func newMigrationTestReconciler(t *testing.T) (*CostManagementServiceConfigRecon
 	t.Helper()
 	scheme := ownershipScheme(t)
 	cfg := minimalCR(testCRName, testNamespace)
-	cfg.Spec.Database.Deploy = boolPtr(true)
-	cfg.Spec.Cache.Deploy = boolPtr(true)
+	cfg.Spec.Database.Deploy = new(true)
+	cfg.Spec.Cache.Deploy = new(true)
 	cfg.Spec.CostManagement.API.Image = costv1alpha1.ImageSpec{
 		Repository: "quay.io/test/koku",
 		Tag:        "v1",

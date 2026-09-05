@@ -63,8 +63,6 @@ func noobaaAdminSecretIn(ns, accessKey, secretKey string) *corev1.Secret {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func assertStorageCondition(t *testing.T, cfg *costv1alpha1.CostManagementServiceConfig, wantStatus metav1.ConditionStatus, wantReason string) {
 	t.Helper()
 	for _, cond := range cfg.Status.Conditions {
@@ -90,7 +88,7 @@ func TestResolveS3_UserProvided(t *testing.T) {
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				Endpoint:   "minio.cost-byoi-infra.svc.cluster.local",
 				Port:       9000,
-				UseSSL:     boolPtr(false),
+				UseSSL:     new(false),
 				SecretName: "byoi-s3-credentials",
 				S3:         costv1alpha1.S3Options{Region: defaultS3Region},
 			},
@@ -366,14 +364,14 @@ func TestNoobaaEndpoint(t *testing.T) {
 			name:     "custom host uses spec port and SSL",
 			endpoint: "s3.apps.example.com",
 			port:     443,
-			useSSL:   boolPtr(true),
+			useSSL:   new(true),
 			want:     "https://s3.apps.example.com:443",
 		},
 		{
 			name:     "custom host honors UseSSL false and port",
 			endpoint: "s3-noobaa.apps.example.com",
 			port:     80,
-			useSSL:   boolPtr(false),
+			useSSL:   new(false),
 			want:     "http://s3-noobaa.apps.example.com:80",
 		},
 	}
@@ -397,7 +395,7 @@ func TestNoobaaEndpointIgnoresDiscoveredStatus(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
 	cfg.Spec.ObjectStorage.Endpoint = "s3.apps.example.com"
 	cfg.Spec.ObjectStorage.Port = 443
-	cfg.Spec.ObjectStorage.UseSSL = boolPtr(true)
+	cfg.Spec.ObjectStorage.UseSSL = new(true)
 	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{
 		S3: &costv1alpha1.DiscoveredS3{Endpoint: "https://s3.openshift-storage.svc.cluster.local:443"},
 	}
@@ -512,7 +510,7 @@ func TestResolveS3_NooBaaCustomEndpoint(t *testing.T) {
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				Endpoint: "s3.apps.example.com",
 				Port:     443,
-				UseSSL:   boolPtr(true),
+				UseSSL:   new(true),
 			},
 		},
 	}
@@ -586,7 +584,7 @@ func TestReconcileDiscovery_UserProvidedS3_SetsStorageReady(t *testing.T) {
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				Endpoint:   "minio.example.svc",
 				Port:       9000,
-				UseSSL:     boolPtr(false),
+				UseSSL:     new(false),
 				SecretName: "my-s3",
 			},
 		},
