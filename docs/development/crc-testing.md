@@ -3,6 +3,61 @@
 CRC provides a single-node OpenShift cluster for local development. The
 operator runs locally (out-of-cluster) and talks to CRC via kubeconfig.
 
+Two paths:
+
+| Path | What it exercises | Section |
+|------|-------------------|---------|
+| **`./hack/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
+| **`make run` + a bundled sample CR** | Operator out-of-cluster, operator-provisioned Postgres/Valkey, no Kafka/Keycloak | rest of this document |
+
+## Full BYOI demo on CRC
+
+`./hack/demo-preprod.sh --crc` runs the [pre-prod demo](../development/pre-prod-install.md)
+against local CRC. It layers `hack/demo-preprod.crc.env` under the normal
+settings:
+
+- `KUBE_CONTEXT=crc` (create it once — see below)
+- `BUILD_MODE=openshift` — the operator image is built **on** the CRC node, so
+  it is natively arm64 (no cross build, no external registry)
+- **arm64 workload image overrides** — the BYOI sample pins amd64-only builds of
+  koku, `insights-rbac`, ingress and `koku-ui-onprem` that segfault / fail to
+  pull on the arm64 node; the profile points them at arm64 rebuilds under
+  `quay.io/martin_povolny/*`. Envoy (`proxyv2-rhel9`) and `oauth2-proxy-rhel9`
+  are Red Hat multi-arch and are left as-is.
+- **1+1 Kafka** (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
+  10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC
+  disk.
+
+The amd64 / `clusterbot` path is unaffected: without `--crc` the profile file is
+never read and the rendered CR is byte-identical to before.
+
+### One-time: create the `crc` kube context
+
+```bash
+crc start -p ~/.crc-secret.json
+oc login -u kubeadmin -p "$(crc console --credentials | sed -n 's/.*-p \([^ ]*\).*/\1/p' | tail -1)" \
+    https://api.crc.testing:6443 --insecure-skip-tls-verify=true
+oc config set-context crc --cluster=api-crc-testing:6443 \
+    --user=kubeadmin/api-crc-testing:6443 --namespace=default
+```
+
+`oc login` refreshes the token; re-run it (not `set-context`) if the context
+later reports `Unauthorized`.
+
+### Run it
+
+```bash
+# needs the sibling cost-onprem-chart checkout for scripts/deploy-rhbk.sh
+./hack/demo-preprod.sh --crc --dry-run     # show the plan
+./hack/demo-preprod.sh --crc               # tmux: steps + two klock panes
+./hack/demo-preprod.sh --crc --reset       # tear the four namespaces down first
+```
+
+Override any image from the profile with a matching env var, e.g.
+`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64 ./hack/demo-preprod.sh --crc`.
+Rebuilding the arm64 workload images: see
+[the profile file](../../hack/demo-preprod.crc.env) for the source repos.
+
 ## Prerequisites
 
 - CRC installed (`brew install --cask crc` or from [developers.redhat.com](https://developers.redhat.com/products/openshift-local))

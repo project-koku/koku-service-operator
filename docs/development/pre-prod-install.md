@@ -310,6 +310,7 @@ oc delete ns "$NAMESPACE" "$INFRA_NAMESPACE" --ignore-not-found
 ## Related docs
 
 - [ownnamespace.md](ownnamespace.md) — install/watch model and RBAC shape
-- [crc-testing.md](crc-testing.md) — local CRC / out-of-cluster `make run`
+- [crc-testing.md](crc-testing.md) — local CRC: this same BYOI flow via
+  `./hack/demo-preprod.sh --crc` (arm64), or the out-of-cluster `make run` path
 - [uninstall.md](../install/uninstall.md) — CR-first uninstall and stuck-namespace recovery
 - [config/samples/byoi/README.md](../../config/samples/byoi/README.md) — fixture details, monitoring, teardown

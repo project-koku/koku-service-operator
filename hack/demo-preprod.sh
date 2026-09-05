@@ -7,9 +7,10 @@
 #   ./hack/demo-preprod.sh --reset          # delete app/infra/kafka/keycloak NS first
 #   ./hack/demo-preprod.sh --no-tmux
 #   ./hack/demo-preprod.sh --rebuild        # force operator image rebuild
+#   ./hack/demo-preprod.sh --crc            # target local CRC (arm64, single node)
 #
 # Settings: env vars, then hack/demo-preprod.local.env, then
-# hack/demo-preprod.env.example. See the example file.
+# hack/demo-preprod.env.example (and hack/demo-preprod.crc.env with --crc).
 #
 # tmux (default): left pane = numbered steps; top-right = kubectl klock pods
 # in NAMESPACE; bottom-right = kubectl klock pods in KAFKA_NAMESPACE.
@@ -29,6 +30,7 @@ DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
+DEMO_CRC="${DEMO_CRC:-0}"
 
 usage() {
   sed -n '2,18p' "$SCRIPT" | sed 's/^# \{0,1\}//'
@@ -41,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --no-tmux) DEMO_NO_TMUX=1 ;;
     --rebuild) DEMO_REBUILD=1 ;;
     --no-open) DEMO_NO_OPEN=1 ;;
+    --crc) DEMO_CRC=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown flag $1" >&2
@@ -73,10 +76,20 @@ load_env_file() {
   done <"$file"
 }
 
+# --crc: layer the CRC/arm64 profile under the normal files. load_env_file only
+# sets vars that are still unset, so real env > .local.env > .env.example >
+# .crc.env, and the amd64 path (no --crc) never reads this file.
+if [[ "$DEMO_CRC" == "1" ]]; then
+  load_env_file "${ROOT}/hack/demo-preprod.crc.env"
+fi
 load_env_file "${ROOT}/hack/demo-preprod.env.example"
 load_env_file "${ROOT}/hack/demo-preprod.local.env"
 
-KUBE_CONTEXT="${KUBE_CONTEXT:-clusterbot}"
+if [[ "$DEMO_CRC" == "1" ]]; then
+  KUBE_CONTEXT="${KUBE_CONTEXT:-crc}"
+else
+  KUBE_CONTEXT="${KUBE_CONTEXT:-clusterbot}"
+fi
 NAMESPACE="${NAMESPACE:-cost-byoi}"
 CR_NAME="${CR_NAME:-cost-management}"
 INFRA_NAMESPACE="${INFRA_NAMESPACE:-cost-byoi-infra}"
@@ -165,6 +178,7 @@ Pre-prod demo plan
   tmux:        ${TMUX_SESSION}  (NO_TMUX=${DEMO_NO_TMUX})
   reset:       ${DEMO_RESET}
   rebuild:     ${DEMO_REBUILD}
+  crc mode:    ${DEMO_CRC}$([[ "$DEMO_CRC" == "1" ]] && echo "  (arm64 image overrides + single-node Kafka from hack/demo-preprod.crc.env)")
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
   [1/8] Preflight (context, oc, CHART_ROOT, StorageClass)
@@ -223,7 +237,7 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") $(printf %q "$ROOT/hack/demo-preprod.sh")"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/hack/demo-preprod.sh")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -254,6 +268,16 @@ fi
 "$KUBECTL" config use-context "$KUBE_CONTEXT" >/dev/null
 require_reachable_cluster "$KUBECTL" || exit 1
 ok "using $($KUBECTL config current-context) — $($KUBECTL whoami --show-server)"
+
+if [[ "$DEMO_CRC" == "1" ]]; then
+  NODE_ARCH="$("$KUBECTL" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true)"
+  if [[ "$NODE_ARCH" != "arm64" ]]; then
+    echo "warning: --crc expects an arm64 node but the cluster reports '${NODE_ARCH:-unknown}'." >&2
+    echo "  The arm64 image overrides in hack/demo-preprod.crc.env may not match this node." >&2
+  else
+    ok "node architecture ${NODE_ARCH} (arm64 image overrides from hack/demo-preprod.crc.env)"
+  fi
+fi
 
 if [[ ! -x "${CHART_ROOT}/scripts/deploy-rhbk.sh" ]]; then
   echo "error: CHART_ROOT has no scripts/deploy-rhbk.sh: ${CHART_ROOT}" >&2
@@ -413,7 +437,92 @@ ui_deploy_ready() {
   [[ "$("$KUBECTL" -n "$NAMESPACE" get deploy "${CR_NAME}-ui" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
 }
 
+# RHBK / Keycloak operator: the channel deploy-rhbk.sh pins (stable-v22) ships
+# amd64-only operator images. On the arm64 CRC node we pre-create the
+# Subscription on an arm64-capable channel (stable-v26); deploy-rhbk.sh then
+# finds it and skips its own create. No-op on amd64 / clusterbot.
+ensure_rhbk_channel() {
+  local ns="$1" channel="$2"
+  need_ns "$ns"
+  "$KUBECTL" apply -f - >/dev/null <<EOF
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: rhbk-operator-group
+  namespace: ${ns}
+spec:
+  targetNamespaces:
+  - ${ns}
+EOF
+  local cur
+  cur="$("$KUBECTL" -n "$ns" get subscription rhbk-operator -o jsonpath='{.spec.channel}' 2>/dev/null || true)"
+  if [[ -z "$cur" ]]; then
+    echo "  creating RHBK Subscription on channel ${channel} (arm64)"
+    "$KUBECTL" apply -f - >/dev/null <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhbk-operator
+  namespace: ${ns}
+spec:
+  channel: ${channel}
+  installPlanApproval: Automatic
+  name: rhbk-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+EOF
+  elif [[ "$cur" != "$channel" ]]; then
+    echo "  repointing RHBK Subscription ${cur} -> ${channel} (arm64)"
+    "$KUBECTL" -n "$ns" patch subscription rhbk-operator --type=merge \
+      -p "{\"spec\":{\"channel\":\"${channel}\"}}" >/dev/null
+    "$KUBECTL" -n "$ns" delete csv -l "operators.coreos.com/rhbk-operator.${ns}" --ignore-not-found >/dev/null 2>&1 || true
+  else
+    echo "  RHBK Subscription already on channel ${channel}"
+  fi
+  echo "  waiting for deployment/rhbk-operator to be Available…"
+  local end=$((SECONDS + 300))
+  while (( SECONDS < end )); do
+    if [[ "$("$KUBECTL" -n "$ns" get deploy rhbk-operator -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)" == "1" ]]; then
+      ok "RHBK operator ready (channel ${channel})"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "error: RHBK operator (channel ${channel}) did not become ready in 5m" >&2
+  "$KUBECTL" -n "$ns" get csv,subscription,installplan,pods >&2 || true
+  exit 1
+}
+
+# RHBK >= v24 uses Hostname v2: spec.hostname.hostname / .admin must be full
+# URLs. deploy-rhbk.sh (written for v22) sets bare hostnames, which makes
+# keycloak-0 CrashLoop on the newer channel. This runs in the background while
+# deploy-rhbk.sh creates + waits on the Keycloak CR: as soon as the CR shows a
+# bare hostname, rewrite it to https:// and delete keycloak-0 so the StatefulSet
+# rolls a pod with the fixed config. Exits on its own; a no-op if the value is
+# already a URL. --crc only.
+crc_fix_keycloak_hostname_v2() {
+  local ns="$1" end=$((SECONDS + 600)) h
+  while (( SECONDS < end )); do
+    h="$("$KUBECTL" -n "$ns" get keycloak keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || true)"
+    if [[ -n "$h" ]]; then
+      case "$h" in
+        http://*|https://*) return 0 ;;
+        *)
+          echo "  [crc] rewriting Keycloak hostname '${h}' -> 'https://${h}' (RHBK Hostname v2)"
+          "$KUBECTL" -n "$ns" patch keycloak keycloak --type=merge \
+            -p "{\"spec\":{\"hostname\":{\"hostname\":\"https://${h}\",\"admin\":\"https://${h}\"}}}" >/dev/null 2>&1 || true
+          "$KUBECTL" -n "$ns" delete pod keycloak-0 --ignore-not-found >/dev/null 2>&1 || true
+          return 0 ;;
+      esac
+    fi
+    sleep 5
+  done
+}
+
 step "BYOI dependencies (Kafka, Postgres, Valkey, MinIO, Keycloak)"
+if [[ "$DEMO_CRC" == "1" ]] && ! keycloak_ready; then
+  ensure_rhbk_channel "$KEYCLOAK_NAMESPACE" "${DEMO_RHBK_CHANNEL:-stable-v26}"
+fi
 SKIP_KAFKA=0 SKIP_INFRA=0 SKIP_KEYCLOAK=0 SKIP_OAUTH_MIRROR=0
 kafka_ready && SKIP_KAFKA=1 && skip "Kafka ${KAFKA_CLUSTER_NAME} already Ready"
 infra_ready && SKIP_INFRA=1 && skip "infra in ${INFRA_NAMESPACE} already rolled out"
@@ -423,7 +532,13 @@ if [[ "${SKIP_KAFKA}${SKIP_INFRA}${SKIP_KEYCLOAK}${SKIP_OAUTH_MIRROR}" == "1111"
   skip "all BYOI stages healthy"
 else
   export SKIP_KAFKA SKIP_INFRA SKIP_KEYCLOAK SKIP_OAUTH_MIRROR
+  KC_FIX_PID=""
+  if [[ "$DEMO_CRC" == "1" && "$SKIP_KEYCLOAK" != "1" ]]; then
+    crc_fix_keycloak_hostname_v2 "$KEYCLOAK_NAMESPACE" &
+    KC_FIX_PID=$!
+  fi
   ./hack/deploy-byoi.sh
+  [[ -n "$KC_FIX_PID" ]] && wait "$KC_FIX_PID" 2>/dev/null || true
 fi
 ok "BYOI ready"
 
