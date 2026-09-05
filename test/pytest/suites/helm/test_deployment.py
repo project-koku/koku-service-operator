@@ -54,7 +54,10 @@ class TestDeploymentHealth:
     def test_database_pod_ready(self, cluster_config, database_deployed):
         """Verify database pod is ready (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed by chart (BYOI mode)")
+            pytest.skip(
+                "No operator-deployed database pod in this namespace (BYOI: the "
+                "database is external; its health is covered by TestDatabaseConnectivity)"
+            )
         assert check_pod_ready(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"

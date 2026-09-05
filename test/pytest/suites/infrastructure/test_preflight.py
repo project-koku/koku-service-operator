@@ -21,18 +21,24 @@ class TestPodHealth:
     """Tests for pod health status."""
 
     def test_database_pod_exists(self, cluster_config, database_deployed):
-        """Verify database pod exists (bundled deployments only)."""
+        """Verify the operator-deployed database pod exists (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed (BYOI)")
+            pytest.skip(
+                "No operator-deployed database pod in this namespace (BYOI: the "
+                "database is external; its health is covered by TestDatabaseConnectivity)"
+            )
         assert check_pod_exists(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"
         ), "Database pod not found"
 
     def test_database_pod_ready(self, cluster_config, database_deployed):
-        """Verify database pod is ready (bundled deployments only)."""
+        """Verify the operator-deployed database pod is ready (bundled deployments only)."""
         if not database_deployed:
-            pytest.skip("Database not deployed (BYOI)")
+            pytest.skip(
+                "No operator-deployed database pod in this namespace (BYOI: the "
+                "database is external; its health is covered by TestDatabaseConnectivity)"
+            )
         assert check_pod_ready(
             cluster_config.namespace,
             "app.kubernetes.io/component=database"
@@ -65,8 +71,14 @@ class TestPodHealth:
 class TestDatabaseConnectivity:
     """Tests for database connectivity."""
 
+    @pytest.mark.smoke
     def test_database_accepts_connections(self, cluster_config, database_config):
-        """Verify database accepts connections."""
+        """Verify database accepts connections.
+
+        Marked smoke so a real readiness probe (pg_isready) runs in every
+        deployment mode. In BYOI the operator-created database pod tests skip,
+        so this connectivity check is what actually asserts DB readiness there.
+        """
         result = exec_in_pod(
             database_config.namespace,
             database_config.pod_name,
