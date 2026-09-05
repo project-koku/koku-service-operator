@@ -4,6 +4,20 @@ metadata:
   annotations:
     alm-examples: '[]'
     capabilities: Basic Install
+    operatorframework.io/suggested-namespace: cost-onprem
+    operatorframework.io/suggested-namespace-template: |-
+      {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+          "name": "cost-onprem",
+          "labels": {
+            "pod-security.kubernetes.io/enforce": "restricted",
+            "pod-security.kubernetes.io/audit": "restricted",
+            "pod-security.kubernetes.io/warn": "restricted"
+          }
+        }
+      }
   name: koku-service-operator.v0.0.0
   namespace: placeholder
 spec:

@@ -156,7 +156,7 @@ Summary:
 ./scripts/deploy-test-cost-onprem.sh --namespace cost-onprem --deploy-s4 \
   --skip-helm --skip-chart-tests --skip-tls
 
-# 2. Operator in-cluster (OwnNamespace: same NS as CR)
+# 2. Operator in-cluster (AllNamespaces; suggested NS cost-onprem)
 export IMG=quay.io/<you>/koku-service-operator:<tag>
 ./hack/deploy-incluster.sh cost-onprem
 
@@ -167,8 +167,8 @@ export NAMESPACE=cost-onprem HELM_RELEASE_NAME=cost-onprem KEYCLOAK_NAMESPACE=ke
 ./scripts/run-pytest.sh --no-ui -v
 ```
 
-**Do not** use `NAMESPACE=koku-service-operator-system` unless the CR also lives
-there. The default sample uses `cost-onprem`.
+Pytest `NAMESPACE` is the **CR** namespace (`cost-onprem` in the default
+sample). BYOI (Kafka, Keycloak, S4) may live in other namespaces.
 
 ### macOS notes
 

@@ -37,22 +37,50 @@ func init() {
 }
 
 // serviceAccountNamespacePath is the in-cluster namespace file. Tests override
-// it to exercise the SA-file branch without a real kubelet mount.
+// it so inCluster() can be exercised without a real kubelet mount.
 var serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
-// watchNamespace returns the namespace this OwnNamespace operator instance
-// watches and manages. In-cluster: the pod's service-account namespace file
-// (install NS == watch NS). Out-of-cluster (dev): NAMESPACE env var.
+// inCluster reports whether the process is running inside a pod. Presence of
+// the SA namespace file is the signal — not its contents. AllNamespaces must
+// not treat that file as the watch namespace (that would pin OLM AllNamespaces
+// installs to the operator pod NS).
+func inCluster() bool {
+	_, err := os.Stat(serviceAccountNamespacePath)
+	return err == nil
+}
+
+// watchNamespace returns a namespace to pin the informer cache, or "" to
+// watch all namespaces (AllNamespaces — the product install mode).
+//
+//   - WATCH_NAMESPACE set: pin to that namespace (OLMv0 Own/Single escape
+//     hatch; not advertised in the CSV).
+//   - In-cluster, WATCH_NAMESPACE empty: watch all (OLMv0 AllNamespaces
+//     OperatorGroup and OLMv1 ClusterExtension with no watchNamespace).
+//   - Out-of-cluster: NAMESPACE pins the cache for laptop `make run`.
 //
 // BYOI infrastructure may live in other namespaces; the operator connects to
-// it via CR fields and does not informer-watch those namespaces.
+// it via CR fields and does not own those namespaces.
 func watchNamespace() string {
-	if data, err := os.ReadFile(serviceAccountNamespacePath); err == nil {
-		if ns := strings.TrimSpace(string(data)); ns != "" {
-			return ns
-		}
+	if ns := strings.TrimSpace(os.Getenv("WATCH_NAMESPACE")); ns != "" {
+		return ns
 	}
-	return os.Getenv("NAMESPACE")
+	if inCluster() {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv("NAMESPACE"))
+}
+
+// cacheOptionsForNamespace pins DefaultNamespaces when ns is set. Empty ns
+// is cluster-wide cache (AllNamespaces).
+func cacheOptionsForNamespace(ns string) cache.Options {
+	if ns == "" {
+		return cache.Options{}
+	}
+	return cache.Options{
+		DefaultNamespaces: map[string]cache.Config{
+			ns: {},
+		},
+	}
 }
 
 func main() {
@@ -96,23 +124,16 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// OwnNamespace: restrict the informer cache to the watched namespace so a
-	// compromised or misconfigured operator cannot list Secrets/Jobs cluster-wide.
-	// Cluster-scoped resources (StorageClass, ConsoleLink, …) are unaffected.
 	ns := watchNamespace()
 	if ns == "" {
-		setupLog.Error(nil, "unable to determine watch namespace — set NAMESPACE when running out-of-cluster")
-		os.Exit(1)
+		setupLog.Info("AllNamespaces: watching CostManagementServiceConfig in every namespace")
+	} else {
+		setupLog.Info("restricting informer cache to namespace", "namespace", ns)
 	}
-	setupLog.Info("OwnNamespace: restricting cache to namespace", "namespace", ns)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme: scheme,
-		Cache: cache.Options{
-			DefaultNamespaces: map[string]cache.Config{
-				ns: {},
-			},
-		},
+		Scheme:                 scheme,
+		Cache:                  cacheOptionsForNamespace(ns),
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,

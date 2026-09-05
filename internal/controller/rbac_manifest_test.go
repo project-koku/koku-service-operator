@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
@@ -63,13 +64,6 @@ func assertObjectBucketClaimGetList(t *testing.T, source string, rules []rbacv1.
 		wantGroup    = "objectbucket.io"
 		wantResource = "objectbucketclaims"
 	)
-	extraVerbs := map[string]struct{}{
-		"watch":  {},
-		"create": {},
-		"update": {},
-		"patch":  {},
-		"delete": {},
-	}
 
 	var found bool
 	for _, rule := range rules {
@@ -87,8 +81,7 @@ func assertObjectBucketClaimGetList(t *testing.T, source string, rules []rbacv1.
 				hasGet = true
 			case "list":
 				hasList = true
-			}
-			if _, extra := extraVerbs[v]; extra {
+			default:
 				t.Errorf("%s objectbucketclaims rule must not include verb %q: %+v", source, v, rule)
 			}
 		}
@@ -103,11 +96,11 @@ func assertObjectBucketClaimGetList(t *testing.T, source string, rules []rbacv1.
 	}
 }
 
-func TestManagerRoleBinding_IsNamespacedRoleBinding(t *testing.T) {
-	var rb rbacv1.RoleBinding
+func TestManagerRoleBinding_IsClusterRoleBinding(t *testing.T) {
+	var rb rbacv1.ClusterRoleBinding
 	decodeYAMLFile(t, rbacManifestPath(t, "role_binding.yaml"), &rb)
-	if rb.Kind != "RoleBinding" {
-		t.Fatalf("manager binding kind: got %q, want RoleBinding (OwnNamespace)", rb.Kind)
+	if rb.Kind != "ClusterRoleBinding" {
+		t.Fatalf("manager binding kind: got %q, want ClusterRoleBinding (AllNamespaces)", rb.Kind)
 	}
 	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != "manager-role" {
 		t.Fatalf("roleRef: got %+v, want ClusterRole/manager-role", rb.RoleRef)
@@ -170,24 +163,15 @@ func TestManagerRole_GrantsObjectBucketClaimGetList(t *testing.T) {
 		}
 	}
 
-	// OLM installs from the CSV, not role.yaml. CI does not regenerate the
-	// bundle, so lock namespaced permissions to the same get+list grant.
-	// ObjectBucketClaim is namespace-scoped, so the grant belongs in
-	// permissions (OwnNamespace), not clusterPermissions.
+	// OLM installs from the CSV, not role.yaml. AllNamespaces binds
+	// manager-role via ClusterRoleBinding, so OBC get+list lives in
+	// clusterPermissions. CSV permissions stay leader-election (namespaced).
 	var csv olmCSVInstallPermissions
 	decodeYAMLFile(t, bundleCSVPath(t), &csv)
-	if len(csv.Spec.Install.Spec.Permissions) == 0 {
-		t.Fatal("CSV spec.install.spec.permissions is empty (unmarshal failed or field moved)")
-	}
 	if len(csv.Spec.Install.Spec.ClusterPermissions) == 0 {
 		t.Fatal("CSV spec.install.spec.clusterPermissions is empty (unmarshal failed or field moved)")
 	}
-	assertObjectBucketClaimGetList(t, "CSV permissions", csvPolicyRules(csv.Spec.Install.Spec.Permissions))
-	for _, rule := range csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions) {
-		if slices.Contains(rule.APIGroups, "objectbucket.io") {
-			t.Errorf("CSV clusterPermissions must not grant objectbucket.io: %+v", rule)
-		}
-	}
+	assertObjectBucketClaimGetList(t, "CSV clusterPermissions", csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions))
 }
 
 func TestManagerRole_StillGrantsNamespacedSecrets(t *testing.T) {
@@ -205,14 +189,13 @@ func TestManagerRole_StillGrantsNamespacedSecrets(t *testing.T) {
 		}
 	}
 	if !foundSecrets {
-		t.Fatal("manager-role must still list unnamed secrets (scoped by RoleBinding)")
+		t.Fatal("manager-role must still list unnamed secrets (AllNamespaces ClusterRoleBinding)")
 	}
 }
 
-// clusterScopedResources belong in cluster_access_role.yaml. role.yaml is
-// bound via a namespaced RoleBinding, so rules for these resources are inert
-// today but would regain cluster-wide reach if the binding were switched
-// back to a ClusterRoleBinding (review follow-up #6).
+// clusterScopedResources belong in cluster_access_role.yaml. manager-role is
+// bound cluster-wide (AllNamespaces), so cluster-scoped kinds in role.yaml
+// would be a real cluster grant — keep them in cluster_access_role.yaml.
 var clusterScopedResources = map[string]struct{}{
 	"consolelinks":        {},
 	"clusterroles":        {},
@@ -350,13 +333,67 @@ func TestManagerRole_NoClusterScopedResources(t *testing.T) {
 	}
 	assertNoClusterScopedResources(t, "manager-role", cr.Rules)
 
-	// OLM installs from the CSV, not role.yaml. Lock namespaced permissions
-	// to the same constraint so a regenerated bundle cannot reintroduce
-	// cluster-scoped rules under OwnNamespace.
+	// Leader-election RoleBinding stays namespaced. Cluster-scoped kinds
+	// (consolelinks, storageclasses, …) must not appear there.
 	var csv olmCSVInstallPermissions
 	decodeYAMLFile(t, bundleCSVPath(t), &csv)
 	if len(csv.Spec.Install.Spec.Permissions) == 0 {
 		t.Fatal("CSV spec.install.spec.permissions is empty (unmarshal failed or field moved)")
 	}
 	assertNoClusterScopedResources(t, "CSV permissions", csvPolicyRules(csv.Spec.Install.Spec.Permissions))
+}
+
+func TestCSV_AllNamespacesInstallMode(t *testing.T) {
+	type csvInstallContract struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+		Spec struct {
+			InstallModes []struct {
+				Type      string `json:"type"`
+				Supported bool   `json:"supported"`
+			} `json:"installModes"`
+		} `json:"spec"`
+	}
+	var csv csvInstallContract
+	decodeYAMLFile(t, bundleCSVPath(t), &csv)
+
+	want := map[string]bool{
+		"OwnNamespace":    false,
+		"SingleNamespace": false,
+		"MultiNamespace":  false,
+		"AllNamespaces":   true,
+	}
+	got := map[string]bool{}
+	for _, m := range csv.Spec.InstallModes {
+		got[m.Type] = m.Supported
+	}
+	for mode, supported := range want {
+		if got[mode] != supported {
+			t.Errorf("installModes %s: got %v, want %v", mode, got[mode], supported)
+		}
+	}
+	if csv.Metadata.Annotations["operatorframework.io/suggested-namespace"] != "cost-onprem" {
+		t.Errorf("suggested-namespace: got %q, want cost-onprem", csv.Metadata.Annotations["operatorframework.io/suggested-namespace"])
+	}
+	tmpl := csv.Metadata.Annotations["operatorframework.io/suggested-namespace-template"]
+	if tmpl == "" {
+		t.Fatal("missing operatorframework.io/suggested-namespace-template")
+	}
+	var ns corev1.Namespace
+	if err := yaml.Unmarshal([]byte(tmpl), &ns); err != nil {
+		t.Fatalf("suggested-namespace-template unmarshal: %v\n%s", err, tmpl)
+	}
+	if ns.Name != "cost-onprem" {
+		t.Errorf("suggested-namespace-template metadata.name: got %q, want cost-onprem", ns.Name)
+	}
+	for _, key := range []string{
+		"pod-security.kubernetes.io/enforce",
+		"pod-security.kubernetes.io/audit",
+		"pod-security.kubernetes.io/warn",
+	} {
+		if ns.Labels[key] != "restricted" {
+			t.Errorf("suggested-namespace-template label %s: got %q, want restricted", key, ns.Labels[key])
+		}
+	}
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# OwnNamespace in-cluster deploy: CRDs + RBAC + manager Deployment in the
-# CostManagementServiceConfig namespace (install NS == CR NS).
+# AllNamespaces in-cluster deploy: CRDs + RBAC + manager Deployment.
+# Suggested NS is cost-onprem; the manager watches CMSC in every namespace.
+# BYOI infra may live elsewhere (CR connection fields).
 #
 # Prefer this over `make run` when the CR points at in-cluster BYOI hosts
 # (*.svc.cluster.local) — those names are not resolvable from a laptop.
@@ -37,13 +38,13 @@ if ! command -v openssl >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "=== In-cluster OwnNamespace deploy ==="
+echo "=== In-cluster AllNamespaces deploy ==="
 echo "Namespace: $NS"
 echo "Image:     $IMG"
 echo "Cluster:   $(oc whoami --show-server)"
 echo ""
 
-# CRDs + RoleBinding (default SA) + ClusterRoleBinding + anyuid SCC.
+# CRDs + ClusterRoleBindings (default SA) + anyuid SCC.
 ./hack/deploy-dev.sh "$NS"
 
 echo "[in-cluster] Ensuring webhook serving-cert Secret (${WEBHOOK_SECRET})..."
@@ -95,11 +96,6 @@ spec:
         - --leader-elect
         - --health-probe-bind-address=:8081
         - --operator-image=${IMG}
-        env:
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

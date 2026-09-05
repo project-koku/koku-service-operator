@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OwnNamespace CRD + RBAC bootstrap for local / lab clusters (CRC, Cluster Bot, …).
+# AllNamespaces CRD + RBAC bootstrap for local / lab clusters (CRC, Cluster Bot, …).
 # Does NOT deploy the manager — use make run (laptop) or hack/deploy-incluster.sh.
 #
 # Usage: ./hack/deploy-dev.sh [namespace]
@@ -9,7 +9,7 @@ set -euo pipefail
 
 NS="${1:-cost-onprem}"
 
-echo "=== Dev deploy (OwnNamespace CRD + RBAC) ==="
+echo "=== Dev deploy (AllNamespaces CRD + RBAC) ==="
 echo "Namespace: $NS"
 echo "Cluster:   $(oc whoami --show-server 2>/dev/null || echo unknown)"
 echo ""
@@ -23,32 +23,66 @@ oc get namespace "$NS" &>/dev/null || oc create namespace "$NS"
 echo "[1/4] Installing CRDs..."
 make install
 
-# Apply RBAC needed by the operator (OwnNamespace).
+# Apply RBAC needed by the operator (AllNamespaces).
 echo "[2/4] Applying RBAC..."
 oc apply -f config/rbac/role.yaml
 oc apply -f config/rbac/cluster_access_role.yaml
-# Leader-election Role is namespaced — apply into the watch NS and bind default SA.
+# Leader-election Role is namespaced — apply into the operator NS and bind default SA.
 oc apply -n "$NS" -f config/rbac/leader_election_role.yaml
 
-# Namespaced manage rights (Secrets, Jobs, …) — RoleBinding in $NS only.
-oc delete clusterrolebinding koku-operator-dev 2>/dev/null || true
-oc create rolebinding koku-operator-dev \
-  --clusterrole=manager-role \
-  --serviceaccount="$NS:default" \
-  -n "$NS" \
-  2>/dev/null || echo "  (rolebinding koku-operator-dev already exists)"
+# Namespaced kinds (Secrets, Jobs, CMSC, …) cluster-wide so a CMSC outside
+# this NS is still reconcilable. Drop leftover OwnNamespace RoleBinding.
+oc delete rolebinding koku-operator-dev -n "$NS" 2>/dev/null || true
+# Do not apply config/rbac/cluster_access_role_binding.yaml here — that
+# kustomize binding targets SA controller-manager in namespace "system".
+# Lab make run / deploy-incluster uses the default SA in $NS.
 
-oc create rolebinding koku-operator-dev-leader-election \
-  --role=leader-election-role \
-  --serviceaccount="$NS:default" \
-  -n "$NS" \
-  2>/dev/null || echo "  (rolebinding koku-operator-dev-leader-election already exists)"
+oc apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: koku-operator-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
+
+oc apply -n "$NS" -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: koku-operator-dev-leader-election
+  namespace: $NS
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
 
 # Cluster-scoped + NooBaa admin Secret get.
-oc create clusterrolebinding koku-operator-dev-cluster \
-  --clusterrole=manager-cluster-role \
-  --serviceaccount="$NS:default" \
-  2>/dev/null || echo "  (clusterrolebinding koku-operator-dev-cluster already exists)"
+oc apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: koku-operator-dev-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: $NS
+EOF
 
 # Grant anyuid SCC so bundled PostgreSQL/Valkey pods can run with their
 # required UIDs (postgres=999, valkey=999). Skip if not on OpenShift.

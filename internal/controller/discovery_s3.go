@@ -188,8 +188,9 @@ func (r *CostManagementServiceConfigReconciler) discoverNooBaa(ctx context.Conte
 	if !noobaaNamespaceAllowed(ns) {
 		return nil, fmt.Errorf("spec.objectStorage.noobaaNamespace %q is not allowed (want %s or %s); for other namespaces set spec.objectStorage.secretName", ns, noobaaAdminNamespace, noobaaStandaloneNamespace)
 	}
-	// Use APIReader: noobaa-admin lives outside the OwnNamespace informer
-	// cache (Cache.DefaultNamespaces), typically in openshift-storage.
+	// Use APIReader: noobaa-admin lives in a customer storage NS
+	// (typically openshift-storage), not in the CMSC namespace. APIReader
+	// works whether the cache is cluster-wide (AllNamespaces) or pinned.
 	reader := r.APIReader
 	if reader == nil {
 		reader = r.Client

@@ -50,7 +50,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # CRDs + RBAC (so the CR can be applied even before the manager is up)
 # ---------------------------------------------------------------------------
-echo "[1/4] CRDs + OwnNamespace RBAC (deploy-dev.sh)..."
+echo "[1/4] CRDs + AllNamespaces RBAC (deploy-dev.sh)..."
 ./hack/deploy-dev.sh "$NAMESPACE"
 
 # ---------------------------------------------------------------------------

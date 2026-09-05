@@ -195,7 +195,7 @@ func TestResolveS3_NooBaa(t *testing.T) {
 	}
 }
 
-// TestResolveS3_NooBaaPrefersAPIReader simulates OwnNamespace cache: the
+// TestResolveS3_NooBaaPrefersAPIReader simulates a cache miss: the
 // cached Client cannot see openshift-storage/noobaa-admin, but APIReader can.
 func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
 	scheme := testScheme(t)
