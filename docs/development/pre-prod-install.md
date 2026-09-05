@@ -280,6 +280,27 @@ curl -skI "https://$(oc -n "$NAMESPACE" get route "${CR_NAME}-ui" -o jsonpath='{
 
 ---
 
+## Part D — Seed test data (optional)
+
+The UI is empty until a source has uploaded cost data. `./scripts/seed-test-data.sh`
+registers an OpenShift source, generates NISE OCP data, and uploads it through
+the gateway/ingress (no pytest):
+
+```bash
+NAMESPACE="$NAMESPACE" HELM_RELEASE_NAME="$CR_NAME" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
+  ./scripts/seed-test-data.sh --days 7
+```
+
+It sets up the venv from `test/pytest/requirements.txt`, installs `koku-nise`,
+and reuses the `test/pytest` helpers. masu processes the upload asynchronously
+off Kafka; data shows in the UI a few minutes later. The E2E suite
+(`./scripts/run-pytest.sh --e2e` with `E2E_CLEANUP_*=false`) also seeds as a
+side effect. See
+[test/pytest/README.md](../../test/pytest/README.md#data-generation) and
+[ui-development.md](ui-development.md).
+
+---
+
 ## Common failures
 
 | Symptom | Cause | Fix |
