@@ -21,23 +21,17 @@ metadata:
                 "replicas": 2
               },
               "keycloak": {
-                "audiences": [
-                  "cost-management-operator",
-                  "cost-management-ui"
-                ],
-                "realm": "kubernetes",
-                "url": "https://keycloak.keycloak.svc.cluster.local:8443"
+                "url": ""
               }
             },
             "cache": {
-              "deploy": true,
-              "image": {
-                "repository": "registry.redhat.io/rhel10/valkey-8",
-                "tag": "10.1"
+              "auth": {
+                "enabled": true,
+                "secretName": ""
               },
-              "persistence": {
-                "size": "5Gi"
-              }
+              "deploy": false,
+              "host": "",
+              "port": 6379
             },
             "costManagement": {
               "api": {
@@ -78,14 +72,11 @@ metadata:
               }
             },
             "database": {
-              "deploy": true,
-              "image": {
-                "repository": "registry.redhat.io/rhel10/postgresql-16",
-                "tag": "10.1"
-              },
-              "storage": {
-                "size": "30Gi"
-              }
+              "deploy": false,
+              "host": "",
+              "port": 5432,
+              "secretName": "",
+              "sslMode": "require"
             },
             "global": {
               "clusterDomain": "apps.cluster.local",
@@ -98,7 +89,7 @@ metadata:
               }
             },
             "kafka": {
-              "bootstrapServers": "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+              "bootstrapServers": ""
             },
             "kruize": {
               "image": {
@@ -111,8 +102,14 @@ metadata:
               "enabled": true
             },
             "objectStorage": {
-              "endpoint": "s3.openshift-storage.svc.cluster.local",
+              "buckets": {
+                "ingress": "",
+                "koku": "",
+                "ros": ""
+              },
+              "endpoint": "",
               "port": 443,
+              "secretName": "",
               "useSSL": true
             },
             "rbac": {
@@ -156,7 +153,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-03T14:07:27Z"
+    createdAt: "2026-09-05T16:59:16Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1

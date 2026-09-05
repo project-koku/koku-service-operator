@@ -7,6 +7,8 @@ import (
 
 func TestWaitForPostgres_UsesDatabaseImage(t *testing.T) {
 	cfg := testCfg()
+	deploy := true
+	cfg.Spec.Database.Deploy = &deploy
 	cfg.Spec.Database.Image.Repository = "quay.io/sclorg/postgresql-16-c10s"
 	cfg.Spec.Database.Image.Tag = "c10s"
 	c := waitForPostgres(cfg, "db.svc", "5432")

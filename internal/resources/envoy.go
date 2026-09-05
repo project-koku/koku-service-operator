@@ -53,14 +53,22 @@ func KeycloakIssuerURL(cfg *costv1alpha1.CostManagementServiceConfig) string {
 		}
 		return iss + "/realms/" + KeycloakRealm(cfg)
 	}
-	return KeycloakURL(cfg) + "/realms/" + KeycloakRealm(cfg)
+	base := KeycloakURL(cfg)
+	if base == "" {
+		return ""
+	}
+	return base + "/realms/" + KeycloakRealm(cfg)
 }
 
 // KeycloakJWKSURL is the OIDC JWKS endpoint used by Envoy's remote_jwks fetch.
 // Always derived from url (not issuerURL) so JWKS can stay on the in-cluster Service
 // while iss matches the public RHBK hostname.
 func KeycloakJWKSURL(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	return KeycloakURL(cfg) + "/realms/" + KeycloakRealm(cfg) + "/protocol/openid-connect/certs"
+	base := KeycloakURL(cfg)
+	if base == "" {
+		return ""
+	}
+	return base + "/realms/" + KeycloakRealm(cfg) + "/protocol/openid-connect/certs"
 }
 
 // KeycloakAudiences returns JWT audiences (CR defaults apply via kubebuilder when empty).
@@ -74,6 +82,9 @@ func KeycloakAudiences(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 // keycloakHostPort returns host and port for the Envoy JWKS cluster.
 func keycloakHostPort(cfg *costv1alpha1.CostManagementServiceConfig) (host string, port int32, useTLS bool) {
 	raw := KeycloakURL(cfg)
+	if raw == "" {
+		return "", 0, false
+	}
 	useTLS = strings.HasPrefix(raw, "https://")
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {

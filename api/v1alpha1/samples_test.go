@@ -69,6 +69,92 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 }
 
+func TestSampleCRs_DefaultDoesNotBundleDBCache(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if BoolVal(cfg.Spec.Database.Deploy, true) {
+		t.Error("default sample database.deploy: want false (BYOI)")
+	}
+	if BoolVal(cfg.Spec.Cache.Deploy, true) {
+		t.Error("default sample cache.deploy: want false (BYOI)")
+	}
+}
+
+func TestSampleCRs_DefaultLeavesExternalDBCacheValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Database.Host != "" {
+		t.Errorf("default sample database.host = %q, want empty string", cfg.Spec.Database.Host)
+	}
+	if cfg.Spec.Database.SecretName != "" {
+		t.Errorf("default sample database.secretName = %q, want empty string", cfg.Spec.Database.SecretName)
+	}
+	if cfg.Spec.Cache.Host != "" {
+		t.Errorf("default sample cache.host = %q, want empty string", cfg.Spec.Cache.Host)
+	}
+	if cfg.Spec.Cache.Auth.SecretName != "" {
+		t.Errorf("default sample cache.auth.secretName = %q, want empty string", cfg.Spec.Cache.Auth.SecretName)
+	}
+}
+
+func TestSampleCRs_DefaultLeavesAuthKeycloakURLBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Auth.Keycloak.URL != "" {
+		t.Fatalf("default sample auth.keycloak.url = %q, want empty string", cfg.Spec.Auth.Keycloak.URL)
+	}
+}
+
+func TestSampleCRs_DefaultLeavesObjectStorageValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.ObjectStorage.Endpoint != "" {
+		t.Fatalf("default sample objectStorage.endpoint = %q, want empty string", cfg.Spec.ObjectStorage.Endpoint)
+	}
+	if cfg.Spec.ObjectStorage.SecretName != "" {
+		t.Fatalf("default sample objectStorage.secretName = %q, want empty string", cfg.Spec.ObjectStorage.SecretName)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Koku != "" {
+		t.Fatalf("default sample objectStorage.buckets.koku = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Koku)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Ingress != "" {
+		t.Fatalf("default sample objectStorage.buckets.ingress = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Ingress)
+	}
+}
+
+func TestSampleCRs_DefaultShowsObjectStorageBucketsShape(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(samplePath(sampleDefault))
+	if err != nil {
+		t.Fatalf("read %s: %v", sampleDefault, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "buckets:") {
+		t.Fatalf("%s must show objectStorage.buckets", sampleDefault)
+	}
+	if !strings.Contains(text, `koku: ""`) {
+		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit blank field", sampleDefault)
+	}
+	if !strings.Contains(text, `ingress: ""`) {
+		t.Fatalf("%s must show objectStorage.buckets.ingress as an explicit blank field", sampleDefault)
+	}
+	if strings.Contains(text, "stagingBucket:") {
+		t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
+	}
+	if strings.Contains(text, "bucketName:") {
+		t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+	}
+}
+
+func TestSampleCRs_DefaultLeavesKafkaBootstrapBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Kafka.BootstrapServers != "" {
+		t.Fatalf("default sample kafka.bootstrapServers = %q, want empty string", cfg.Spec.Kafka.BootstrapServers)
+	}
+}
+
 func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	t.Parallel()
 	cfg := loadSampleCR(t, sampleCommunity)

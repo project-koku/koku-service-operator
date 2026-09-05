@@ -393,7 +393,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 	alreadyReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady) &&
 		apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
 
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		if err := r.apply(ctx, cfg, resources.DatabaseService(cfg)); err != nil {
 			return Result{}, fmt.Errorf("database service: %w", err)
 		}
@@ -418,7 +418,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionTrue, "ExternalDatabase", "")
 	}
 
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		if err := r.apply(ctx, cfg, resources.CachePVC(cfg)); err != nil {
 			return Result{}, fmt.Errorf("valkey pvc: %w", err)
 		}
@@ -934,10 +934,10 @@ func (r *CostManagementServiceConfigReconciler) applyNetworkPolicies(ctx context
 			resources.ROSAPINetworkPolicy(cfg),
 		)
 	}
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		netpols = append(netpols, resources.CacheNetworkPolicy(cfg))
 	}
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		netpols = append(netpols, resources.DatabaseNetworkPolicy(cfg))
 	}
 	for _, np := range netpols {
