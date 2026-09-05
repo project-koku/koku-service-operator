@@ -7,7 +7,7 @@
 # Options:
 #   --namespace NAME     Target namespace (default: cost-onprem)
 #   --marker EXPR        Pytest marker expression (default: cost_ocp_on_prem)
-#   --timeout SECONDS    Test timeout (default: 14400 / 4 hours)
+#   --timeout SECONDS    Test timeout (default: 5400 / 90 minutes)
 #   --keep-pod           Don't delete the IQE pod after tests
 #   --help               Show this help message
 #
@@ -98,7 +98,7 @@ Options:
     --namespace NAME     Target namespace (default: cost-onprem)
     --marker EXPR        Pytest marker expression (default: cost_ocp_on_prem)
     --filter EXPR        Pytest -k filter expression (overrides skip groups)
-    --timeout SECONDS    Test timeout (default: 14400)
+    --timeout SECONDS    Test timeout (default: 5400)
     --keep-pod           Don't delete the IQE pod after tests
     --clean-sources      Delete existing sources before running tests (default)
     --keep-sources       Keep existing sources (reuse data from previous runs)
@@ -162,6 +162,19 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown option: $1"; show_help; exit 1 ;;
     esac
 done
+
+# Validate IQE_TIMEOUT: must be a positive integer (seconds). In CI it must also stay
+# under the ci-operator step timeout (2h/7200s) or the step is SIGKILLed before this
+# script's poll loop can collect junit/artifacts. We warn rather than hard-clamp so
+# local runs (which have no step cap) can still override for large or debug runs.
+if ! [[ "${IQE_TIMEOUT}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: --timeout/IQE_TIMEOUT must be a positive integer (seconds); got '${IQE_TIMEOUT}'"
+    exit 1
+fi
+if [ "${IQE_TIMEOUT}" -gt 7200 ]; then
+    echo "WARNING: IQE_TIMEOUT=${IQE_TIMEOUT}s exceeds the ci-operator step cap (7200s);"
+    echo "         in CI the step will be SIGKILLed before the poll loop collects artifacts."
+fi
 
 # Apply profile settings if specified (overrides individual SKIP_* defaults)
 if [[ -n "${TEST_PROFILE}" ]]; then
@@ -901,8 +914,16 @@ spec:
       # IQE config; it ignores REQUESTS_CA_BUNDLE). Stage the mounted ingress/router
       # CA bundle there so uploads succeed; otherwise every ingest test fails to upload
       # and then polls "No stats" until the CI step's 2h timeout SIGKILLs the run.
-      cp /etc/pki/tls/certs/ca-bundle.crt /tmp/router-ca.crt 2>/dev/null || \
-        echo "WARNING: could not stage /tmp/router-ca.crt; nise uploads may fail TLS verification"
+      # Fail fast if the CA bundle isn't staged: without it every nise upload fails
+      # TLS verification and each ingest test then polls "No stats" until the step
+      # timeout. Better to exit now (pod -> Failed, poll loop reports it) than burn
+      # the whole timeout on a run that cannot ingest data.
+      if ! cp /etc/pki/tls/certs/ca-bundle.crt /tmp/router-ca.crt; then
+        echo "ERROR: could not stage /tmp/router-ca.crt from the mounted CA bundle"
+        echo "       (/etc/pki/tls/certs/ca-bundle.crt missing or unreadable)."
+        echo "       nise HTTPS uploads would fail TLS verification; failing fast."
+        exit 1
+      fi
 
       echo "Running IQE tests with marker: ${IQE_MARKER}"
       # --force-default-user is required because the cost_onprem config's Jinja templates

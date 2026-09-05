@@ -628,10 +628,10 @@ def _find_db_pod(namespace: str, service_name: str) -> Optional[str]:
 
 @pytest.fixture(scope="session")
 def database_deployed(cluster_config: ClusterConfig) -> bool:
-    """Detect whether the chart deployed a bundled database pod.
+    """Detect whether the operator deployed a bundled database pod.
 
     Returns True for default (bundled) deployments, False for BYOI.
-    Used only by tests that verify chart-created resources (pod exists, service exists).
+    Used only by tests that verify operator-created resources (pod exists, service exists).
     """
     return check_pod_exists(
         cluster_config.namespace, "app.kubernetes.io/component=database"
