@@ -230,6 +230,14 @@ func NameRBACKeycloakSyncConfigMap(cfg *costv1alpha1.CostManagementServiceConfig
 	return cfg.Name + "-rbac-keycloak-sync-script"
 }
 
+func NameRBACSeedPermissionsConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-rbac-seed-permissions"
+}
+
+func NameRBACSeedDefinitionsConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-rbac-seed-definitions"
+}
+
 func NameROSAPI(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-ros-api"
 }

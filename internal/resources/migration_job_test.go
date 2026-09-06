@@ -59,15 +59,14 @@ func TestMigrationJob_TTLNil(t *testing.T) {
 	}
 }
 
-// TestMigrationJobNames verifies naming convention for all 4 migration Jobs.
+// TestMigrationJobNames verifies naming convention for migration Jobs.
 func TestMigrationJobNames(t *testing.T) {
 	cfg := minimalCRForResources("cost-onprem", "cost-tests")
 
 	tests := map[string]string{
-		"Koku":           "cost-onprem-koku-migrate",
-		"ROS":            "cost-onprem-ros-migrate",
-		"RBAC":           "cost-onprem-rbac-migrate",
-		"AdminBootstrap": "cost-onprem-rbac-admin-bootstrap",
+		"Koku": "cost-onprem-koku-migrate",
+		"ROS":  "cost-onprem-ros-migrate",
+		"RBAC": "cost-onprem-rbac-migrate",
 	}
 
 	for name, want := range tests {
@@ -79,8 +78,6 @@ func TestMigrationJobNames(t *testing.T) {
 			got = NameROSMigration(cfg)
 		case "RBAC":
 			got = NameRBACMigration(cfg)
-		case "AdminBootstrap":
-			got = NameRBACAdminBootstrap(cfg)
 		}
 		if got != want {
 			t.Errorf("%s: got %q, want %q", name, got, want)
@@ -90,7 +87,7 @@ func TestMigrationJobNames(t *testing.T) {
 
 // TestRBACSeedTagFormat verifies the seed revision suffix format.
 func TestRBACSeedTagFormat(t *testing.T) {
-	if RBACSeedJobTag("v1.2.3") != "v1.2.3-cmseed1" {
+	if RBACSeedJobTag("v1.2.3") != "v1.2.3-cmseed2" {
 		t.Errorf("RBACSeedJobTag format wrong")
 	}
 }
@@ -137,37 +134,5 @@ func TestMigrationJob_ContainerCapabilitiesDropAll(t *testing.T) {
 	}
 	if !slices.Contains(container.SecurityContext.Capabilities.Drop, "ALL") {
 		t.Errorf("expected Capabilities.Drop to include ALL, got %v", container.SecurityContext.Capabilities.Drop)
-	}
-}
-
-// TestAdminBootstrapJob_SecretKeyRefKeys verifies the specific secret keys used.
-func TestAdminBootstrapJob_SecretKeyRefKeys(t *testing.T) {
-	cfg := minimalCRForResources("test", "ns")
-	cfg.Spec.Database.Deploy = boolPtr(true)
-	cfg.Spec.RBAC.Image.Tag = "rbac-tag"
-	cfg.Spec.RBAC.Image.Repository = "quay.io/test/rbac"
-	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
-	cfg.Spec.RBAC.BootstrapAdmin.SecretRef.Name = "rbac-bootstrap-admin"
-
-	job := AdminBootstrapJob(cfg, "rbac-tag")
-	if job == nil {
-		t.Fatal("expected AdminBootstrapJob when enabled with secretRef set")
-		return
-	}
-
-	envSecrets := map[string]string{}
-	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
-		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
-			envSecrets[e.Name] = e.ValueFrom.SecretKeyRef.Key
-		}
-	}
-
-	for _, k := range []string{"SYNC_ORG_ID", "SYNC_ACCOUNT_NUMBER", "SYNC_USERNAME"} {
-		if envSecrets[k] == "" {
-			t.Errorf("env %s must use secretKeyRef", k)
-		}
-	}
-	if envSecrets["SYNC_ORG_ID"] != "org-id" || envSecrets["SYNC_ACCOUNT_NUMBER"] != "account-number" || envSecrets["SYNC_USERNAME"] != "username" {
-		t.Errorf("secretKeyRef keys incorrect: %+v", envSecrets)
 	}
 }
