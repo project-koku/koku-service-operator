@@ -242,19 +242,6 @@ kubectl -n "$NAMESPACE" create secret generic cost-management-minimal-ui-oauth-c
 Name the Secret `{cr-name}-ui-oauth-client` to match the CR `metadata.name`, or
 set `spec.ui.oauthClientSecretRef`.
 
-## Optional: RBAC bootstrap admin
-
-If you set `spec.rbac.bootstrapAdmin.enabled: true`, also create a Secret
-referenced by `spec.rbac.bootstrapAdmin.secretRef`:
-
-| Key | Required |
-|-----|----------|
-| `org-id` | Yes |
-| `account-number` | Yes |
-| `username` | Yes |
-
-Skip this for a minimal Cost-only start. Leave `enabled` unset/false.
-
 ## Secrets the operator creates (do not pre-create unless you intend to keep them)
 
 These are **create-only**: the operator writes them if absent and never

@@ -32,17 +32,17 @@ with it.
 
 ---
 
-## 4. RBAC migration/bootstrap code provenance
+## 4. RBAC migration/bootstrap code provenance — **resolved (COST-8088)**
 
 **Source:** [general comment](https://github.com/project-koku/koku-service-operator/pull/22#issuecomment-5257084580)
 
-`rbacMigrationScript` and `rbacAdminBootstrapScript` embed 60–130 lines
-of Django ORM Python as Go string literals, executed via
-`manage.py shell <<'HEREDOC'`. This fails the code-provenance question
-an audit asks. Recommended fix: custom Django management commands in
-`insights-rbac`. Long-term: versioned REST/gRPC API. Requires
-`insights-rbac` maintainer buy-in. See [Jordi's comment](https://github.com/project-koku/koku-service-operator/pull/22#issuecomment-5257084580)
-for full analysis including dropped alternatives.
+Previously `rbacMigrationScript` embedded Django ORM Python as Go string literals
+via `manage.py shell` heredocs. **COST-8088** replaced this with embedded
+rbac-config JSON mounted into insights-rbac seed paths and a single
+`manage.py seeds --skip-notifications` in `{cr}-rbac-migrate`. Optional
+`AdminBootstrapJob` was removed (Variant A: `is_org_admin` JWT + public
+**Default admin access** fallback). See
+[`docs/operations/rbac-seed-maintenance.md`](operations/rbac-seed-maintenance.md).
 
 ---
 
