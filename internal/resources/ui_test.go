@@ -24,7 +24,8 @@ func uiTestCfg() *costv1alpha1.CostManagementServiceConfig {
 				Repository: "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
 				Tag:        "v7.6.0",
 			},
-			CookieExpire: "720h",
+			CookieExpire:  "720h",
+			CookieRefresh: "4m",
 		},
 		App: costv1alpha1.UIAppSpec{
 			Image: costv1alpha1.ImageSpec{

@@ -207,6 +207,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 		"--email-domain=*",
 		"--cookie-secure=true",
 		"--cookie-expire=" + spec.OAuthProxy.CookieExpire,
+		"--cookie-refresh=" + spec.OAuthProxy.CookieRefresh,
 		"--provider-ca-file=/etc/keycloak-ca/ca.crt",
 	}
 	// Public Keycloak Routes use the OpenShift router cert, not the service CA

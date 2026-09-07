@@ -145,6 +145,7 @@ metadata:
                 }
               },
               "oauthProxy": {
+                "cookieRefresh": "4m",
                 "image": {
                   "repository": "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
                   "tag": "v7.6.0"
@@ -156,7 +157,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-03T14:07:27Z"
+    createdAt: "2026-09-07T10:43:52Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1

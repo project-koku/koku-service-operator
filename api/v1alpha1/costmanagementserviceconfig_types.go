@@ -599,6 +599,11 @@ type OAuthProxySpec struct {
 	// Cookie session expiration (e.g. "720h").
 	// +kubebuilder:default:="720h"
 	CookieExpire string `json:"cookieExpire,omitempty"`
+	// Interval for silently refreshing the OIDC access token (e.g. "4m").
+	// Must be shorter than the Keycloak accessTokenLifespan so sessions survive
+	// past the first access-token expiry (cost-onprem-chart: ui.oauthProxy.cookie.refresh).
+	// +kubebuilder:validation:Required
+	CookieRefresh string `json:"cookieRefresh"`
 }
 
 type UIAppSpec struct {

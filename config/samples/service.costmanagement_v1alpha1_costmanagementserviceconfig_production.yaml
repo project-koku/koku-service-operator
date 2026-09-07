@@ -204,6 +204,7 @@ spec:
           cpu: 500m
           memory: 512Mi
     oauthProxy:
+      cookieRefresh: "4m"
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
         tag: "v7.6.0"

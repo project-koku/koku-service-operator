@@ -156,6 +156,7 @@ spec:
         repository: quay.io/insights-onprem/koku-ui-onprem
         tag: "2f23c646581028bd385856b6713e6bf367baf953"
     oauthProxy:
+      cookieRefresh: "4m"
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
         tag: "v7.6.0"

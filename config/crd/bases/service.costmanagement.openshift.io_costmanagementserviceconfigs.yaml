@@ -2672,6 +2672,12 @@ spec:
                         default: 720h
                         description: Cookie session expiration (e.g. "720h").
                         type: string
+                      cookieRefresh:
+                        description: |-
+                          Interval for silently refreshing the OIDC access token (e.g. "4m").
+                          Must be shorter than the Keycloak accessTokenLifespan so sessions survive
+                          past the first access-token expiry (cost-onprem-chart: ui.oauthProxy.cookie.refresh).
+                        type: string
                       image:
                         properties:
                           pullPolicy:
@@ -2747,6 +2753,8 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                    required:
+                    - cookieRefresh
                     type: object
                   replicaCount:
                     default: 1
