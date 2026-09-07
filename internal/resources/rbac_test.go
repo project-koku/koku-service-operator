@@ -44,6 +44,29 @@ func TestRBACEnvAPIPathPrefix(t *testing.T) {
 	}
 }
 
+// TestRBACEnvRoleCreateAllowList verifies ROLE_CREATE_ALLOW_LIST is set
+// non-empty. insights-rbac does `get("ROLE_CREATE_ALLOW_LIST", "").split(",")`,
+// so an unset var becomes [""] and the custom-role wizard's
+// GET /permissions/?allowed_only=true returns nothing (COST-8190).
+func TestRBACEnvRoleCreateAllowList(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Name = "cost-onprem"
+	cfg.Namespace = "cost-tests"
+
+	found := false
+	for _, e := range rbacEnv(cfg) {
+		if e.Name == "ROLE_CREATE_ALLOW_LIST" {
+			found = true
+			if e.Value != "cost-management,sources" {
+				t.Fatalf("ROLE_CREATE_ALLOW_LIST = %q, want cost-management,sources", e.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ROLE_CREATE_ALLOW_LIST not set on RBAC env (would evaluate to [\"\"] in insights-rbac)")
+	}
+}
+
 // TestRBACEnvUsesConfiguredCachePort verifies that RBAC pods use the cache
 // port from spec.cache.port rather than a hardcoded 6379. Users running
 // Redis/Valkey on a non-default port would silently get the wrong connection.
