@@ -37,7 +37,7 @@ Custom koku build (feature branch on Apple Silicon):
 docker build --platform linux/arm64 -t default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag .
 ./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag
 # patch spec.costManagement.api/masu.image in the CR, then:
-oc delete job -n cost-onprem -l job-name=cost-management-koku-migrate --ignore-not-found
+oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 ```
 
 ## Prerequisites
@@ -131,8 +131,11 @@ oc describe cmsc cost-management -n cost-onprem
 ### Do you need Kafka on CRC?
 
 **No** for koku-only API tests (e.g. async source create). Kafka is required for
-the listener and SaaS-style event paths. The minimal sample sets `listener.replicas: 0`.
-`KafkaReady` may stay False — that is expected.
+the listener and SaaS-style event paths. The minimal sample does **not** disable
+the listener: the operator treats `listener.replicas: 0` (and `auth.envoy.replicas: 0`)
+as **2** replicas (`internal/resources/koku.go`, `envoy.go`). Without a reachable
+Kafka bootstrap, listener pods may **CrashLoopBackOff** and `KafkaReady` stays
+False — that is expected for API/celery-only smoke tests.
 
 If you do deploy Kafka on CRC, use smaller PVCs and enable Strimzi node pools:
 
@@ -206,6 +209,8 @@ CRC's default storage class is `crc-csi-hostpath-provisioner`. Leave
 | Kafka pods never created | Missing `strimzi.io/node-pools: enabled` | Fixed in `deploy-kafka.sh` |
 | BYOI CR `Progressing`, no pods | External DB/Kafka hosts don't exist | Delete stale CRs; use bundled or minimal sample |
 | `StorageReady` False | No S3/ODF on CRC | Expected for minimal dev; koku may still run migrations |
+| Listener `CrashLoopBackOff` / `Available=False` | No Kafka on CRC minimal sample | Expected; koku API/celery can still run migrations and serve API |
+| Migrate job not deleted after image patch | Wrong Job label selector | `oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found` |
 | Deployment still on old image after CR patch | Operator did not roll image | `oc set image deploy/... *=<new-image>` or delete Deployment |
 
 Legacy fixes (already in operator):

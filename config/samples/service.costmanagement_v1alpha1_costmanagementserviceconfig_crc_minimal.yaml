@@ -1,8 +1,10 @@
 # CRC minimal sample — bundled DB/cache + koku API/celery only.
 #
-# Use this for koku/operator dev on OpenShift Local (Apple Silicon). Skips ROS,
-# UI, Keycloak, and Kafka deployment. KafkaReady/AuthenticationReady/UIReady
-# stay False; koku migrations and API pods can still run.
+# Use this for koku/operator dev on OpenShift Local (Apple Silicon). Skips ROS
+# and Kafka deployment. Does not disable listener or auth envoy: replicas 0 is
+# remapped to 2 by the operator; without Kafka those pods may CrashLoopBackOff.
+# KafkaReady/AuthenticationReady/UIReady may stay False; koku migrations and
+# API/celery pods can still run.
 #
 # Apply after ./hack/deploy-crc.sh and NAMESPACE=cost-onprem make run:
 #   oc apply -n cost-onprem -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
@@ -54,8 +56,6 @@ spec:
         repository: quay.io/martin_povolny/koku
         tag: "latest"
       replicas: 1
-    listener:
-      replicas: 0
     celery:
       workers:
         default:
@@ -90,8 +90,6 @@ spec:
       tag: "master"
 
   auth:
-    envoy:
-      replicas: 0
     keycloak:
       url: "https://keycloak.keycloak.svc.cluster.local"
       realm: kubernetes
