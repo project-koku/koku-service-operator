@@ -3,11 +3,49 @@
 CRC provides a single-node OpenShift cluster for local development. The
 operator runs locally (out-of-cluster) and talks to CRC via kubeconfig.
 
+**Scope:** use CRC for **operator + koku API/celery** iteration. For full UI,
+Kafka, Keycloak, and nginx timeout E2E, prefer [clusterbot.md](clusterbot.md).
+
+## Quick start (minimal koku-only)
+
+Two terminals, one step at a time:
+
+```bash
+# 0. Preflight (every new shell)
+export KUBECONFIG=${HOME}/.crc/machines/crc/kubeconfig
+oc get --raw /healthz   # must print: ok
+
+# 1. Bootstrap CRD/RBAC (once per CRC restart)
+make crc-dev CRC_NAMESPACE=cost-onprem
+
+# 2. Build + push operator image (init containers need a real image in-cluster)
+make crc-operator-image CRC_NAMESPACE=cost-onprem
+
+# 3. Terminal A — operator
+NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev make run
+
+# 4. Terminal B — minimal CR (bundled DB/cache; no UI/Kafka/Keycloak)
+oc apply -n cost-onprem \
+  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
+
+oc get pods -n cost-onprem -w
+```
+
+Custom koku build (feature branch on Apple Silicon):
+
+```bash
+docker build --platform linux/arm64 -t default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag .
+./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag
+# patch spec.costManagement.api/masu.image in the CR, then:
+oc delete job -n cost-onprem -l job-name=cost-management-koku-migrate --ignore-not-found
+```
+
 ## Prerequisites
 
 - CRC installed (`brew install --cask crc` or from [developers.redhat.com](https://developers.redhat.com/products/openshift-local))
 - Pull secret at `~/.crc-secret.json` (download from Red Hat console)
 - `oc` CLI available (CRC ships one at `~/.crc/bin/oc/oc`)
+- `skopeo` for pushing images (`brew install skopeo`)
 
 ## Start CRC
 
@@ -26,14 +64,24 @@ If the cluster becomes unreachable after being left running for a long time,
 restart it:
 
 ```bash
+crc stop && sleep 30 && crc start -p ~/.crc-secret.json
+export KUBECONFIG=${HOME}/.crc/machines/crc/kubeconfig
+oc get --raw /healthz
+```
+
+Nuclear option (loses cluster state):
+
+```bash
 pkill -f vfkit; pkill -f "crc daemon"
 crc delete --force && crc setup && crc start -p ~/.crc-secret.json
 ```
 
 ## Log in
 
+`eval "$(crc oc-env)"` may not export `KUBECONFIG` on all shells. Prefer:
+
 ```bash
-eval "$(crc oc-env)"
+export KUBECONFIG=${HOME}/.crc/machines/crc/kubeconfig
 crc console --credentials          # prints kubeadmin password
 
 oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
@@ -45,50 +93,23 @@ oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
 ```bash
 ./hack/deploy-dev.sh cost-onprem
 # Alias (same script): ./hack/deploy-crc.sh cost-onprem
+# or: make crc-dev CRC_NAMESPACE=cost-onprem
 ```
 
-This script installs the CRD and OwnNamespace RBAC: `manager-role` via a
-**RoleBinding** in the target namespace, plus `manager-cluster-role` via a
-**ClusterRoleBinding** (StorageClass/Ingress discovery, ConsoleLink, Kruize,
-narrow NooBaa `noobaa-admin` Secret get). Run it once per CRC restart.
-
-Alternatively, do it manually:
-
-```bash
-oc new-project cost-onprem
-make install   # regenerates manifests and applies CRDs via config/crd kustomize
-oc apply -f config/rbac/role.yaml
-oc apply -f config/rbac/cluster_access_role.yaml
-oc create rolebinding koku-operator-dev \
-  --clusterrole=manager-role \
-  --serviceaccount=cost-onprem:default \
-  -n cost-onprem
-oc create clusterrolebinding koku-operator-dev-cluster \
-  --clusterrole=manager-cluster-role \
-  --serviceaccount=cost-onprem:default
-oc adm policy add-scc-to-user anyuid -z default -n cost-onprem
-```
+This script installs the CRD and OwnNamespace RBAC. Run it once per CRC restart.
 
 ## Run the operator
 
-OwnNamespace requires a watch namespace. Prefer `NAMESPACE=… IMG=… make run`
-(`make run` passes `--dev` and `--operator-image=$(IMG)`):
+`--operator-image` is **required** for wait-for init containers. The tag
+`quay.io/project-koku/koku-service-operator:v0.0.1` is **not** published — build
+and push to the CRC internal registry instead:
 
 ```bash
-NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make run
-# or:
-NAMESPACE=cost-onprem go run ./cmd/main.go --dev \
-  --operator-image=quay.io/project-koku/koku-service-operator:v0.0.1 \
-  --health-probe-bind-address=:8082 \
-  --metrics-bind-address=:8083
+make crc-operator-image CRC_NAMESPACE=cost-onprem
+NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev make run
 ```
 
-`--dev` skips admission webhook registration (no TLS certs needed on the
-laptop). `--operator-image` is **required** for wait-for init containers.
-
-The operator reads `~/.kube/config` (set by `eval "$(crc oc-env)"`) and
-restricts its informer cache to the `cost-onprem` namespace. See
-[ownnamespace.md](ownnamespace.md).
+`--dev` skips admission webhook registration (no TLS certs needed on the laptop).
 
 **Cluster Bot / remote OpenShift:** do not use `make run` with BYOI
 `*.svc.cluster.local` hosts — use [clusterbot.md](clusterbot.md) /
@@ -96,95 +117,101 @@ restricts its informer cache to the `cost-onprem` namespace. See
 
 ## Apply a sample CR
 
-In a second terminal:
+| Goal | Sample |
+|------|--------|
+| Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
+| Full bundled stack (needs Kafka, Keycloak, S3, UI secrets) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| BYOI smoke | `config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml` |
 
 ```bash
-eval "$(crc oc-env)"
-
-# Bundled mode (DB + Cache provisioned by operator — dev only)
-oc apply -n cost-onprem \
-  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
-
-# Alternative sample with public images:
-# oc apply -n cost-onprem \
-#   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
-
-# Watch reconciliation
 oc get cmsc -n cost-onprem -w
 oc describe cmsc cost-management -n cost-onprem
+```
+
+### Do you need Kafka on CRC?
+
+**No** for koku-only API tests (e.g. async source create). Kafka is required for
+the listener and SaaS-style event paths. The minimal sample sets `listener.replicas: 0`.
+`KafkaReady` may stay False — that is expected.
+
+If you do deploy Kafka on CRC, use smaller PVCs and enable Strimzi node pools:
+
+```bash
+STORAGE_CLASS=crc-csi-hostpath-provisioner CRC=1 \
+  KAFKA_BROKER_STORAGE=20Gi KAFKA_CONTROLLER_STORAGE=20Gi \
+  ./config/samples/byoi/deploy-kafka.sh
+```
+
+The deploy script sets `strimzi.io/node-pools: enabled` on the Kafka CR.
+
+### Push images to the CRC registry
+
+Direct `docker push` to the registry Route often fails TLS verification on macOS.
+Use the helper script (port-forward + skopeo):
+
+```bash
+./hack/push-image-crc.sh <host>/<namespace>/<image>:<tag>
 ```
 
 ### UI OAuth client Secret (Keycloak stays external)
 
 Bundled DB/cache does **not** include Keycloak. The UI needs a same-namespace
-Secret with keys `client-id` and `client-secret` (default name
-`{cr}-ui-oauth-client`). Until it exists, condition `UIReady` stays False and
-the UI Deployment is not applied. Cookie Secret is operator-created.
-
-```bash
-# After deploy-rhbk.sh (or equivalent) has created
-# keycloak-client-secret-cost-management-ui in the keycloak namespace:
-NAMESPACE=cost-onprem CR_NAME=cost-management \
-  ./config/samples/byoi/mirror-ui-oauth-secret.sh
-```
-
-Align RHBK redirect URIs with the UI host **before** expecting login to work:
-
-```bash
-export COST_MGMT_NAMESPACE=cost-onprem   # CR namespace
-export COST_MGMT_RELEASE_NAME=cost-management
-# or: export COST_MGMT_UI_BASE_URL=https://cost-management-ui-cost-onprem.apps.crc.testing
-```
-
-For RHBK Route TLS/OIDC, also set `spec.auth.keycloak.issuerURL` to the public
-issuer (`iss`) and either `spec.auth.keycloak.tls.caCertSecretName` or
-`insecureSkipVerify` as needed for JWKS fetch.
-
-Set `ui.app.image` and `ui.oauthProxy.image` (repository **and** tag on each).
-The operator does not default either field. See the sample CRs and
-[pre-prod-install.md](pre-prod-install.md).
+Secret with keys `client-id` and `client-secret`. Until it exists, `UIReady`
+stays False. The **minimal CRC sample** sets `ui.replicaCount: 0` to skip UI.
 
 ## Image note: arm64 vs amd64
 
-CRC on Apple Silicon runs an **arm64** node. The production koku image
-(`quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:768be82`) is
-**amd64-only** and segfaults under QEMU emulation.
+CRC on Apple Silicon runs an **arm64** node. Konflux koku images are often
+**amd64-only** and crash with `Illegal instruction` or segfault.
 
-Use the local arm64 build for testing:
+Use an arm64 build:
 
 ```yaml
 costManagement:
   api:
     image:
-      repository: quay.io/martin_povolny/koku
+      repository: quay.io/martin_povolny/koku   # arm64 community build
       tag: "latest"
 ```
 
-The bundled sample CR (`config/samples/..._costmanagementserviceconfig.yaml`)
-already uses this image.
+When building locally: `docker build --platform linux/arm64 …`
 
-For **clusterbot / typical OpenShift** (amd64 nodes), do the opposite: build
-and push the operator with `--platform linux/amd64` and use amd64 app images
-from the BYOI sample. See [pre-prod-install.md](pre-prod-install.md).
+For **clusterbot / typical OpenShift** (amd64 nodes), build with
+`--platform linux/amd64`. See [pre-prod-install.md](pre-prod-install.md).
 
 ## Storage class
 
-CRC's default storage class is `crc-csi-hostpath-provisioner`. The production
-sample CR defaults to `ocs-storagecluster-ceph-rbd` (ODF). For CRC, leave
-`global.storageClass` empty or set it explicitly:
+CRC's default storage class is `crc-csi-hostpath-provisioner`. Leave
+`global.storageClass` empty in the CR.
 
-```yaml
-global:
-  storageClass: ""   # uses cluster default (crc-csi-hostpath-provisioner)
-```
+## CRC vs cluster-bot
+
+| | CRC (local) | Cluster-bot |
+|--|-------------|-------------|
+| Best for | Operator dev, koku API/celery smoke | Full stack, amd64, UI/nginx E2E |
+| arm64 Mac | Build/push arm64 images yourself | Uses amd64 nodes |
+| Setup time | High first time; fragile under load | Queue + automated BYOI |
+| Kafka/UI | Optional / skip with minimal sample | Usually included |
 
 ## Common issues
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `TLS handshake timeout` | CRC cluster hung under load | Restart CRC |
-| `Permission denied` on PVC mount | fsGroup not set | `anyuid` SCC already granted by deploy-dev.sh; check `fsGroup` in pod SC |
-| `No module named listener` | Wrong container command | Fixed — uses `python manage.py listener` |
-| `Unable to configure handler 'file'` | Django file log handler on read-only FS | Fixed — `kokuAppContainerSC()` does not set `readOnlyRootFilesystem` |
-| Migration segfault | amd64 image on arm64 node | Use arm64 image (see above) |
-| BYOI probes fail under `make run` | `*.svc` not resolvable from laptop | Use [pre-prod-install.md](pre-prod-install.md) / `deploy-incluster.sh` |
+| `TLS handshake timeout` | CRC hung under load | `crc stop && crc start`; wait for `oc get --raw /healthz` → `ok` |
+| `Missing or incomplete configuration` | `KUBECONFIG` not set | `export KUBECONFIG=$HOME/.crc/machines/crc/kubeconfig` |
+| `ImagePullBackOff` on init container | `--operator-image` points to missing Quay tag | `make crc-operator-image` |
+| `Illegal instruction` on migrate | amd64 koku image on arm64 CRC | arm64 image; `docker build --platform linux/arm64` |
+| Registry push TLS / EOF | Route cert / podman VM networking | `./hack/push-image-crc.sh` |
+| Kafka brokers `Pending` forever | 100Gi PVC on CRC disk | `KAFKA_BROKER_STORAGE=20Gi` + `CRC=1` |
+| Kafka pods never created | Missing `strimzi.io/node-pools: enabled` | Fixed in `deploy-kafka.sh` |
+| BYOI CR `Progressing`, no pods | External DB/Kafka hosts don't exist | Delete stale CRs; use bundled or minimal sample |
+| `StorageReady` False | No S3/ODF on CRC | Expected for minimal dev; koku may still run migrations |
+| Deployment still on old image after CR patch | Operator did not roll image | `oc set image deploy/... *=<new-image>` or delete Deployment |
+
+Legacy fixes (already in operator):
+
+| Symptom | Fix |
+|---------|-----|
+| `No module named listener` | Uses `python manage.py listener` |
+| Django file log on read-only FS | `readOnlyRootFilesystem` not set on koku pods |
+| BYOI probes fail under `make run` | `*.svc` not resolvable from laptop — use cluster-bot |
