@@ -53,6 +53,13 @@ func rbacEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
 		EnvVal("DJANGO_LOG_FORMATTER", "simple"),
 		EnvVal("DJANGO_LOG_HANDLERS", "console"),
 		EnvVal("ACCESS_CACHE_ENABLED", "True"),
+		// Applications whose permissions may back custom roles. insights-rbac
+		// parses this as `os.environ.get("ROLE_CREATE_ALLOW_LIST", "").split(",")`,
+		// so leaving it unset yields [""], which makes the custom-role wizard's
+		// GET /permissions/?allowed_only=true return nothing (empty Application
+		// filter). Seed data ships permissions/roles for cost-management and
+		// sources only, so those are the meaningful entries on-prem.
+		EnvVal("ROLE_CREATE_ALLOW_LIST", "cost-management,sources"),
 	}
 	if cfg.Spec.Cache.Auth.Enabled && cfg.Spec.Cache.Auth.SecretName != "" {
 		env = append(env,

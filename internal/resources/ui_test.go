@@ -24,7 +24,8 @@ func uiTestCfg() *costv1alpha1.CostManagementServiceConfig {
 				Repository: "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
 				Tag:        "v7.6.0",
 			},
-			CookieExpire: "720h",
+			CookieExpire:  "720h",
+			CookieRefresh: "4m",
 		},
 		App: costv1alpha1.UIAppSpec{
 			Image: costv1alpha1.ImageSpec{
@@ -90,6 +91,19 @@ func TestUIDeploymentOAuthProxyHonorsInsecureSkipVerify(t *testing.T) {
 	proxySecure := containerByName(t, depSecure.Spec.Template.Spec.Containers, "oauth-proxy")
 	if slices.Contains(proxySecure.Args, skipVerifyArg) {
 		t.Fatal("oauth-proxy must not set --ssl-insecure-skip-verify when insecureSkipVerify=false")
+	}
+}
+
+// TestUIDeploymentOAuthProxyCookieRefresh verifies oauth2-proxy is told to
+// refresh the Keycloak access token before it expires. Without --cookie-refresh
+// the expired ~5m token is forwarded to Envoy, which 401s, and the RBAC UI
+// reload-loops instead of re-authenticating (COST-8202).
+func TestUIDeploymentOAuthProxyCookieRefresh(t *testing.T) {
+	cfg := uiTestCfg()
+	cfg.Spec.UI.OAuthProxy.CookieRefresh = "3m"
+	proxy := containerByName(t, UIDeployment(cfg).Spec.Template.Spec.Containers, "oauth-proxy")
+	if !slices.Contains(proxy.Args, "--cookie-refresh=3m") {
+		t.Fatalf("oauth-proxy args missing --cookie-refresh=3m\ngot %q", proxy.Args)
 	}
 }
 
