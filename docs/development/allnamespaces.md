@@ -23,7 +23,10 @@ both use AllNamespaces. Do not add OperatorConditions. Do not set
 ## RBAC shape
 
 - **`manager-role` + ClusterRoleBinding** — namespace-scoped kinds (Secrets,
-  Jobs, Deployments, CMSC, …) in **every** namespace.
+  Jobs, Deployments, CMSC, …) in **every** namespace. That a CMSC outside the
+  operator's own namespace actually reconciles (the reason a ClusterRoleBinding
+  is needed over a namespaced RoleBinding) is exercised by the cross-namespace
+  envtest in `internal/controller/cross_namespace_test.go`.
 - **`manager-cluster-role` + ClusterRoleBinding** — the cluster exceptions
   above (including `storageclasses` `get;list;watch`, and `secrets` get with
   `resourceNames: [noobaa-admin]`). Not a blanket extra Secrets grant beyond
@@ -97,8 +100,11 @@ in `internal/controller/rbac_manifest_test.go` so the grant cannot silently wide
 ## Local / CRC (out-of-cluster)
 
 Works when the CR uses addresses reachable from your laptop (bundled DB/cache
-on CRC, or port-forwards). `make run` pins the cache with `NAMESPACE` so a
-laptop does not list the whole cluster:
+on CRC, or port-forwards). A laptop run **must** pin the cache with `NAMESPACE`
+(or `WATCH_NAMESPACE`) so it does not list the whole cluster through your
+kubeconfig. The manager **fails closed** here: out-of-cluster with neither set,
+it refuses to start rather than defaulting to AllNamespaces — so the bare
+`go run …` form needs the pin too, not just the `make run` wrapper.
 
 ```bash
 ./hack/deploy-dev.sh cost-onprem   # alias: ./hack/deploy-crc.sh
@@ -106,9 +112,9 @@ NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make
 # or: NAMESPACE=… go run ./cmd/main.go --dev --operator-image=…
 ```
 
-In-cluster, omit `WATCH_NAMESPACE` (empty = watch all). Do not inject
-`NAMESPACE` from the pod SA file as a watch pin — that would turn AllNamespaces
-into OwnNamespace.
+In-cluster, omit `WATCH_NAMESPACE` (empty = watch all — the fail-closed guard
+applies only out-of-cluster). Do not inject `NAMESPACE` from the pod SA file as
+a watch pin — that would turn AllNamespaces into OwnNamespace.
 
 ## In-cluster (BYOI / Cluster Bot / pre-prod)
 
