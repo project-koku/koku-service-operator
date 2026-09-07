@@ -2672,6 +2672,14 @@ spec:
                         default: 720h
                         description: Cookie session expiration (e.g. "720h").
                         type: string
+                      cookieRefresh:
+                        default: 4m
+                        description: |-
+                          How often oauth2-proxy refreshes the access token from Keycloak using the
+                          refresh token (e.g. "4m"). Must be shorter than the Keycloak access-token
+                          lifespan (default 5m); otherwise oauth2-proxy forwards an expired token to
+                          Envoy, which returns 401 and the RBAC UI reload-loops. Chart parity: "4m".
+                        type: string
                       image:
                         properties:
                           pullPolicy:

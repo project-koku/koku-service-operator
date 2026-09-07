@@ -207,6 +207,11 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 		"--email-domain=*",
 		"--cookie-secure=true",
 		"--cookie-expire=" + spec.OAuthProxy.CookieExpire,
+		// Refresh the access token from Keycloak in the background before it
+		// expires. Without this, oauth2-proxy keeps forwarding the expired
+		// ~5m Keycloak token to Envoy, which 401s, and the RBAC UI reload-
+		// loops instead of re-authenticating (COST-8202).
+		"--cookie-refresh=" + spec.OAuthProxy.CookieRefresh,
 		"--provider-ca-file=/etc/keycloak-ca/ca.crt",
 	}
 	// Public Keycloak Routes use the OpenShift router cert, not the service CA
