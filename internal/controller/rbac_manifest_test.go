@@ -174,7 +174,14 @@ func TestManagerRole_GrantsObjectBucketClaimGetList(t *testing.T) {
 	assertObjectBucketClaimGetList(t, "CSV clusterPermissions", csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions))
 }
 
-func TestManagerRole_StillGrantsNamespacedSecrets(t *testing.T) {
+// TestManagerRole_SecretsNoListWatch pins the AllNamespaces least-privilege
+// contract: the cluster-wide ClusterRoleBinding grants get + CRUD on unnamed
+// Secrets (needed to manage operands in any CMSC namespace) but NOT list or
+// watch. Without list/watch a compromised operator cannot enumerate or stream
+// Secret contents cluster-wide — it must already know a name. This depends on
+// the manager not running a Secret informer (no Owns(&corev1.Secret{}); cache
+// DisableFor Secret — see cmd/main.go and SetupWithManager).
+func TestManagerRole_SecretsNoListWatch(t *testing.T) {
 	var cr rbacv1.ClusterRole
 	decodeYAMLFile(t, rbacManifestPath(t, "role.yaml"), &cr)
 	if cr.Name != "manager-role" {
@@ -182,14 +189,138 @@ func TestManagerRole_StillGrantsNamespacedSecrets(t *testing.T) {
 	}
 	var foundSecrets bool
 	for _, rule := range cr.Rules {
-		for _, res := range rule.Resources {
-			if res == "secrets" && len(rule.ResourceNames) == 0 {
-				foundSecrets = true
+		if len(rule.ResourceNames) != 0 || !slices.Contains(rule.Resources, "secrets") {
+			continue
+		}
+		foundSecrets = true
+		for _, v := range rule.Verbs {
+			if v == "list" || v == "watch" {
+				t.Errorf("manager-role unnamed secrets rule must not include %q (no cluster-wide Secret enumeration): %+v", v, rule)
+			}
+		}
+		for _, want := range []string{"get", "create", "update", "patch", "delete"} {
+			if !slices.Contains(rule.Verbs, want) {
+				t.Errorf("manager-role unnamed secrets rule missing verb %q: %+v", want, rule)
 			}
 		}
 	}
 	if !foundSecrets {
-		t.Fatal("manager-role must still list unnamed secrets (AllNamespaces ClusterRoleBinding)")
+		t.Fatal("manager-role must grant get+CRUD on unnamed secrets (AllNamespaces ClusterRoleBinding)")
+	}
+
+	// OLM installs from the CSV. AllNamespaces binds manager-role cluster-wide,
+	// so the unnamed-secrets rule lands in clusterPermissions and must carry the
+	// same no-list/watch guarantee.
+	var csv olmCSVInstallPermissions
+	decodeYAMLFile(t, bundleCSVPath(t), &csv)
+	for _, rule := range csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions) {
+		if len(rule.ResourceNames) != 0 || !slices.Contains(rule.Resources, "secrets") {
+			continue
+		}
+		for _, v := range rule.Verbs {
+			if v == "list" || v == "watch" {
+				t.Errorf("CSV clusterPermissions unnamed secrets rule must not include %q: %+v", v, rule)
+			}
+		}
+	}
+}
+
+// verbSet returns the union of verbs granted on an exact (group, resource) pair
+// across rules with no resourceNames restriction.
+func verbSet(rules []rbacv1.PolicyRule, group, resource string) map[string]bool {
+	out := map[string]bool{}
+	for _, rule := range rules {
+		if len(rule.ResourceNames) != 0 {
+			continue
+		}
+		if !slices.Contains(rule.APIGroups, group) || !slices.Contains(rule.Resources, resource) {
+			continue
+		}
+		for _, v := range rule.Verbs {
+			out[v] = true
+		}
+	}
+	return out
+}
+
+// assertExactVerbs fails if group/resource is absent, missing a wanted verb, or
+// carries any verb beyond want. Exact matching is the point: a widened grant
+// (an added list/watch/update) must break the build, not slip through.
+func assertExactVerbs(t *testing.T, source, group, resource string, rules []rbacv1.PolicyRule, want ...string) {
+	t.Helper()
+	got := verbSet(rules, group, resource)
+	if len(got) == 0 {
+		t.Fatalf("%s: no rule grants %s/%s", source, group, resource)
+	}
+	wantSet := map[string]bool{}
+	for _, w := range want {
+		wantSet[w] = true
+		if !got[w] {
+			t.Errorf("%s: %s/%s missing verb %q (want exactly %v)", source, group, resource, w, want)
+		}
+	}
+	for g := range got {
+		if !wantSet[g] {
+			t.Errorf("%s: %s/%s has unexpected verb %q (want exactly %v)", source, group, resource, g, want)
+		}
+	}
+}
+
+// assertNoGrant fails if any rule grants the exact (group, resource) pair.
+func assertNoGrant(t *testing.T, source, group, resource string, rules []rbacv1.PolicyRule) {
+	t.Helper()
+	for _, rule := range rules {
+		if slices.Contains(rule.APIGroups, group) && slices.Contains(rule.Resources, resource) {
+			t.Errorf("%s must not grant %s/%s (no code path constructs one): %+v", source, group, resource, rule)
+		}
+	}
+}
+
+// TestManagerRole_TierAGrantsTrimmed locks the Tier A attack-surface trims,
+// checked in role.yaml AND the CSV clusterPermissions (what OLM actually
+// installs — a rule silently missing from the CSV must still fail):
+//
+//   - roles/rolebindings: no grant at all. Nothing constructs a namespaced Role
+//     or RoleBinding; under the cluster-wide ClusterRoleBinding this would be an
+//     unused escalation primitive (mint bindings in any namespace).
+//   - servicemonitors/prometheusrules: Server-Side Apply + delete only, so
+//     create;delete;get;patch — no list;watch (no cluster-wide enumeration) and
+//     no update (SSA uses patch).
+//   - costmanagementserviceconfigs (the owned CR): watched via For() and Updated
+//     only to toggle the finalizer, so get;list;watch;update. Users create,
+//     delete, and edit the CR — the operator does not.
+func TestManagerRole_TierAGrantsTrimmed(t *testing.T) {
+	var cr rbacv1.ClusterRole
+	decodeYAMLFile(t, rbacManifestPath(t, "role.yaml"), &cr)
+	if cr.Name != "manager-role" {
+		t.Fatalf("manager role name: got %q", cr.Name)
+	}
+
+	var csv olmCSVInstallPermissions
+	decodeYAMLFile(t, bundleCSVPath(t), &csv)
+	csvRules := csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions)
+	if len(csvRules) == 0 {
+		t.Fatal("CSV clusterPermissions empty (unmarshal failed or field moved)")
+	}
+
+	for _, tc := range []struct {
+		source string
+		rules  []rbacv1.PolicyRule
+	}{
+		{"manager-role", cr.Rules},
+		{"CSV clusterPermissions", csvRules},
+	} {
+		// A1: no namespaced roles/rolebindings grant. (clusterroles/
+		// clusterrolebindings are separate exact strings and stay — Kruize.)
+		assertNoGrant(t, tc.source, "rbac.authorization.k8s.io", "roles", tc.rules)
+		assertNoGrant(t, tc.source, "rbac.authorization.k8s.io", "rolebindings", tc.rules)
+
+		// A2: monitoring kinds are SSA-applied — no list/watch/update.
+		assertExactVerbs(t, tc.source, "monitoring.coreos.com", "servicemonitors", tc.rules, "create", "delete", "get", "patch")
+		assertExactVerbs(t, tc.source, "monitoring.coreos.com", "prometheusrules", tc.rules, "create", "delete", "get", "patch")
+
+		// A3: the owned CR — watch + finalizer Update only.
+		assertExactVerbs(t, tc.source, "service.costmanagement.openshift.io", "costmanagementserviceconfigs", tc.rules, "get", "list", "watch", "update")
 	}
 }
 

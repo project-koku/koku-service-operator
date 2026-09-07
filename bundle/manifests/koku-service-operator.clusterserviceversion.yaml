@@ -156,7 +156,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-05T18:20:36Z"
+    createdAt: "2026-09-07T14:25:00Z"
     operatorframework.io/suggested-namespace: cost-onprem
     operatorframework.io/suggested-namespace-template: |-
       {
@@ -246,7 +246,6 @@ spec:
           resources:
           - configmaps
           - persistentvolumeclaims
-          - secrets
           - serviceaccounts
           - services
           verbs:
@@ -272,6 +271,16 @@ spec:
           - get
           - list
           - watch
+        - apiGroups:
+          - ""
+          resources:
+          - secrets
+          verbs:
+          - create
+          - delete
+          - get
+          - patch
+          - update
         - apiGroups:
           - apps
           resources:
@@ -307,10 +316,7 @@ spec:
           - create
           - delete
           - get
-          - list
           - patch
-          - update
-          - watch
         - apiGroups:
           - networking.k8s.io
           resources:
@@ -330,19 +336,6 @@ spec:
           verbs:
           - get
           - list
-        - apiGroups:
-          - rbac.authorization.k8s.io
-          resources:
-          - rolebindings
-          - roles
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
         - apiGroups:
           - route.openshift.io
           resources:
@@ -366,11 +359,8 @@ spec:
           resources:
           - costmanagementserviceconfigs
           verbs:
-          - create
-          - delete
           - get
           - list
-          - patch
           - update
           - watch
         - apiGroups:

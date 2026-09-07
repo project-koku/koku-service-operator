@@ -29,3 +29,15 @@ This must return nothing. If it does, the marker belongs in
 
 CI also locks this via `TestManagerRole_NoClusterScopedResources` in
 `internal/controller/rbac_manifest_test.go`.
+
+## Secrets: get + CRUD, never list/watch
+
+The `secrets` marker is kept **separate** from the other core kinds and grants
+`get;create;update;patch;delete` only — **no `list`, no `watch`**. Under the
+cluster-wide ClusterRoleBinding, `list`/`watch` on Secrets would let a
+compromised operator enumerate every Secret in the cluster. The manager runs no
+Secret informer (no `Owns(&corev1.Secret{})`; cache `DisableFor` Secret in
+`cmd/main.go`), so it never needs them. Do not fold `secrets` back into the
+`services;configmaps;…` marker (that would re-add `list;watch`).
+
+CI locks this via `TestManagerRole_SecretsNoListWatch`.

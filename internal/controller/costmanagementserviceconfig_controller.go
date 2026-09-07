@@ -81,19 +81,35 @@ type CostManagementServiceConfigReconciler struct {
 	Recorder  record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=service.costmanagement.openshift.io,resources=costmanagementserviceconfigs,verbs=get;list;watch;create;update;patch;delete
+// CostManagementServiceConfig (the owned CR): watched via For(); Update is used
+// only to add/remove the finalizer. Users create/delete the CR, not the
+// operator, so no create;delete;patch. Status/finalizers are separate rules.
+// +kubebuilder:rbac:groups=service.costmanagement.openshift.io,resources=costmanagementserviceconfigs,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=service.costmanagement.openshift.io,resources=costmanagementserviceconfigs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=service.costmanagement.openshift.io,resources=costmanagementserviceconfigs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs;cronjobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core,resources=services;configmaps;secrets;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services;configmaps;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// Secrets: get-by-name + CRUD only, deliberately NO list;watch. The manager
+// never enumerates or watches Secrets cluster-wide: Owns(&corev1.Secret{}) is
+// not registered and the client cache DisableFor's Secret, so every Secret read
+// is a direct Get by known name in a CMSC namespace. Under AllNamespaces this
+// keeps a compromised operator from harvesting Secret contents in any namespace.
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;create;update;patch;delete
 // Pods: read-only for syncManagedPodRestarts (CostManagementPodRestarting gauge).
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
+// ServiceMonitors/PrometheusRules: applied via Server-Side Apply (patch, or
+// create when absent) and deleted on monitoring-disable. Never Owns()'d and
+// never List'd/Get'd through the cache, so no list;watch (no cluster-wide
+// enumeration) and no update (SSA uses patch).
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;prometheusrules,verbs=create;delete;get;patch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create
-// Namespace-scoped RBAC objects (Role + RoleBinding) — granted via ClusterRoleBinding (AllNamespaces).
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+// No roles/rolebindings grant: the operator constructs no namespaced Role or
+// RoleBinding. Under a cluster-wide ClusterRoleBinding, roles;rolebindings
+// create/update would be an escalation primitive (mint bindings in any
+// namespace) with no code path behind it. Kruize's cluster-scoped RBAC lives in
+// cluster_access_role.yaml. Re-add here only if a namespaced Role is introduced.
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // ObjectBucketClaims: namespaced Get/List during reconcile (findBoundOBC), not a watcher.
@@ -1665,7 +1681,12 @@ func (r *CostManagementServiceConfigReconciler) SetupWithManager(mgr ctrl.Manage
 		Owns(&batchv1.CronJob{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
-		Owns(&corev1.Secret{}).
+		// Secret is intentionally NOT Owns()'d: a cluster-wide Secret informer
+		// would require list;watch on Secrets in every namespace. ensureSecret
+		// already never overwrites existing Secrets, so the only capability lost
+		// is immediate recreation of a *deleted* operator Secret — recovered on
+		// the next CMSC reconcile or the manager SyncPeriod (see cmd/main.go).
+		// Secret reads go direct via the API server (cache DisableFor Secret).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&networkingv1.NetworkPolicy{}).

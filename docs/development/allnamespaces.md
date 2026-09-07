@@ -30,8 +30,69 @@ both use AllNamespaces. Do not add OperatorConditions. Do not set
   `manager-role`.
 - Leader election stays a namespaced RoleBinding in the operator install NS.
 
-Follow-up: bind operands with a RoleBinding in each CMSC namespace instead of
-cluster-wide `manager-role` (keep cluster-wide CMSC get/list/watch/status).
+### Secrets: no cluster-wide list/watch
+
+AllNamespaces means broad *reach* — the operator must manage operands in any
+namespace a CMSC lands. It does **not** mean the operator may enumerate Secret
+contents cluster-wide. `manager-role` grants Secrets `get;create;update;patch;delete`
+but **not** `list` or `watch`. The `get` is still cluster-wide (any namespace,
+any name — the AllNamespaces reach), so a compromised operator can read a Secret
+it can *name*, but without `list`/`watch` it cannot enumerate or harvest every
+Secret in the cluster. Removing enumeration is the win; the residual by-name
+`get` is structural (see the least-privilege note below).
+
+This holds because the manager runs **no Secret informer**:
+
+- `SetupWithManager` does not `Owns(&corev1.Secret{})`.
+- The client cache `DisableFor`s Secret (`cmd/main.go`), so `Get` on a Secret
+  goes straight to the API server rather than lazily starting a `list;watch`
+  informer.
+
+Trade-off: because there is no Secret watch, a *deleted* operator-managed Secret
+is not recreated on a watch event. `ensureSecret` already never overwrites an
+existing Secret (generated credentials are preserved), so only deletion recovery
+is affected, and it is bounded by the manager `SyncPeriod` (1h) or the next CMSC
+reconcile.
+
+This is OLMv1-aligned: RBAC stays static and cluster-wide (no runtime
+RoleBinding provisioning), and the trimmed verb set is directly visible in the
+bundle ClusterRole that a cluster admin audits before installing the
+ClusterExtension.
+
+### Least privilege: grants must map to a code path
+
+AllNamespaces makes *reach* cluster-wide and, under static OLMv1 RBAC, that reach
+is not reducible without per-namespace runtime RoleBindings (rejected). So the
+security lever is the **grant set** (kinds × verbs), not the scope. The rule:
+**every `(kind, verb)` in `manager-role`/`manager-cluster-role` must trace to an
+actual client call.** The Secret split above is the template — apply the same
+reasoning everywhere:
+
+- If a kind is only read **by name** (a `Get`, never a `List`), it needs no
+  `list`/`watch` — but only if it is also kept out of the informer cache
+  (`Owns()`-free **and** cache `DisableFor`, or read via `APIReader`). A cached
+  `Get` silently starts a `list;watch` informer, so RBAC and cache config must be
+  trimmed together.
+- If a kind is written via **Server-Side Apply**, it needs `patch` (and `create`
+  when absent), **not** `update`.
+- If the operator never constructs a kind, it gets **no grant** — an unused
+  cluster-wide grant is pure attack surface (worst case: an escalation primitive
+  like `roles`/`rolebindings`).
+
+Applied trims (all locked by `TestManagerRole_TierAGrantsTrimmed`, which checks
+`role.yaml` **and** the CSV `clusterPermissions`):
+
+| Kind | Verbs | Rationale |
+|------|-------|-----------|
+| `secrets` | `get;create;update;patch;delete` (no `list`/`watch`) | No Secret informer; by-name `Get` only. |
+| `rbac.../roles`,`rolebindings` | **none** | No namespaced Role/RoleBinding is ever built; would be an unused cluster-wide escalation primitive. |
+| `monitoring.coreos.com/servicemonitors`,`prometheusrules` | `create;delete;get;patch` | SSA-applied + deleted; never `Owns()`'d or `List`'d. |
+| `service.costmanagement.../costmanagementserviceconfigs` | `get;list;watch;update` | Owned CR: watched via `For()`, `Update`d only for the finalizer; users create/delete/edit it. |
+
+When adding or changing a `+kubebuilder:rbac` marker, name the call site in a
+comment, run `make manifests` **and** `make bundle`, and add/extend an assertion
+in `internal/controller/rbac_manifest_test.go` so the grant cannot silently widen
+(or a required rule silently vanish from the CSV).
 
 ## Local / CRC (out-of-cluster)
 

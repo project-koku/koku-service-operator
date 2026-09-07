@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -14,6 +15,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -70,17 +72,20 @@ func watchNamespace() string {
 	return strings.TrimSpace(os.Getenv("NAMESPACE"))
 }
 
+// managerSyncPeriod bounds how long a *deleted* operator-managed Secret can
+// stay missing. The manager does not watch Secrets (see SetupWithManager), so
+// deletion recovery relies on the periodic resync rather than an informer event.
+const managerSyncPeriod = time.Hour
+
 // cacheOptionsForNamespace pins DefaultNamespaces when ns is set. Empty ns
 // is cluster-wide cache (AllNamespaces).
 func cacheOptionsForNamespace(ns string) cache.Options {
-	if ns == "" {
-		return cache.Options{}
+	syncPeriod := managerSyncPeriod
+	opts := cache.Options{SyncPeriod: &syncPeriod}
+	if ns != "" {
+		opts.DefaultNamespaces = map[string]cache.Config{ns: {}}
 	}
-	return cache.Options{
-		DefaultNamespaces: map[string]cache.Config{
-			ns: {},
-		},
-	}
+	return opts
 }
 
 func main() {
@@ -132,8 +137,17 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		Cache:                  cacheOptionsForNamespace(ns),
+		Scheme: scheme,
+		Cache:  cacheOptionsForNamespace(ns),
+		// DisableFor Secret: the cached client would otherwise start a Secret
+		// informer (list;watch cluster-wide) on first Get. Routing Secret reads
+		// straight to the API server keeps the manager to get;create;update;
+		// patch;delete on Secrets — no cluster-wide Secret list/watch.
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{&corev1.Secret{}},
+			},
+		},
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
