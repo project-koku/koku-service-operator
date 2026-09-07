@@ -38,7 +38,14 @@ oc -n "$NAMESPACE" get deploy,pods
 
 # Delete the CR and wait for finalizer cleanup
 oc -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s
-if oc -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+# Fail closed: --ignore-not-found returns success + empty only when the CR is
+# truly gone; a real query failure (auth, API down) is nonzero and must NOT
+# fall through to deleting the namespace.
+if ! remaining=$(oc -n "$NAMESPACE" get cmsc "$CR_NAME" --ignore-not-found -o name 2>/dev/null); then
+  echo "Could not query the CMSC (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See recovery below." >&2
   exit 1
 fi

@@ -138,7 +138,13 @@ the operator and leaves the CR finalizer stuck. Full order and recovery:
 ```bash
 # --all covers both samples in this file (bundled `cost-onprem`, BYOI `cost-management`)
 oc delete cmsc -n cost-onprem --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-onprem --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to bundle-cleanup on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-onprem --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not running bundle-cleanup." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not running bundle-cleanup. See uninstall.md recovery." >&2
   exit 1
 fi

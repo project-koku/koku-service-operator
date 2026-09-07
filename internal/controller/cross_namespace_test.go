@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -62,22 +63,29 @@ var _ = Describe("cross-namespace reconcile (AllNamespaces)", func() {
 		}).SetupWithManager(mgr)).To(Succeed())
 
 		mgrCtx, stopMgr := context.WithCancel(ctx)
+		mgrDone := make(chan error, 1)
 		go func() {
 			defer GinkgoRecover()
-			Expect(mgr.Start(mgrCtx)).To(Succeed())
+			mgrDone <- mgr.Start(mgrCtx)
 		}()
 
-		// Cleanup: stop the manager FIRST so it cannot re-add the finalizer or
+		// Cleanup: stop the manager and WAIT for it to fully return before
+		// touching the CMSC. stopMgr() only cancels the context; without waiting
+		// on mgrDone an in-flight reconcile could re-add the finalizer after we
+		// strip it. Once the manager is drained it cannot re-add the finalizer or
 		// run reconcileDelete (which deletes a ConsoleLink — a CRD absent from
-		// envtest — and would wedge on the error). Then strip the finalizer
-		// directly and delete, leaving no residue for later specs.
+		// envtest — and would wedge on the error), so we can strip the finalizer
+		// directly and delete, asserting each step, leaving no residue.
 		DeferCleanup(func() {
 			stopMgr()
+			Eventually(mgrDone).WithTimeout(30 * time.Second).Should(Receive(Succeed()))
 			got := &costv1alpha1.CostManagementServiceConfig{}
 			if err := k8sClient.Get(ctx, probeKey, got); err == nil {
 				got.SetFinalizers(nil)
-				_ = k8sClient.Update(ctx, got)
-				_ = k8sClient.Delete(ctx, got)
+				Expect(k8sClient.Update(ctx, got)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+			} else {
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "unexpected Get error during cleanup: %v", err)
 			}
 		})
 

@@ -149,7 +149,13 @@ Full order and recovery: [uninstall.md](../install/uninstall.md).
 ```bash
 # Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
 oc delete cmsc -n cost-byoi --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-byoi --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to deleting namespaces on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-byoi --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
   exit 1
 fi

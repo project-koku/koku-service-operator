@@ -210,30 +210,36 @@ func TestManagerRole_SecretsNoListWatch(t *testing.T) {
 
 	// OLM installs from the CSV. AllNamespaces binds manager-role cluster-wide,
 	// so the unnamed-secrets rule lands in clusterPermissions and must carry the
-	// same no-list/watch guarantee.
+	// same grant exactly — present, with get+CRUD, and no list/watch. assertExactVerbs
+	// requires the rule (fails if absent) and rejects any extra verb, so an omitted
+	// secrets grant or a smuggled list/watch both break the build.
 	var csv olmCSVInstallPermissions
 	decodeYAMLFile(t, bundleCSVPath(t), &csv)
-	for _, rule := range csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions) {
-		if len(rule.ResourceNames) != 0 || !slices.Contains(rule.Resources, "secrets") {
-			continue
-		}
-		for _, v := range rule.Verbs {
-			if v == "list" || v == "watch" {
-				t.Errorf("CSV clusterPermissions unnamed secrets rule must not include %q: %+v", v, rule)
-			}
-		}
-	}
+	assertExactVerbs(t, "CSV clusterPermissions", "", "secrets",
+		csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions),
+		"get", "create", "update", "patch", "delete")
 }
 
-// verbSet returns the union of verbs granted on an exact (group, resource) pair
-// across rules with no resourceNames restriction.
+// ruleGrants reports whether a PolicyRule applies to the requested (group,
+// resource). Kubernetes RBAC treats "*" in apiGroups/resources as matching any
+// value, so a wildcard rule really does grant the pair — the helpers must see it
+// that way or a wildcard grant slips past assertNoGrant / hides verbs from
+// assertExactVerbs.
+func ruleGrants(rule rbacv1.PolicyRule, group, resource string) bool {
+	matchGroup := slices.Contains(rule.APIGroups, group) || slices.Contains(rule.APIGroups, "*")
+	matchResource := slices.Contains(rule.Resources, resource) || slices.Contains(rule.Resources, "*")
+	return matchGroup && matchResource
+}
+
+// verbSet returns the union of verbs granted on the (group, resource) pair
+// across rules with no resourceNames restriction. Wildcard rules count.
 func verbSet(rules []rbacv1.PolicyRule, group, resource string) map[string]bool {
 	out := map[string]bool{}
 	for _, rule := range rules {
 		if len(rule.ResourceNames) != 0 {
 			continue
 		}
-		if !slices.Contains(rule.APIGroups, group) || !slices.Contains(rule.Resources, resource) {
+		if !ruleGrants(rule, group, resource) {
 			continue
 		}
 		for _, v := range rule.Verbs {
@@ -266,11 +272,12 @@ func assertExactVerbs(t *testing.T, source, group, resource string, rules []rbac
 	}
 }
 
-// assertNoGrant fails if any rule grants the exact (group, resource) pair.
+// assertNoGrant fails if any rule grants the (group, resource) pair, including
+// via a wildcard apiGroups/resources entry.
 func assertNoGrant(t *testing.T, source, group, resource string, rules []rbacv1.PolicyRule) {
 	t.Helper()
 	for _, rule := range rules {
-		if slices.Contains(rule.APIGroups, group) && slices.Contains(rule.Resources, resource) {
+		if ruleGrants(rule, group, resource) {
 			t.Errorf("%s must not grant %s/%s (no code path constructs one): %+v", source, group, resource, rule)
 		}
 	}
@@ -327,6 +334,12 @@ func TestManagerRole_TierAGrantsTrimmed(t *testing.T) {
 // clusterScopedResources belong in cluster_access_role.yaml. manager-role is
 // bound cluster-wide (AllNamespaces), so cluster-scoped kinds in role.yaml
 // would be a real cluster grant — keep them in cluster_access_role.yaml.
+//
+// This is a denylist, not the complete K8s cluster-scoped set (that is only
+// knowable via live API discovery). The first group is the kinds the operator
+// actually touches; the second is high-value cluster-scoped kinds the operator
+// must NEVER grant, listed so an accidental widening is caught even though no
+// current code path emits them.
 var clusterScopedResources = map[string]struct{}{
 	"consolelinks":        {},
 	"clusterroles":        {},
@@ -335,6 +348,12 @@ var clusterScopedResources = map[string]struct{}{
 	// noobaa-admin is a Secret resourceName, not a resource — see
 	// clusterScopedViolations. The CLAUDE.md grep uses noobaa-admin
 	// for the same reason.
+
+	// Must-never-grant cluster-scoped kinds (no operator code path builds one).
+	"nodes":                     {},
+	"namespaces":                {},
+	"persistentvolumes":         {},
+	"customresourcedefinitions": {},
 }
 
 // exclusivelyClusterScopedAPIGroups have no namespaced resources. A

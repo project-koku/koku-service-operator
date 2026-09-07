@@ -199,16 +199,17 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host (pins cache via NAMESPACE).
-	@if [ -z "$${NAMESPACE}" ]; then \
-		echo "NAMESPACE is required for out-of-cluster runs (pins the informer cache)."; \
+run: manifests generate fmt vet ## Run a controller from your host (pins cache via NAMESPACE or WATCH_NAMESPACE).
+	@if [ -z "$${NAMESPACE}" ] && [ -z "$${WATCH_NAMESPACE}" ]; then \
+		echo "NAMESPACE (or WATCH_NAMESPACE) is required for out-of-cluster runs (pins the informer cache)."; \
 		echo "In-cluster / OLM AllNamespaces watches every namespace; laptop make run does not."; \
 		echo "Example: NAMESPACE=cost-onprem make run"; \
 		exit 1; \
 	fi
 	# IMG always has a Makefile default (IMAGE_TAG_BASE:vVERSION); override for your registry.
 	# --dev skips admission webhook registration (no TLS certs on the laptop).
-	NAMESPACE=$(NAMESPACE) go run ./cmd/main.go --dev --operator-image=$(IMG)
+	# Pass both pins through; resolveWatchNamespace() accepts either (WATCH_NAMESPACE wins).
+	NAMESPACE=$(NAMESPACE) WATCH_NAMESPACE=$(WATCH_NAMESPACE) go run ./cmd/main.go --dev --operator-image=$(IMG)
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
