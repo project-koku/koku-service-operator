@@ -72,6 +72,22 @@ func watchNamespace() string {
 	return strings.TrimSpace(os.Getenv("NAMESPACE"))
 }
 
+// resolveWatchNamespace is the process-start decision on cache scope, and it
+// fails closed on the one dangerous case: out-of-cluster with no namespace pin.
+// watchNamespace() returns "" for two situations it cannot distinguish — the
+// legitimate in-cluster AllNamespaces mode (scoped by the ClusterRoleBinding),
+// and an unpinned laptop run. The latter would list and watch *every* namespace
+// through the developer kubeconfig (typically cluster-admin), the opposite of
+// least privilege, so the process must refuse to start there. Empty is allowed
+// only in-cluster.
+func resolveWatchNamespace() (string, error) {
+	ns := watchNamespace()
+	if ns == "" && !inCluster() {
+		return "", fmt.Errorf("refusing to start out-of-cluster with no namespace pin: an empty watch namespace would list and watch every namespace via the local kubeconfig. Set NAMESPACE=<ns> (e.g. NAMESPACE=cost-onprem make run) or WATCH_NAMESPACE=<ns>; empty means AllNamespaces only when running in-cluster")
+	}
+	return ns, nil
+}
+
 // managerSyncPeriod bounds how long a *deleted* operator-managed Secret can
 // stay missing. The manager does not watch Secrets (see SetupWithManager), so
 // deletion recovery relies on the periodic resync rather than an informer event.
@@ -129,7 +145,11 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	ns := watchNamespace()
+	ns, err := resolveWatchNamespace()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 	if ns == "" {
 		setupLog.Info("AllNamespaces: watching CostManagementServiceConfig in every namespace")
 	} else {

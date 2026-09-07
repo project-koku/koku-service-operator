@@ -4,6 +4,14 @@
 #
 # Usage: ./hack/deploy-dev.sh [namespace]
 #
+# Run this ONCE. AllNamespaces means one operator (one SA) watches every
+# namespace, so a single bootstrap is enough — a CMSC in any namespace is
+# reconcilable. The ClusterRoleBindings below (koku-operator-dev,
+# koku-operator-dev-cluster) are cluster-scoped with fixed names, so a second
+# `./hack/deploy-dev.sh other-ns` does not add a namespace — it overwrites the
+# subject, repointing the grant to other-ns's SA and breaking the first NS.
+# If you truly need two operator SAs, give the bindings distinct names.
+#
 # Alias: ./hack/deploy-crc.sh still works and calls this script.
 set -euo pipefail
 
