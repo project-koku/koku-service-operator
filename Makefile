@@ -229,7 +229,8 @@ crc-dev: ## Install CRDs and RBAC on CRC (namespace=$(CRC_NAMESPACE)).
 	./hack/deploy-crc.sh $(CRC_NAMESPACE)
 
 .PHONY: crc-operator-image
-crc-operator-image: docker-build ## Build and push operator image to the CRC internal registry.
+crc-operator-image: ## Build and push operator image to the CRC internal registry.
+	$(MAKE) docker-build IMG=$(CRC_OPERATOR_IMG)
 	./hack/push-image-crc.sh $(CRC_OPERATOR_IMG)
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
