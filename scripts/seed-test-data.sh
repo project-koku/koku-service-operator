@@ -18,6 +18,10 @@
 #
 # `oc` must be logged in to the target cluster. masu processes the upload
 # asynchronously off the Kafka topic; data appears in the UI a few minutes later.
+# `--no-venv` requires test/pytest/requirements.txt to be installed in the
+# active Python environment.
+# Set REQUESTS_CA_BUNDLE or CURL_CA_BUNDLE when the OpenShift routes use a
+# private CA; requests verifies certificates by default.
 #
 set -euo pipefail
 
@@ -44,12 +48,52 @@ err() { echo "${RED}[seed-test-data]${NC} $*" >&2; }
 
 usage() { sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "$value" ]]; then
+    err "$option requires a value"
+    usage >&2
+    exit 2
+  fi
+}
+
+require_positive_integer() {
+  local option="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    err "$option requires a positive integer (got '$value')"
+    usage >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --days) DAYS="$2"; shift 2 ;;
-    --clusters) CLUSTERS="$2"; shift 2 ;;
-    --source-name) SOURCE_NAME="$2"; shift 2 ;;
-    --org-id) ORG_ID_ARG="$2"; shift 2 ;;
+    --days)
+      arg_value="${2:-}"
+      require_positive_integer "$1" "$arg_value"
+      DAYS="$arg_value"
+      shift 2
+      ;;
+    --clusters)
+      arg_value="${2:-}"
+      require_positive_integer "$1" "$arg_value"
+      CLUSTERS="$arg_value"
+      shift 2
+      ;;
+    --source-name)
+      arg_value="${2:-}"
+      require_value "$1" "$arg_value"
+      SOURCE_NAME="$arg_value"
+      shift 2
+      ;;
+    --org-id)
+      arg_value="${2:-}"
+      require_value "$1" "$arg_value"
+      ORG_ID_ARG="$arg_value"
+      shift 2
+      ;;
     --no-venv) USE_VENV=false; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "unknown flag: $1"; usage >&2; exit 2 ;;
@@ -105,8 +149,6 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.environ["TESTS_DIR"])
 
 import requests
-import urllib3
-urllib3.disable_warnings()
 
 from conftest import (
     ClusterConfig,
@@ -139,6 +181,8 @@ clusters = int(os.environ["CLUSTERS"])
 org_id_arg = os.environ.get("ORG_ID_ARG") or ""  # empty unless --org-id given
 source_name_arg = os.environ.get("SOURCE_NAME") or ""
 koku_api = os.environ["KOKU_API_URL"].rstrip("/")
+ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE")
+request_verify = ca_bundle or True
 
 ClusterConfig(namespace=ns, helm_release_name=release, keycloak_namespace=kc_ns)
 
@@ -187,7 +231,7 @@ except Exception:
 # Use the org_id the ingress/JWT path stamps onto uploaded payloads, else Koku
 # creates the provider under one tenant and processes the report under another
 # ("Received unexpected OCP report").
-org_id = org_id_arg or claims.get("org_id") or "org1234567"
+org_id = org_id_arg or claims.get("org_id") or "1234567"
 acct_number = claims.get("account_number") or "7890123"
 print(f"  org_id={org_id} account_number={acct_number}")
 sa_default = f"service-account-{client_id}"
@@ -199,7 +243,7 @@ sa_usernames = list(dict.fromkeys([
 try:
     requests.get(f"{gateway_url}/cost-management/v1/status/",
                  headers={"Authorization": f"Bearer {jwt.access_token}"},
-                 verify=False, timeout=30)
+                 verify=request_verify, timeout=30)
 except Exception as e:
     print(f"  (tenant trigger request failed: {e})")
 time.sleep(3)
@@ -271,9 +315,10 @@ def register(source_name, cluster_id):
             break
     sys.exit(f"error: source creation failed: {last}")
 
-ensure_nise_available()
+if not ensure_nise_available():
+    sys.exit("error: koku-nise is unavailable; install test/pytest/requirements.txt or rerun without --no-venv")
 up = requests.Session()
-up.verify = False
+up.verify = request_verify
 
 end = datetime.now(timezone.utc)
 start = end - timedelta(days=days)

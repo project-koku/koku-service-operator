@@ -429,6 +429,11 @@ deploy_kafka_cluster() {
     local controller_replicas=${KAFKA_CONTROLLER_REPLICAS:-3}
     local controller_storage_size=${KAFKA_CONTROLLER_STORAGE:-20Gi}
     local storage_class="$STORAGE_CLASS"
+    # CRC hostpath provisioner cannot satisfy 100Gi broker PVCs on a laptop disk.
+    if [[ "$storage_class" == *crc* ]] || [[ "${CRC:-}" == "1" ]]; then
+        broker_storage_size=${KAFKA_BROKER_STORAGE:-20Gi}
+        controller_storage_size=${KAFKA_CONTROLLER_STORAGE:-20Gi}
+    fi
     local tls_enabled="true"
 
     echo_info "Creating KRaft Kafka cluster with configuration:"
@@ -527,6 +532,8 @@ kind: Kafka
 metadata:
   name: $KAFKA_CLUSTER_NAME
   namespace: $KAFKA_NAMESPACE
+  annotations:
+    strimzi.io/node-pools: enabled
 spec:
   kafka:
     version: $KAFKA_VERSION${listeners_yaml}

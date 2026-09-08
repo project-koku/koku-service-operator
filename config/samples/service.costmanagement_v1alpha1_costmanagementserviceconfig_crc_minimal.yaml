@@ -1,0 +1,101 @@
+# CRC minimal sample — bundled DB/cache + koku API/celery only.
+#
+# Use this for koku/operator dev on OpenShift Local (Apple Silicon). Skips ROS
+# and Kafka deployment. Does not disable listener or auth envoy: replicas 0 is
+# remapped to 2 by the operator; without Kafka those pods may CrashLoopBackOff.
+# KafkaReady/AuthenticationReady/UIReady may stay False; koku migrations and
+# API/celery pods can still run.
+#
+# Apply after ./hack/deploy-crc.sh and NAMESPACE=cost-onprem make run:
+#   oc apply -n cost-onprem -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
+#
+# For a custom koku build (e.g. feature branch):
+#   ./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag
+#   then patch spec.costManagement.api/masu.image in this CR.
+apiVersion: service.costmanagement.openshift.io/v1alpha1
+kind: CostManagementServiceConfig
+metadata:
+  name: cost-management
+spec:
+  global:
+    clusterDomain: ""
+    storageClass: ""
+
+  database:
+    deploy: true
+    image:
+      repository: registry.redhat.io/rhel10/postgresql-16
+      tag: "10.1"
+    storage:
+      size: 10Gi
+
+  cache:
+    deploy: true
+    image:
+      repository: registry.redhat.io/rhel10/valkey-8
+      tag: "10.1"
+    persistence:
+      size: 2Gi
+
+  kafka:
+    bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+  objectStorage:
+    endpoint: "s3.openshift-storage.svc.cluster.local"
+    port: 443
+    useSSL: true
+
+  costManagement:
+    api:
+      image:
+        repository: quay.io/martin_povolny/koku
+        tag: "latest"
+      replicas: 1
+    masu:
+      image:
+        repository: quay.io/martin_povolny/koku
+        tag: "latest"
+      replicas: 1
+    celery:
+      workers:
+        default:
+          replicas: 1
+        priority:
+          replicas: 1
+        summary:
+          replicas: 1
+        ocp:
+          replicas: 1
+        costModel:
+          replicas: 1
+
+  ros:
+    enabled: false
+
+  rbac:
+    image:
+      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      tag: "73870d8"
+    api:
+      replicas: 1
+    worker:
+      replicas: 1
+
+  kruize:
+    replicas: 0
+
+  ingress:
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
+  auth:
+    keycloak:
+      url: "https://keycloak.keycloak.svc.cluster.local"
+      realm: kubernetes
+
+  ui:
+    replicaCount: 0
+
+  monitoring:
+    enabled: false
