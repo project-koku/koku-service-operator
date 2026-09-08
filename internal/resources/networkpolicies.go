@@ -222,6 +222,7 @@ func CacheNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networki
 		"cost-worker-subs-transmission",
 		"rbac-api",
 		"rbac-worker",
+		"rbac-keycloak-sync",
 	}))
 }
 
