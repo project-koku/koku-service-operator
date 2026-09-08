@@ -130,28 +130,70 @@ func TestSampleCRs_DefaultShowsObjectStorageBucketsShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", sampleDefault, err)
 	}
-	text := string(data)
-	if !strings.Contains(text, "buckets:") {
-		t.Fatalf("%s must show objectStorage.buckets", sampleDefault)
+	// Decode into a generic mapping so key *presence* is distinguishable from an
+	// empty value: the default template must show koku as an explicit blank
+	// field while omitting the optional ingress/ros buckets. A typed decode
+	// collapses "" and omitted into the same zero value, so this inspects the
+	// parsed mapping keys rather than the raw text.
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal %s: %v", sampleDefault, err)
 	}
-	if !strings.Contains(text, `koku: ""`) {
-		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit blank field", sampleDefault)
+
+	buckets := nestedMap(t, doc, "spec", "objectStorage", "buckets")
+	koku, ok := buckets["koku"]
+	if !ok {
+		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit field", sampleDefault)
+	}
+	if koku != "" {
+		t.Fatalf("%s objectStorage.buckets.koku = %v, want an explicit blank field", sampleDefault, koku)
 	}
 	// ingress and ros buckets are optional (ingress inherits koku; ros only when
 	// ros.enabled). The default template omits them to avoid suggesting fields
 	// users would blindly fill in.
-	if strings.Contains(text, `ingress: ""`) {
-		t.Fatalf("%s must not show a blank objectStorage.buckets.ingress (optional, inherits koku)", sampleDefault)
+	if _, ok := buckets["ingress"]; ok {
+		t.Fatalf("%s must omit objectStorage.buckets.ingress (optional, inherits koku)", sampleDefault)
 	}
-	if strings.Contains(text, `ros: ""`) {
-		t.Fatalf("%s must not show a blank objectStorage.buckets.ros (optional, only when ros.enabled)", sampleDefault)
+	if _, ok := buckets["ros"]; ok {
+		t.Fatalf("%s must omit objectStorage.buckets.ros (optional, only when ros.enabled)", sampleDefault)
 	}
-	if strings.Contains(text, "stagingBucket:") {
-		t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
+
+	// Legacy bucket fields are removed in favor of objectStorage.buckets.
+	if ingress := optionalMap(doc, "spec", "ingress"); ingress != nil {
+		if _, ok := ingress["stagingBucket"]; ok {
+			t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
+		}
 	}
-	if strings.Contains(text, "bucketName:") {
-		t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+	if storage := optionalMap(doc, "spec", "costManagement", "storage"); storage != nil {
+		if _, ok := storage["bucketName"]; ok {
+			t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+		}
 	}
+}
+
+// optionalMap walks a decoded YAML document to the mapping at the given key
+// path, returning nil if any segment is absent or not a mapping (so callers can
+// assert that a subtree is omitted).
+func optionalMap(doc map[string]any, path ...string) map[string]any {
+	cur := doc
+	for _, key := range path {
+		next, ok := cur[key].(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = next
+	}
+	return cur
+}
+
+// nestedMap is optionalMap with a fatal assertion that the mapping exists.
+func nestedMap(t *testing.T, doc map[string]any, path ...string) map[string]any {
+	t.Helper()
+	m := optionalMap(doc, path...)
+	if m == nil {
+		t.Fatalf("path %q is missing or not a mapping", strings.Join(path, "."))
+	}
+	return m
 }
 
 func TestSampleCRs_MinimalAndProductionOmitDistinctIngressBucket(t *testing.T) {

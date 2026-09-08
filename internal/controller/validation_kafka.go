@@ -115,9 +115,17 @@ func (r *CostManagementServiceConfigReconciler) kafkaDialer(ctx context.Context,
 	}, "", nil
 }
 
+// kafkaUsesTLS reports whether the broker connection will be TLS-wrapped, per
+// spec.kafka.tls.enabled or a TLS-bearing securityProtocol. PLAIN SASL over a
+// non-TLS connection transmits credentials in cleartext, so it is rejected.
+func kafkaUsesTLS(cfg *costv1alpha1.CostManagementServiceConfig) bool {
+	return cfg.Spec.Kafka.TLS.Enabled ||
+		cfg.Spec.Kafka.SecurityProtocol == "SSL" ||
+		cfg.Spec.Kafka.SecurityProtocol == "SASL_SSL"
+}
+
 func (r *CostManagementServiceConfigReconciler) kafkaTLSConfig(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (*tls.Config, error) {
-	useTLS := cfg.Spec.Kafka.TLS.Enabled || cfg.Spec.Kafka.SecurityProtocol == "SSL" || cfg.Spec.Kafka.SecurityProtocol == "SASL_SSL"
-	if !useTLS {
+	if !kafkaUsesTLS(cfg) {
 		return nil, nil
 	}
 
@@ -161,6 +169,12 @@ func (r *CostManagementServiceConfigReconciler) kafkaSASLMechanism(ctx context.C
 
 	switch mechanism {
 	case "PLAIN":
+		// PLAIN sends the username and password base64-encoded but unencrypted;
+		// refuse it unless the connection is TLS-wrapped so credentials are not
+		// transmitted in cleartext (CWE-319).
+		if !kafkaUsesTLS(cfg) {
+			return nil, fmt.Errorf("spec.kafka.sasl.mechanism %q requires TLS: set spec.kafka.tls.enabled=true or spec.kafka.securityProtocol=SASL_SSL so credentials are not sent in cleartext", mechanism)
+		}
 		return plain.Mechanism{Username: username, Password: password}, nil
 	case "SCRAM-SHA-256":
 		return scrammech.Mechanism(scrammech.SHA256, username, password)
@@ -182,7 +196,12 @@ func defaultKafkaMetadataProbe(ctx context.Context, bootstrapServers string, dia
 		missing := make([]string, 0, len(topics))
 		reachable := false
 		for _, topic := range topics {
-			partitions, err := dialer.LookupPartitions(ctx, "tcp", broker, topic)
+			// Dialer.Timeout bounds only connection establishment; a broker that
+			// accepts TCP but never returns metadata would otherwise stall
+			// reconciliation when ctx has no deadline. Bound each lookup.
+			probeCtx, cancel := context.WithTimeout(ctx, validationTimeout)
+			partitions, err := dialer.LookupPartitions(probeCtx, "tcp", broker, topic)
+			cancel()
 			if err != nil {
 				if isKafkaAuthError(err) {
 					return &kafkaAuthError{err: fmt.Errorf("kafka auth for %q failed: %w", broker, err)}

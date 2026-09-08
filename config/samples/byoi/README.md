@@ -37,7 +37,8 @@ is present.
 The operator does **not** create S3/MinIO/NooBaa/ODF buckets. It only stores
 connection details and env vars (`REQUESTED_BUCKET`, `INGRESS_STAGEBUCKET`, …).
 
-This fixture's MinIO init Job (`job/minio-init`) creates `koku-bucket` and
+This fixture's MinIO init Job (`job/minio-init`) creates `koku-bucket`,
+`koku-upload-bucket` (the app samples set `buckets.ingress` to it), and
 `ros-data`. In production, create the primary Cost bucket
 (`spec.objectStorage.buckets.koku`) in MinIO/ODF/NooBaa **before** uploads.
 

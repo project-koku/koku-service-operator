@@ -120,7 +120,8 @@ NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testin
 | Goal | Sample |
 |------|--------|
 | Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
-| Full bundled stack (needs Kafka, Keycloak, S3, UI secrets) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| BYOI template — fill in external infra (Kafka, Keycloak, S3, UI secrets) before applying; rejected by admission unedited | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| Turnkey bundled stack (Postgres/Valkey + public images) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml` |
 | BYOI smoke | `config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml` |
 
 ```bash
