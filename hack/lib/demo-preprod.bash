@@ -7,11 +7,11 @@ patch_operator_dockerfile() {
   # Portable in-place edit (macOS/Linux).
   local tmp
   tmp="$(mktemp)"
-  sed \
+    sed \
     -e 's|go build -a -o manager cmd/main.go|go build -a -o /tmp/manager cmd/main.go|' \
     -e 's|go build -a -o wait-for ./cmd/wait-for/|go build -a -o /tmp/wait-for ./cmd/wait-for/|' \
-    -e 's|COPY --from=builder /workspace/manager .|COPY --from=builder /tmp/manager .|' \
-    -e 's|COPY --from=builder /workspace/wait-for .|COPY --from=builder /tmp/wait-for .|' \
+    -e 's|COPY --from=builder /workspace/manager /manager|COPY --from=builder /tmp/manager /manager|' \
+    -e 's|COPY --from=builder /workspace/wait-for /wait-for|COPY --from=builder /tmp/wait-for /wait-for|' \
     "$file" >"$tmp"
   mv "$tmp" "$file"
 }

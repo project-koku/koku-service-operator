@@ -28,7 +28,7 @@ func KokuVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume 
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{Name: NameCACombineConfigMap(cfg)},
 					Items: []corev1.KeyToPath{
-						{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: int32Ptr(0755)},
+						{Key: "combine-ca.sh", Path: "combine-ca.sh", Mode: new(int32(0755))},
 					},
 				},
 			},
@@ -181,8 +181,6 @@ func kokuAppContainerSC() *corev1.SecurityContext {
 func migrationContainerSC() *corev1.SecurityContext {
 	return kokuAppContainerSC()
 }
-
-func int32Ptr(i int32) *int32 { return &i }
 
 const caExtraVolumeName = "ca-extra"
 

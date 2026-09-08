@@ -247,7 +247,7 @@ oc patch cmsc cost-onprem -n cost-onprem --type merge -p "{
     },
     \"auth\": {
       \"keycloak\": {
-        \"url\": \"https://keycloak.keycloak.svc.cluster.local:8443\",
+        \"url\": \"http://keycloak-service.keycloak.svc.cluster.local:8080\",
         \"issuerURL\": \"${KEYCLOAK_URL}\"
       }
     }

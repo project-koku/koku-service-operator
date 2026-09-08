@@ -599,6 +599,12 @@ type OAuthProxySpec struct {
 	// Cookie session expiration (e.g. "720h").
 	// +kubebuilder:default:="720h"
 	CookieExpire string `json:"cookieExpire,omitempty"`
+	// How often oauth2-proxy refreshes the access token from Keycloak using the
+	// refresh token (e.g. "4m"). Must be shorter than the Keycloak access-token
+	// lifespan (default 5m); otherwise oauth2-proxy forwards an expired token to
+	// Envoy, which returns 401 and the RBAC UI reload-loops. Chart parity: "4m".
+	// +kubebuilder:default:="4m"
+	CookieRefresh string `json:"cookieRefresh,omitempty"`
 }
 
 type UIAppSpec struct {
