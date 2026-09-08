@@ -3,15 +3,12 @@ package controller
 import (
 	"context"
 	"maps"
-	"strings"
 	"testing"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -150,8 +147,8 @@ func TestReconcileMigration_KokuComplete_CreatesRBACJob(t *testing.T) {
 	if !jobExists(c, testNamespace, rbacJobName) {
 		t.Fatalf("expected RBAC migration Job %q to exist", rbacJobName)
 	}
-	if getJobAnnotation(t, c, testNamespace, rbacJobName, resources.MigrationImageTagAnnotation) != "rbac-tag-cmseed1" {
-		t.Errorf("RBAC Job image-tag should include cmseed1 suffix")
+	if getJobAnnotation(t, c, testNamespace, rbacJobName, resources.MigrationImageTagAnnotation) != "rbac-tag-cmseed2" {
+		t.Errorf("RBAC Job image-tag should include cmseed2 suffix")
 	}
 
 	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
@@ -367,127 +364,6 @@ func TestReconcileMigration_ROSEnabled_IncludesROSMigration(t *testing.T) {
 	}
 	if !jobExists(c, testNamespace, resources.NameRBACMigration(cfg)) {
 		t.Fatal("expected RBAC MigrationJob after ROS complete")
-	}
-}
-
-func TestReconcileMigration_AdminBootstrapGated(t *testing.T) {
-	r, cfg, c := newMigrationTestReconciler(t)
-
-	for _, jobName := range []string{
-		resources.NameKokuMigration(cfg),
-		resources.NameRBACMigration(cfg),
-	} {
-		if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
-			t.Fatalf("step: %v", err)
-		}
-		markJobComplete(t, c, testNamespace, jobName)
-	}
-
-	result, err := r.reconcileMigration(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("final: %v", err)
-	}
-	if !result.IsZero() {
-		t.Fatalf("expected zero result, got %+v", result)
-	}
-	if jobExists(c, testNamespace, resources.NameRBACAdminBootstrap(cfg)) {
-		t.Fatal("expected no AdminBootstrap Job when disabled")
-	}
-}
-
-func TestReconcileMigration_AdminBootstrapEnabledWithSecret_CreatesJob(t *testing.T) {
-	r, cfg, c := newMigrationTestReconciler(t)
-	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
-	cfg.Spec.RBAC.BootstrapAdmin.SecretRef.Name = "rbac-bootstrap-admin"
-
-	for _, jobName := range []string{
-		resources.NameKokuMigration(cfg),
-		resources.NameRBACMigration(cfg),
-	} {
-		if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
-			t.Fatalf("step: %v", err)
-		}
-		markJobComplete(t, c, testNamespace, jobName)
-	}
-
-	bootstrapName := resources.NameRBACAdminBootstrap(cfg)
-	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	if !jobExists(c, testNamespace, bootstrapName) {
-		t.Fatal("expected AdminBootstrap Job when enabled with secretRef")
-	}
-
-	markJobComplete(t, c, testNamespace, bootstrapName)
-	result, err := r.reconcileMigration(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("after bootstrap complete: %v", err)
-	}
-	if !result.IsZero() {
-		t.Fatalf("expected zero Result after 4-step complete, got %+v", result)
-	}
-	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "MigrationComplete" {
-		t.Fatalf("expected SchemaUpToDate=True MigrationComplete after bootstrap, got %+v", cond)
-	}
-	for _, name := range []string{
-		resources.NameKokuMigration(cfg),
-		resources.NameRBACMigration(cfg),
-		bootstrapName,
-	} {
-		if !jobExists(c, testNamespace, name) {
-			t.Errorf("expected Job %q after 4-step complete", name)
-		}
-	}
-	if jobExists(c, testNamespace, resources.NameROSMigration(cfg)) {
-		t.Fatal("expected no ROS Job when ROS is disabled")
-	}
-	if countJobs(c, testNamespace) != 3 {
-		t.Errorf("expected 3 Jobs (Koku + RBAC + admin-bootstrap), got %d", countJobs(c, testNamespace))
-	}
-}
-
-func TestReconcileMigration_AdminBootstrapEnabledNoSecret_WarningEvent(t *testing.T) {
-	r, cfg, c := newMigrationTestReconciler(t)
-	cfg.Spec.RBAC.BootstrapAdmin.Enabled = true
-	// Replace recorder with FakeRecorder to capture events
-	rec := record.NewFakeRecorder(10)
-	r.Recorder = rec
-
-	for _, jobName := range []string{
-		resources.NameKokuMigration(cfg),
-		resources.NameRBACMigration(cfg),
-	} {
-		if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
-			t.Fatalf("step: %v", err)
-		}
-		markJobComplete(t, c, testNamespace, jobName)
-	}
-
-	if _, err := r.reconcileMigration(context.Background(), cfg); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-
-	found := false
-	for range 20 {
-		select {
-		case event := <-rec.Events:
-			if strings.Contains(event, "BootstrapAdminSkipped") {
-				found = true
-			}
-		default:
-		}
-		if found {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !found {
-		t.Fatal("expected BootstrapAdminSkipped warning event in events channel")
-	}
-
-	if jobExists(c, testNamespace, resources.NameRBACAdminBootstrap(cfg)) {
-		t.Fatal("expected no AdminBootstrap Job when secretRef empty")
 	}
 }
 

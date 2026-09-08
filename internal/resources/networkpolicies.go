@@ -222,6 +222,7 @@ func CacheNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networki
 		"cost-worker-subs-transmission",
 		"rbac-api",
 		"rbac-worker",
+		"rbac-keycloak-sync",
 	}))
 }
 
@@ -259,7 +260,6 @@ func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *netwo
 		"rbac-api",
 		"rbac-worker",
 		"rbac-migration",
-		"rbac-admin-bootstrap",
 		"rbac-keycloak-sync",
 		"ros-api",
 		"ros-processor",

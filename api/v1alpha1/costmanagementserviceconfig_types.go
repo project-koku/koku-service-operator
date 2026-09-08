@@ -350,24 +350,16 @@ type KeycloakTLSSpec struct {
 // -----------------------------------------------------------------------------
 
 type RBACConfig struct {
-	Image          ImageSpec          `json:"image,omitempty"`
-	API            RBACComponentSpec  `json:"api,omitempty"`
-	Worker         RBACComponentSpec  `json:"worker,omitempty"`
-	BootstrapAdmin BootstrapAdminSpec `json:"bootstrapAdmin,omitempty"`
-	KeycloakSync   KeycloakSyncSpec   `json:"keycloakSync,omitempty"`
+	Image        ImageSpec         `json:"image,omitempty"`
+	API          RBACComponentSpec `json:"api,omitempty"`
+	Worker       RBACComponentSpec `json:"worker,omitempty"`
+	KeycloakSync KeycloakSyncSpec  `json:"keycloakSync,omitempty"`
 }
 
 type RBACComponentSpec struct {
 	// +kubebuilder:default:=1
 	Replicas  int32                       `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-}
-
-type BootstrapAdminSpec struct {
-	Enabled bool `json:"enabled,omitempty"`
-	// SecretRef references a Secret containing the bootstrap admin identity.
-	// Required keys: org-id, account-number, username.
-	SecretRef corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 type KeycloakSyncSpec struct {

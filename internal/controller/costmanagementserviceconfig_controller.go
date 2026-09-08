@@ -362,6 +362,20 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 			return Result{}, fmt.Errorf("configmap %s: %w", cm.Name, err)
 		}
 	}
+	permSeedCM, err := resources.RBACSeedPermissionsConfigMap(cfg)
+	if err != nil {
+		return Result{}, fmt.Errorf("rbac seed permissions configmap: %w", err)
+	}
+	if err := r.apply(ctx, cfg, permSeedCM); err != nil {
+		return Result{}, fmt.Errorf("configmap %s: %w", permSeedCM.Name, err)
+	}
+	defSeedCM, err := resources.RBACSeedDefinitionsConfigMap(cfg)
+	if err != nil {
+		return Result{}, fmt.Errorf("rbac seed definitions configmap: %w", err)
+	}
+	if err := r.apply(ctx, cfg, defSeedCM); err != nil {
+		return Result{}, fmt.Errorf("configmap %s: %w", defSeedCM.Name, err)
+	}
 
 	// ServiceAccount (skipped when costManagement.serviceAccount.create=false).
 	if err := r.ensureServiceAccount(ctx, cfg, cfg.Spec.CostManagement.ServiceAccount, resources.KokuServiceAccount(cfg)); err != nil {
@@ -452,7 +466,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 // -----------------------------------------------------------------------------
 
 // reconcileMigration runs migration Jobs sequentially:
-// Koku → ROS → RBAC migrate+seed → (optional) RBAC admin-bootstrap.
+// Koku → ROS → RBAC migrate+seed.
 // Each Job must complete before the next is created. Previously-succeeded
 // Jobs are not re-created unless the image-tag annotation changed.
 func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
@@ -494,16 +508,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 		imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
 		build:    func() *batchv1.Job { return resources.RBACMigrationJob(cfg, cfg.Spec.RBAC.Image.Tag) },
 	})
-	if resources.AdminBootstrapJob(cfg, cfg.Spec.RBAC.Image.Tag) != nil {
-		steps = append(steps, migStep{
-			name:     resources.NameRBACAdminBootstrap(cfg),
-			imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
-			build:    func() *batchv1.Job { return resources.AdminBootstrapJob(cfg, cfg.Spec.RBAC.Image.Tag) },
-		})
-	} else if cfg.Spec.RBAC.BootstrapAdmin.Enabled {
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "BootstrapAdminSkipped",
-			"bootstrapAdmin.enabled is true but secretRef.name is empty — admin bootstrap will not run; set spec.rbac.bootstrapAdmin.secretRef to a Secret with keys org-id, account-number, username")
-	}
 
 	for i, step := range steps {
 		result, err := r.runMigrationStep(ctx, cfg, step.name, step.imageTag, step.build, i+1, len(steps))
