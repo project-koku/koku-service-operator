@@ -16,6 +16,7 @@ cluster-bot reproduction are tracked in
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
+| [openshift-ci.md](../openshift-ci/openshift-ci.md) | Prow analogue: OLM catalog install + same stack/pytest scripts |
 
 ## Goal
 
