@@ -70,13 +70,16 @@ RBAC API (`http` / `/metrics`), and operator. Those are not listed as gaps.
 
 ### 3.1 RBAC `ROLE_CREATE_ALLOW_LIST`
 
-The chart exposes `rbac.roleCreateAllowList` (default `""`). The operator
-neither exposes nor sets this.
+The chart exposes `rbac.roleCreateAllowList` (default `""`). The operator does
+not expose a CR field for this setting, but sets
+`ROLE_CREATE_ALLOW_LIST=cost-management,sources` on the RBAC deployment. This
+allows the on-prem custom-role flow to discover the applications whose
+permissions are shipped by the operator.
 
-Empty default matches SaaS: REST custom-role create is blocked unless a
-caller sets `ROLE_CREATE_ALLOW_LIST=cost-management`. Unset on the operator
-is equivalent to the chart default. Only needed if product wants REST-created
-custom roles.
+This is intentionally different from the chart's empty default, which blocks
+REST custom-role creation unless a caller sets the environment variable. Any
+change to the operator value should update the RBAC deployment builder and its
+tests together.
 
 ---
 
@@ -85,4 +88,3 @@ custom roles.
 1. **Add ROS Processor + Poller Services** (prerequisite for scrape; COST-8054)
 2. **Add processor-metrics and poller-metrics NetworkPolicies** (COST-8054)
 3. **Apply ROS API / processor / poller / Kruize ServiceMonitors** when ROS is on (COST-8054; Kruize builder already uses `http` `/q/metrics`). Applying the Kruize SM still will not scrape in a default-deny namespace: `KruizeNetworkPolicy` has no monitoring peer (the chart has the same gap).
-4. **Expose `roleCreateAllowList`** in the RBAC CR section if REST custom roles are required

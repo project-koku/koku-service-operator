@@ -133,9 +133,11 @@ NAMESPACE=cost-byoi HELM_RELEASE_NAME=cost-management KEYCLOAK_NAMESPACE=keycloa
 ```
 
 Flags: `--days N` (default 3), `--clusters N`, `--source-name NAME`,
-`--org-id ID` (default `1234567`), `--no-venv`. `oc` must be logged in to the
-target cluster. masu processes the upload asynchronously off Kafka; data appears
-in the UI a few minutes later. Each run adds another source.
+`--org-id ID` (defaults to the `org_id` claim in the client-credentials JWT),
+`--no-venv`. `oc` must be logged in to the target cluster. With `--no-venv`,
+install `test/pytest/requirements.txt` into the active Python environment first.
+masu processes the upload asynchronously off Kafka; data appears in the UI a
+few minutes later. Each run adds another source.
 
 ### Option 2: the operator E2E suite
 
@@ -148,6 +150,10 @@ E2E_CLEANUP_BEFORE=false E2E_CLEANUP_AFTER=false \
 NAMESPACE=cost-byoi HELM_RELEASE_NAME=cost-management KEYCLOAK_NAMESPACE=keycloak \
   ./scripts/run-pytest.sh --e2e --no-ui
 ```
+
+Record the source ID and cluster ID from the output. When the retained data is
+no longer needed, use the supported teardown command documented in
+[the pytest data-generation guide](../../test/pytest/README.md#alternative-the-e2e-suite).
 
 Heavier (full venv + suite run), but useful when you also want the E2E
 assertions. See [test/pytest/README.md](../../test/pytest/README.md#data-generation).
@@ -173,9 +179,24 @@ npm ci
 CLIENT_ID=cost-management-operator
 CLIENT_SECRET=$(oc get secret keycloak-client-secret-cost-management-operator \
   -n keycloak -o jsonpath='{.data.CLIENT_SECRET}' | base64 -d)
-export API_TOKEN=$(curl -sk -X POST \
+CLIENT_SECRET_FILE="$(mktemp)"
+chmod 600 "$CLIENT_SECRET_FILE"
+printf '%s' "$CLIENT_SECRET" > "$CLIENT_SECRET_FILE"
+trap 'rm -f "$CLIENT_SECRET_FILE"' EXIT
+# Use the OpenShift ingress CA that signs the Keycloak route. If your cluster
+# uses a different private CA, set KEYCLOAK_CA_BUNDLE to its PEM file instead.
+KEYCLOAK_CA_BUNDLE="${KEYCLOAK_CA_BUNDLE:-${TMPDIR:-/tmp}/openshift-ingress-ca.crt}"
+if [[ ! -s "$KEYCLOAK_CA_BUNDLE" ]]; then
+  oc get configmap default-ingress-cert -n openshift-config-managed \
+    -o jsonpath='{.data.ca-bundle\.crt}' > "$KEYCLOAK_CA_BUNDLE"
+fi
+
+export API_TOKEN=$(curl --fail --silent --show-error --cacert "$KEYCLOAK_CA_BUNDLE" \
+  -X POST \
   https://keycloak-keycloak.apps-crc.testing/realms/kubernetes/protocol/openid-connect/token \
-  -d grant_type=client_credentials -d client_id=$CLIENT_ID -d client_secret=$CLIENT_SECRET \
+  --data-urlencode grant_type=client_credentials \
+  --data-urlencode "client_id=$CLIENT_ID" \
+  --data-urlencode "client_secret@$CLIENT_SECRET_FILE" \
   | jq -r '.access_token')
 export API_PROXY_URL=https://cost-management-gateway-cost-byoi.apps-crc.testing/api/cost-management/v1
 

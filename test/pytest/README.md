@@ -347,7 +347,8 @@ NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> KEYCLOAK_NAMESPACE=<keycloa
 
 Flags: `--days N` (default 3), `--clusters N`, `--source-name NAME`,
 `--org-id ID` (default: the JWT `org_id` claim), `--no-venv`. `oc` must be
-logged in. masu processes the upload asynchronously off Kafka.
+logged in. With `--no-venv`, install `requirements.txt` into the active Python
+environment first. masu processes the upload asynchronously off Kafka.
 
 ### Alternative: the E2E suite
 
@@ -360,6 +361,21 @@ E2E_CLEANUP_BEFORE=false E2E_CLEANUP_AFTER=false \
 NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> KEYCLOAK_NAMESPACE=<keycloak-ns> \
 ./scripts/run-pytest.sh --e2e --no-ui
 ```
+
+Record the source ID and cluster ID printed by the run. To remove the retained
+source, uploaded objects, and report manifest/status records later, run the
+teardown command with the same org and deployment settings:
+
+```bash
+ORG_ID=<jwt-org-id> NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> \
+  ./scripts/cleanup-test-data.sh --source-id <source-id> --cluster-id <cluster-id>
+```
+
+The command deletes the source through Koku's API, removes matching S3 objects
+and database report records, and leaves provider lifecycle management to Koku;
+it does not issue raw provider-row deletes. If the database or storage
+configuration cannot be discovered, the command reports that cleanup was
+incomplete instead of claiming success.
 
 The downstream steps (`test_02`, `test_04`–`test_09`) verify processing by
 querying the Koku **database pod** directly and `skip` when the database is
