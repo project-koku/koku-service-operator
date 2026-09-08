@@ -198,6 +198,24 @@ func S3EndpointFromSpec(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return scheme + "://" + host + ":" + int32String(port)
 }
 
+// DefaultS3Region is the SigV4 signing region used when the CR does not set
+// spec.objectStorage.s3.region. us-east-1 is accepted by AWS S3 and by on-prem
+// S3 implementations (MinIO, Ceph RGW, NooBaa), which either ignore the region
+// or treat us-east-1 as their default — unlike a placeholder such as "onprem",
+// which strict endpoints reject during SigV4 verification.
+const DefaultS3Region = "us-east-1"
+
+// S3Region returns the SigV4 signing region: spec.objectStorage.s3.region when
+// set, else DefaultS3Region. It never returns empty so that workloads and the
+// validation probe always sign with a region on-prem endpoints accept, even if
+// the stored CR predates the CRD default.
+func S3Region(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if r := strings.TrimSpace(cfg.Spec.ObjectStorage.S3.Region); r != "" {
+		return r
+	}
+	return DefaultS3Region
+}
+
 // S3Bucket returns the primary object-store bucket for Koku REQUESTED_BUCKET.
 // A non-empty status.discoveredConfig.s3.bucket is preferred over
 // spec.objectStorage.buckets.koku, including when the user supplied a Secret.
@@ -211,8 +229,15 @@ func S3Bucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
 }
 
 // S3IngressBucket returns the upload bucket used by the ingress pod.
+// Ingress uploads land in the same bucket Koku reads (REQUESTED_BUCKET), so
+// when buckets.ingress is unset it inherits the primary Koku bucket
+// (spec.objectStorage.buckets.koku, or the discovered bucket). Set
+// buckets.ingress only to route uploads to a distinct bucket.
 func S3IngressBucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	return cfg.Spec.ObjectStorage.Buckets.Ingress
+	if b := strings.TrimSpace(cfg.Spec.ObjectStorage.Buckets.Ingress); b != "" {
+		return b
+	}
+	return S3Bucket(cfg)
 }
 
 // S3ROSBucket returns the object-store bucket used by ROS.

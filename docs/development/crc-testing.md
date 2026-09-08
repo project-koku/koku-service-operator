@@ -101,17 +101,18 @@ In a second terminal:
 ```bash
 eval "$(crc oc-env)"
 
-# Bundled mode (DB + Cache provisioned by operator — dev only)
+# Bundled mode (DB + Cache provisioned by operator — dev only). The community
+# sample (name: cost-onprem-community) is turnkey: bundled Postgres/Valkey +
+# public images + discovery-resolved storage.
 oc apply -n cost-onprem \
-  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
+  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 
-# Alternative sample with public images:
-# oc apply -n cost-onprem \
-#   -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+# The default sample is a BYOI template with empty external-infra fields and is
+# rejected by admission until you fill them in — do not apply it unedited.
 
 # Watch reconciliation
 oc get cmsc -n cost-onprem -w
-oc describe cmsc cost-management -n cost-onprem
+oc describe cmsc cost-onprem-community -n cost-onprem
 ```
 
 ### UI OAuth client Secret (Keycloak stays external)

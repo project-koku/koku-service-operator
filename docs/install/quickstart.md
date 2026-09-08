@@ -168,7 +168,7 @@ ConsoleLink when the UI Route exists.
 | `SchemaUpToDate` never True | Migration Job failed. List Jobs, then logs for the failed one: `oc -n "$NAMESPACE" get jobs` then `oc -n "$NAMESPACE" logs job/<cr>-koku-migrate` (beta Cost-only; RBAC is `{cr}-rbac-migrate`) |
 | `Available` True but `UIReady` False | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
 | `StorageReady` False | Missing `access-key` / `secret-key`, or bucket does not exist |
-| Uploads return 500 | Bucket `koku-bucket` (or your `bucketName`) was never created |
+| Uploads return 500 | Bucket in `spec.objectStorage.buckets.koku` was never created |
 
 ## Next
 

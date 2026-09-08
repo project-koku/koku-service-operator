@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -33,9 +34,11 @@ const (
 //
 // Secret resolution matches Discovery: user spec.objectStorage.secretName, else
 // status.discoveredConfig.s3.secretName. Missing keys fail before any network
-// call (G2). ListBuckets confirms endpoint, TLS, and that the keys are accepted
-// (G1). HeadBucket then validates the effective bucket contract that the
-// operands will rely on.
+// call (G2). HeadBucket on each effective bucket confirms endpoint reachability,
+// TLS, credential acceptance (G1), and the bucket contract the operands rely on
+// — using only the narrow per-bucket permission the operands actually need. It
+// deliberately avoids ListBuckets, which requires account-wide
+// s3:ListAllMyBuckets that BYOI least-privilege credentials commonly lack.
 func (r *CostManagementServiceConfigReconciler) validateObjectStorage(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) {
 	secretName := cfg.Spec.ObjectStorage.SecretName
 	if secretName == "" && cfg.Status.DiscoveredConfig != nil && cfg.Status.DiscoveredConfig.S3 != nil {
@@ -79,9 +82,12 @@ func (r *CostManagementServiceConfigReconciler) validateObjectStorage(ctx contex
 		return
 	}
 	if err := s3BucketContractProbe(ctx, endpoint, region, accessKey, secretKey, validationTimeout, cfg.Spec.ObjectStorage.InsecureSkipVerify, caCertPool, buckets); err != nil {
-		var bucketErr *s3BucketAccessError
+		// A HeadBucket that reached the endpoint (any HTTP status, e.g. 403/404)
+		// proves the endpoint is reachable and the fault is the bucket or its
+		// permissions. A transport failure (DNS/TCP/TLS/timeout, no HTTP
+		// response) means the endpoint itself is unreachable.
 		reason := storageReasonUnreachable
-		if errors.As(err, &bucketErr) {
+		if s3EndpointResponded(err) {
 			reason = storageReasonBucketInaccessible
 		}
 		r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
@@ -126,11 +132,9 @@ func requiredStorageBuckets(cfg *costv1alpha1.CostManagementServiceConfig) ([]st
 	}
 
 	add(kokuBucket)
-	ingressBucket := strings.TrimSpace(resources.S3IngressBucket(cfg))
-	if ingressBucket == "" {
-		return nil, fmt.Errorf("spec.objectStorage.buckets.ingress is required for the beta object-storage contract")
-	}
-	add(ingressBucket)
+	// Ingress inherits the Koku bucket unless explicitly overridden, so this is
+	// non-empty whenever koku resolves; add() dedups the shared-bucket case.
+	add(resources.S3IngressBucket(cfg))
 	if costv1alpha1.ROSEnabled(cfg) {
 		rosBucket := strings.TrimSpace(resources.S3ROSBucket(cfg))
 		if rosBucket == "" {
@@ -141,9 +145,14 @@ func requiredStorageBuckets(cfg *costv1alpha1.CostManagementServiceConfig) ([]st
 	return buckets, nil
 }
 
-// s3BucketContractProbe calls S3 ListBuckets against endpoint using path-style
-// addressing (required for MinIO / NooBaa / Ceph RGW), then validates every
-// effective bucket with HeadBucket.
+// s3BucketContractProbe validates every effective bucket with HeadBucket against
+// endpoint using path-style addressing (required for MinIO / NooBaa / Ceph RGW).
+//
+// It deliberately does not call ListBuckets: that requires account-wide
+// s3:ListAllMyBuckets, which BYOI credentials scoped to named buckets
+// legitimately lack. HeadBucket on the buckets the operands actually use proves
+// endpoint reachability, TLS, and credential acceptance with only the narrow
+// permission those operands need.
 func s3BucketContractProbe(ctx context.Context, endpoint, region, accessKey, secretKey string, timeout time.Duration, insecureSkipVerify bool, caCertPool *x509.CertPool, buckets []string) error {
 	if region == "" {
 		region = defaultS3Region
@@ -156,15 +165,26 @@ func s3BucketContractProbe(ctx context.Context, endpoint, region, accessKey, sec
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if _, err := client.ListBuckets(ctx, &s3.ListBucketsInput{}); err != nil {
-		return fmt.Errorf("ListBuckets %s: %w", endpoint, err)
-	}
 	for _, bucket := range buckets {
 		if _, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucket)}); err != nil {
 			return &s3BucketAccessError{bucket: bucket, err: err}
 		}
 	}
 	return nil
+}
+
+// s3EndpointResponded reports whether err carries a real HTTP response from the
+// S3 endpoint. A response with a status code (even 403/404) means the endpoint
+// is reachable and the fault is bucket-level. A transport failure (DNS/TCP/TLS/
+// timeout) means the endpoint itself is unreachable — note the retryer still
+// wraps send failures in a ResponseError with StatusCode 0, so the status code
+// must be checked, not merely the error type.
+func s3EndpointResponded(err error) bool {
+	var respErr *smithyhttp.ResponseError
+	if !errors.As(err, &respErr) || respErr.Response == nil || respErr.Response.Response == nil {
+		return false
+	}
+	return respErr.HTTPStatusCode() != 0
 }
 
 func newS3ValidationClient(endpoint, region, accessKey, secretKey string, timeout time.Duration, insecureSkipVerify bool, caCertPool *x509.CertPool) (*s3.Client, error) {

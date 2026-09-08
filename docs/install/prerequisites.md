@@ -176,13 +176,13 @@ Set `spec.objectStorage.endpoint` (hostname only, no scheme or port),
 do not rely on OBC/NooBaa auto-detection.
 
 **The operator never creates buckets.** Create them before uploads, or Ingress
-returns HTTP 500. When `secretName` is set, `endpoint`, `buckets.koku`, and
-`buckets.ingress` are required.
+returns HTTP 500. When `secretName` is set, `endpoint` and `buckets.koku` are
+required.
 
 | Bucket | Spec field | Beta |
 |--------|------------|------|
 | Cost / Koku | `spec.objectStorage.buckets.koku` | Required |
-| Ingress uploads | `spec.objectStorage.buckets.ingress` | Required |
+| Ingress uploads | `spec.objectStorage.buckets.ingress` | Optional — inherits `buckets.koku` when unset; set only to route uploads to a distinct bucket |
 | ROS | `spec.objectStorage.buckets.ros` | Required only if `ros.enabled: true` |
 
 ### Secret: `spec.objectStorage.secretName`

@@ -11,6 +11,7 @@ import (
 
 const (
 	sampleDefault    = "service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
+	sampleMinimal    = "service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml"
 	sampleProduction = "service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml"
 	sampleCommunity  = "service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml"
 
@@ -136,14 +137,41 @@ func TestSampleCRs_DefaultShowsObjectStorageBucketsShape(t *testing.T) {
 	if !strings.Contains(text, `koku: ""`) {
 		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit blank field", sampleDefault)
 	}
-	if !strings.Contains(text, `ingress: ""`) {
-		t.Fatalf("%s must show objectStorage.buckets.ingress as an explicit blank field", sampleDefault)
+	// ingress and ros buckets are optional (ingress inherits koku; ros only when
+	// ros.enabled). The default template omits them to avoid suggesting fields
+	// users would blindly fill in.
+	if strings.Contains(text, `ingress: ""`) {
+		t.Fatalf("%s must not show a blank objectStorage.buckets.ingress (optional, inherits koku)", sampleDefault)
+	}
+	if strings.Contains(text, `ros: ""`) {
+		t.Fatalf("%s must not show a blank objectStorage.buckets.ros (optional, only when ros.enabled)", sampleDefault)
 	}
 	if strings.Contains(text, "stagingBucket:") {
 		t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
 	}
 	if strings.Contains(text, "bucketName:") {
 		t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+	}
+}
+
+func TestSampleCRs_MinimalAndProductionOmitDistinctIngressBucket(t *testing.T) {
+	t.Parallel()
+	// buckets.ingress inherits buckets.koku; the minimal and production samples
+	// must not reintroduce a distinct upload bucket (only the _byoi sample
+	// documents that override). They must still set buckets.koku so uploads and
+	// reads resolve to a real bucket.
+	for _, name := range []string{sampleMinimal, sampleProduction} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg := loadSampleCR(t, name)
+			if cfg.Spec.ObjectStorage.Buckets.Koku == "" {
+				t.Errorf("%s objectStorage.buckets.koku is empty, want a koku bucket", name)
+			}
+			if cfg.Spec.ObjectStorage.Buckets.Ingress != "" {
+				t.Errorf("%s objectStorage.buckets.ingress = %q, want empty (inherits koku)",
+					name, cfg.Spec.ObjectStorage.Buckets.Ingress)
+			}
+		})
 	}
 }
 

@@ -76,7 +76,8 @@ spec:
     secretName: "my-s3-credentials"
     buckets:
       koku: "koku-bucket"
-      ingress: "koku-upload-bucket"
+      # buckets.ingress is optional and inherits buckets.koku; uploads land in the
+      # same bucket Koku reads. See the _byoi sample to route uploads elsewhere.
       ros: "ros-data"
     s3:
       region: "us-east-1"

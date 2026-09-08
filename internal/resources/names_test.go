@@ -60,6 +60,28 @@ func TestS3BucketFallsBackToSpec(t *testing.T) {
 	}
 }
 
+func TestS3RegionDefaultsToUSEast1(t *testing.T) {
+	// A CR that omits spec.objectStorage.s3.region must sign with us-east-1, not
+	// an empty string or a placeholder strict endpoints reject. This is the
+	// single source of truth consumed by workloads, the AWS config, and the
+	// validation probe.
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	if got := S3Region(cfg); got != DefaultS3Region {
+		t.Errorf("S3Region = %q, want %q when region unset", got, DefaultS3Region)
+	}
+	if DefaultS3Region != "us-east-1" {
+		t.Errorf("DefaultS3Region = %q, want us-east-1", DefaultS3Region)
+	}
+}
+
+func TestS3RegionHonorsSpecOverride(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Spec.ObjectStorage.S3.Region = "eu-west-1"
+	if got := S3Region(cfg); got != "eu-west-1" {
+		t.Errorf("S3Region = %q, want eu-west-1 (explicit override)", got)
+	}
+}
+
 func TestS3EndpointFromSpecIgnoresDiscovered(t *testing.T) {
 	useSSL := true
 	cfg := &costv1alpha1.CostManagementServiceConfig{}

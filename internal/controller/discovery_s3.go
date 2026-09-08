@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultOBCName            = "ros-data-ceph"
-	defaultS3Region           = "us-east-1"
+	defaultS3Region           = resources.DefaultS3Region
 	objectBucketAPIGroup      = "objectbucket.io"
 	objectBucketAPIVersion    = "v1alpha1"
 	noobaaAdminNamespace      = "openshift-storage"
@@ -75,10 +75,7 @@ func userProvidedS3(cfg *costv1alpha1.CostManagementServiceConfig) *costv1alpha1
 }
 
 func s3Region(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	if cfg.Spec.ObjectStorage.S3.Region != "" {
-		return cfg.Spec.ObjectStorage.S3.Region
-	}
-	return defaultS3Region
+	return resources.S3Region(cfg)
 }
 
 func (r *CostManagementServiceConfigReconciler) discoverOBC(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (*costv1alpha1.DiscoveredS3, error) {

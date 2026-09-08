@@ -262,16 +262,25 @@ type ObjectStorageConfig struct {
 }
 
 type ObjectStorageBucketsSpec struct {
-	// Primary Cost Management bucket (Koku REQUESTED_BUCKET).
+	// Primary Cost Management bucket (Koku REQUESTED_BUCKET). Required when
+	// objectStorage.secretName is set; otherwise resolved by Discovery.
 	Koku string `json:"koku,omitempty"`
-	// Upload bucket used by the operator-managed ingress pod.
+	// Upload bucket used by the operator-managed ingress pod. Optional:
+	// uploads land in the same bucket Koku reads, so when empty this inherits
+	// buckets.koku (or the discovered bucket). Set only to route uploads to a
+	// distinct bucket.
 	Ingress string `json:"ingress,omitempty"`
 	// ROS object-storage bucket. Required when ros.enabled is true.
 	ROS string `json:"ros,omitempty"`
 }
 
 type S3Options struct {
-	// +kubebuilder:default:=onprem
+	// Region is the SigV4 signing region. Defaults to us-east-1, which AWS S3
+	// and on-prem implementations (MinIO, Ceph RGW, NooBaa) accept — they ignore
+	// the region or treat us-east-1 as their default. Override only when your
+	// endpoint enforces a specific region; a non-existent placeholder is rejected
+	// by strict endpoints during SigV4 verification.
+	// +kubebuilder:default:=us-east-1
 	Region string `json:"region,omitempty"`
 	// +kubebuilder:default:=path
 	// +kubebuilder:validation:Enum=path;auto;virtual

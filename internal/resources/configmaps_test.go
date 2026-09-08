@@ -37,7 +37,7 @@ func TestAWSConfigMap_Defaults(t *testing.T) {
 		t.Errorf("Name = %q", cm.Name)
 	}
 	cfgData := cm.Data["config"]
-	if !strings.Contains(cfgData, "region = onprem") {
+	if !strings.Contains(cfgData, "region = us-east-1") {
 		t.Errorf("default region missing: %q", cfgData)
 	}
 	if !strings.Contains(cfgData, "addressing_style = path") {
@@ -47,11 +47,11 @@ func TestAWSConfigMap_Defaults(t *testing.T) {
 
 func TestAWSConfigMap_Overrides(t *testing.T) {
 	cfg := testCfg()
-	cfg.Spec.ObjectStorage.S3.Region = "us-east-1"
+	cfg.Spec.ObjectStorage.S3.Region = "eu-west-1"
 	cfg.Spec.ObjectStorage.S3.AddressingStyle = "virtual"
 	cm := AWSConfigMap(cfg)
 	cfgData := cm.Data["config"]
-	if !strings.Contains(cfgData, "region = us-east-1") {
+	if !strings.Contains(cfgData, "region = eu-west-1") {
 		t.Errorf("region override missing: %q", cfgData)
 	}
 	if !strings.Contains(cfgData, "addressing_style = virtual") {

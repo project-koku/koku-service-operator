@@ -128,15 +128,15 @@ func TestIngressDeploymentStageBucket(t *testing.T) {
 			want: "",
 		},
 		{
-			name:       "omitted ingress bucket does not fall back to objectStorage.buckets.koku",
+			name:       "omitted ingress bucket inherits objectStorage.buckets.koku",
 			kokuBucket: "my-data",
-			want:       "",
+			want:       "my-data",
 		},
 		{
-			name:             "omitted ingress bucket does not fall back to discovered S3 bucket",
+			name:             "omitted ingress bucket inherits discovered S3 bucket",
 			kokuBucket:       "koku-bucket",
 			discoveredBucket: "obc-provisioned-bucket",
-			want:             "",
+			want:             "obc-provisioned-bucket",
 		},
 		{
 			name:          "explicit ingress bucket is honored over koku bucket",

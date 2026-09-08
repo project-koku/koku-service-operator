@@ -38,15 +38,13 @@ The operator does **not** create S3/MinIO/NooBaa/ODF buckets. It only stores
 connection details and env vars (`REQUESTED_BUCKET`, `INGRESS_STAGEBUCKET`, …).
 
 This fixture's MinIO init Job (`job/minio-init`) creates `koku-bucket` and
-`ros-data`. In production, create the Cost bucket
-(`spec.costManagement.storage.bucketName`, default `koku-bucket`) in
-MinIO/ODF/NooBaa **before** uploads.
+`ros-data`. In production, create the primary Cost bucket
+(`spec.objectStorage.buckets.koku`) in MinIO/ODF/NooBaa **before** uploads.
 
-The Ingress staging bucket uses the same name as the Cost bucket unless
-`spec.ingress.stagingBucket` is set; that bucket must exist too.
+The Ingress upload bucket uses the same name as the Cost bucket unless
+`spec.objectStorage.buckets.ingress` is set; that bucket must exist too.
 
-When `ros.enabled: true`, also create
-`spec.costManagement.storage.rosBucketName` (default `ros-data`).
+When `ros.enabled: true`, also create `spec.objectStorage.buckets.ros`.
 
 ## Prerequisites
 

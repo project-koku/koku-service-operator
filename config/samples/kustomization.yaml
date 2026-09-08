@@ -1,12 +1,14 @@
 ## Append samples of your project ##
+# Order matters: the first entry becomes alm-examples[0], which OperatorHub
+# pre-fills into the "Create instance" form. Keep the BYOI default first; the
+# community (turnkey) sample follows so both appear in the console Samples list.
 resources:
 - service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
+- service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # Additional samples use distinct metadata.name values — apply individually:
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
-# Same metadata.name as the default sample — apply instead of it, not via kustomize:
-#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
 #   kubectl apply -k config/samples/byoi/infra
 #   kubectl apply -k config/samples/byoi/app

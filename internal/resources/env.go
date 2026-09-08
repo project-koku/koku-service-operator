@@ -59,7 +59,7 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		// chain and any code that does not go through settings.S3_*.
 		EnvFromSecretOptional("AWS_ACCESS_KEY_ID", storageSecret, "access-key"),
 		EnvFromSecretOptional("AWS_SECRET_ACCESS_KEY", storageSecret, "secret-key"),
-		EnvVal("S3_REGION", cfg.Spec.ObjectStorage.S3.Region),
+		EnvVal("S3_REGION", S3Region(cfg)),
 		EnvVal("AWS_CONFIG_FILE", "/etc/aws/config"),
 		EnvFromSecret("DJANGO_SECRET_KEY", djangoSecret, "secret-key"),
 		EnvVal("SCHEDULE_REPORT_CHECKS", boolStr(costv1alpha1.BoolVal(cfg.Spec.CostManagement.ScheduleReportChecks, true))),

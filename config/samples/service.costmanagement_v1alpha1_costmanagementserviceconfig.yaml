@@ -1,3 +1,23 @@
+# Default CostManagementServiceConfig — BYOI (Bring Your Own Infrastructure).
+#
+# This is a production-oriented TEMPLATE, not a ready-to-apply CR. External
+# dependencies (database, cache, Kafka, object storage, Keycloak) are left empty
+# on purpose: the operator never provisions or guesses infrastructure it does
+# not own, so it will not silently point you at endpoints you did not choose.
+# Fill in the empty required fields below for your environment.
+#
+# Admission intentionally REJECTS this CR until you provide, at minimum:
+#   - database.host + database.secretName        (or set database.deploy: true)
+#   - cache.host + cache.auth.secretName         (or set cache.deploy: true)
+#   - kafka.bootstrapServers
+#   - auth.keycloak.url
+#   - objectStorage.endpoint + secretName + buckets.koku
+#     (or leave all three empty to let discovery resolve an in-cluster bucket)
+#
+# For a turnkey dev/ci/lab config with bundled Postgres/Valkey and public
+# images, use the community sample instead (name: cost-onprem-community):
+#   service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+# For fuller external examples, see the _minimal, _byoi, and _production samples.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
@@ -31,15 +51,19 @@ spec:
       repository: quay.io/iop/ingress
       tag: "master"
 
+  # Object storage is BYOI: the operator never creates buckets. Provide your own
+  # S3-compatible endpoint + credentials, or leave endpoint/secretName empty to
+  # let discovery resolve an in-cluster ODF/NooBaa bucket (OBC).
   objectStorage:
     endpoint: ""
     port: 443
     useSSL: true
     secretName: ""
     buckets:
+      # Required when objectStorage.secretName is set; otherwise resolved by
+      # discovery. Ingress uploads inherit this bucket unless buckets.ingress is
+      # set. Add buckets.ros only when ros.enabled: true.
       koku: ""
-      ingress: ""
-      ros: ""
 
   costManagement:
     api:
