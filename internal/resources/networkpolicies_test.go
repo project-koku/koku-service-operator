@@ -221,7 +221,7 @@ func TestCacheNetworkPolicy(t *testing.T) {
 		"cost-worker-ocp", "cost-worker-cost-model", "cost-worker-refresh",
 		"cost-worker-hcs", "cost-worker-download",
 		"cost-worker-subs-extraction", "cost-worker-subs-transmission",
-		"rbac-api", "rbac-worker",
+		"rbac-api", "rbac-worker", "rbac-keycloak-sync",
 	}
 
 	cfg := testCfg()
