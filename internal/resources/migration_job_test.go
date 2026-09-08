@@ -29,7 +29,7 @@ func minimalCRForResources(name, ns string) *costv1alpha1.CostManagementServiceC
 // for backoffLimit, activeDeadlineSeconds, and the image-tag annotation key.
 func TestMigrationJob_UsesConstants(t *testing.T) {
 	cfg := minimalCRForResources("test", "ns")
-	cfg.Spec.Database.Deploy = boolPtr(true)
+	cfg.Spec.Database.Deploy = new(true)
 	cfg.Spec.CostManagement.API.Image.Tag = "v1"
 
 	job := MigrationJob(cfg, "v1")
@@ -49,7 +49,7 @@ func TestMigrationJob_UsesConstants(t *testing.T) {
 // A TTL would cause Job GC and re-run migrations on every reconcile (~hourly).
 func TestMigrationJob_TTLNil(t *testing.T) {
 	cfg := minimalCRForResources("test", "ns")
-	cfg.Spec.Database.Deploy = boolPtr(true)
+	cfg.Spec.Database.Deploy = new(true)
 	cfg.Spec.CostManagement.API.Image.Tag = "v1"
 
 	job := MigrationJob(cfg, "v1")
@@ -95,7 +95,7 @@ func TestRBACSeedTagFormat(t *testing.T) {
 // TestMigrationJob_ContainerResources verifies container resource quantities.
 func TestMigrationJob_ContainerResources(t *testing.T) {
 	cfg := minimalCRForResources("test", "ns")
-	cfg.Spec.Database.Deploy = boolPtr(true)
+	cfg.Spec.Database.Deploy = new(true)
 	cfg.Spec.CostManagement.API.Image.Tag = "v1"
 
 	job := MigrationJob(cfg, "v1")
@@ -123,7 +123,7 @@ func TestMigrationJob_ContainerResources(t *testing.T) {
 // TestMigrationJob_ContainerCapabilitiesDropAll verifies Capabilities.Drop includes ALL.
 func TestMigrationJob_ContainerCapabilitiesDropAll(t *testing.T) {
 	cfg := minimalCRForResources("test", "ns")
-	cfg.Spec.Database.Deploy = boolPtr(true)
+	cfg.Spec.Database.Deploy = new(true)
 	cfg.Spec.CostManagement.API.Image.Tag = "v1"
 
 	job := MigrationJob(cfg, "v1")

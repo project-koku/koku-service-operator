@@ -202,7 +202,7 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host (OwnNamespace).
 	@if [ -z "$${NAMESPACE}" ]; then \
 		echo "NAMESPACE is required for out-of-cluster runs (OwnNamespace)."; \
-		echo "Example: NAMESPACE=cost-onprem make run"; \
+		echo "Example: NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev make run"; \
 		exit 1; \
 	fi
 	# IMG always has a Makefile default (IMAGE_TAG_BASE:vVERSION); override for your registry.
@@ -219,6 +219,19 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+CRC_NAMESPACE ?= cost-onprem
+CRC_REGISTRY_HOST ?= default-route-openshift-image-registry.apps-crc.testing
+CRC_OPERATOR_IMG ?= $(CRC_REGISTRY_HOST)/$(CRC_NAMESPACE)/koku-service-operator:dev
+
+.PHONY: crc-dev
+crc-dev: ## Install CRDs and RBAC on CRC (namespace=$(CRC_NAMESPACE)).
+	./hack/deploy-crc.sh $(CRC_NAMESPACE)
+
+.PHONY: crc-operator-image
+crc-operator-image: ## Build and push operator image to the CRC internal registry.
+	$(MAKE) docker-build IMG=$(CRC_OPERATOR_IMG)
+	./hack/push-image-crc.sh $(CRC_OPERATOR_IMG)
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

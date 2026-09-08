@@ -333,24 +333,53 @@ Both `test_complete_flow.py` and `cost_management/conftest.py` import from `e2e_
 
 The test suite supports flexible data generation for different testing scenarios.
 
-### Quick Start: Scenario-Based Setup
+### Quick Start: `./scripts/seed-test-data.sh`
+
+Registers an OpenShift source, generates NISE OCP data, and uploads it through
+the gateway/ingress — without running pytest. It reuses the helpers in this
+directory (`e2e_helpers.py`, `conftest.py`, `utils.py`) so it stays in sync with
+the suite.
 
 ```bash
-# List available scenarios
-./scripts/setup-test-data.sh --list
-
-# Set up data for scenario
-./scripts/setup-test-data.sh --scenario baseline
-
-# Run tests against the data
-./scripts/run-pytest.sh --e2e
+NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> KEYCLOAK_NAMESPACE=<keycloak-ns> \
+  ./scripts/seed-test-data.sh --days 7 --source-name dev
 ```
 
-See **[Test Data Setup Guide](../docs/development/test-data-setup.md)** for complete documentation on:
-- Available scenarios (minimal, baseline, perf-small, perf-medium, ros)
-- On-demand data loading for manual testing
-- Pre-test environment preparation
-- Troubleshooting data issues
+Flags: `--days N` (default 3), `--clusters N`, `--source-name NAME`,
+`--org-id ID` (default: the JWT `org_id` claim), `--no-venv`. `oc` must be
+logged in. With `--no-venv`, install `requirements.txt` into the active Python
+environment first. masu processes the upload asynchronously off Kafka.
+
+### Alternative: the E2E suite
+
+`./scripts/run-pytest.sh --e2e` also seeds as a side effect
+(`test_01_source_registered` + `test_03_upload_data_via_ingress`); run it with
+cleanup disabled to keep the data:
+
+```bash
+E2E_CLEANUP_BEFORE=false E2E_CLEANUP_AFTER=false \
+NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> KEYCLOAK_NAMESPACE=<keycloak-ns> \
+./scripts/run-pytest.sh --e2e --no-ui
+```
+
+Record the source ID and cluster ID printed by the run. To remove the retained
+source, uploaded objects, and report manifest/status records later, run the
+teardown command with the same org and deployment settings:
+
+```bash
+ORG_ID=<jwt-org-id> NAMESPACE=<cr-namespace> HELM_RELEASE_NAME=<cr-name> \
+  ./scripts/cleanup-test-data.sh --source-id <source-id> --cluster-id <cluster-id>
+```
+
+The command deletes the source through Koku's API, removes matching S3 objects
+and database report records, and leaves provider lifecycle management to Koku;
+it does not issue raw provider-row deletes. If the database or storage
+configuration cannot be discovered, the command reports that cleanup was
+incomplete instead of claiming success.
+
+The downstream steps (`test_02`, `test_04`–`test_09`) verify processing by
+querying the Koku **database pod** directly and `skip` when the database is
+external (BYOI) — masu still processes the upload off Kafka either way.
 
 ### NISE Data Generation (Default)
 Uses [koku-nise](https://github.com/project-koku/nise) to generate realistic OCP cost data:
