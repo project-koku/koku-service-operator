@@ -7,10 +7,11 @@
 #
 # Tests are grouped by skip reason. Each group can be toggled independently.
 # Set SKIP_*=false to include those tests in the run.
-# See docs/development/skipped-iqe-tests.md for full documentation.
+# Skip groups are documented in this file. Prow smoke profile:
+# docs/openshift-ci/openshift-ci-jobs.md
 #
 # Profiles (use --profile flag):
-#   smoke     - Source + cost model tests (~43 tests, ~17 min) - FOR PR CHECKS
+#   smoke     - Source + cost model tests (~71 selected, ~17 min) - FOR PR CHECKS
 #   extended  - All except infra tests (~2100 tests, ~33 min) - DAILY CI
 #   stable    - All validated tests (~2350 tests, ~40 min) - WEEKLY CI
 #   full      - All cost_ocp_on_prem tests (~3324 tests, 2-3 hours) - RELEASE VALIDATION
@@ -34,7 +35,7 @@ TEST_PROFILE="${TEST_PROFILE:-}"
 apply_profile() {
     case "${TEST_PROFILE}" in
         smoke)
-            # Quick validation (~44 tests, ~17 min)
+            # Quick validation (~71 selected parameterized cases, ~17 min)
             # Uses positive -k filter to select source + cost model tests
             SMOKE_FILTER="test_api_ocp_source or test_api_cost_model_ocp"
             # Skip all optional groups for fastest run

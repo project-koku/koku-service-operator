@@ -13,7 +13,7 @@ The Prow **job definitions do not live in this repository**. They live in [`open
 
 | Related docs | When to use |
 |--------------|-------------|
-| [openshift-ci-jobs.md](openshift-ci-jobs.md) | Step-by-step for `e2e-olm`, `e2e-pytest`, `e2e-iqe` |
+| [openshift-ci-jobs.md](openshift-ci-jobs.md) | Step-by-step for `e2e-olm`, `e2e-pytest`, `e2e-iqe`; what each job proves; green-run snapshot; IQE pre-launch |
 | [openshift-ci-redactions.md](openshift-ci-redactions.md) | Fail-closed log/artifact redaction (`koso-sanitize`) |
 | [olm-bundle-testing.md](../development/olm-bundle-testing.md) | Local `operator-sdk run bundle` (what `e2e-olm` automates) |
 | [clusterbot-operator-pytest.md](../development/clusterbot-operator-pytest.md) | Reproduce the pytest path on Cluster Bot / MCE |
@@ -27,14 +27,14 @@ Source of truth: [`ci-operator/config/project-koku/koku-service-operator/project
 
 Generated Prow job YAML (do not edit by hand): [`ci-operator/jobs/.../project-koku-koku-service-operator-main-presubmits.yaml`](https://github.com/openshift/release/blob/master/ci-operator/jobs/project-koku/koku-service-operator/project-koku-koku-service-operator-main-presubmits.yaml).
 
-| Prow context | `/test` trigger | Auto-runs on PR? | Required to merge? | What it does |
-|--------------|-----------------|------------------|--------------------|--------------|
-| `ci/prow/build` | `/test build` | Yes | Yes | `go build ./cmd/main.go` in the CI build root |
-| `ci/prow/images` | `/test images` | Yes | Yes | Build operator, e2e runner, and OLM catalog images |
-| `ci/prow/ci-bundle-koku-service-operator-bundle` | `/test ci-bundle-koku-service-operator-bundle` | Yes, except docs-only PRs | Yes (when it runs) | Build the OLM bundle image |
-| `ci/prow/e2e-olm` | `/test e2e-olm` | **No** | **No** (optional) | Claim OCP 4.20, `operator-sdk run bundle`, wait for CSV |
-| `ci/prow/e2e-pytest` | `/test e2e-pytest` | **No** | **No** (optional) | Claim OCP 4.20, OLM install, BYOI + CMSC, pytest |
-| `ci/prow/e2e-iqe` | `/test e2e-iqe` | **No** | **No** (optional) | Same stack as pytest, then IQE `--profile smoke` |
+| Prow context | `/test` trigger | Auto-runs on PR? | Required to merge? | What it does | Proves |
+|--------------|-----------------|------------------|--------------------|--------------|--------|
+| `ci/prow/build` | `/test build` | Yes | Yes | `go build ./cmd/main.go` in the CI build root | The manager compiles |
+| `ci/prow/images` | `/test images` | Yes | Yes | Build operator, e2e runner, and OLM catalog images | Pipeline images build |
+| `ci/prow/ci-bundle-koku-service-operator-bundle` | `/test ci-bundle-koku-service-operator-bundle` | Yes, except docs-only PRs | Yes (when it runs) | Build the OLM bundle image | The bundle image builds |
+| `ci/prow/e2e-olm` | `/test e2e-olm` | **No** | **No** (optional) | Claim OCP 4.20, `operator-sdk run bundle`, wait for CSV | This PR’s bundle installs via OLM (no CMSC) |
+| `ci/prow/e2e-pytest` | `/test e2e-pytest` | **No** | **No** (optional) | Claim OCP 4.20, OwnNamespace OLM, BYOI + CMSC, pytest | The operator deployed a correct, authenticated, healthy stack, and this repo’s pytest suite passed (no UI) |
+| `ci/prow/e2e-iqe` | `/test e2e-iqe` | **No** | **No** (optional) | Same stack as pytest, then IQE `--profile smoke` | Cost Management works for QE smoke (sources, cost models, nise ingest, API reports). No CMMO |
 
 There are currently **no periodic** (nightly) jobs for this repo in `openshift/release`.
 
@@ -62,6 +62,7 @@ flowchart LR
 
   subgraph prow [Prow]
     Images[pipeline images]
+    CiPod["CI pod (SHARED_DIR)"]
     Cluster["Hive OCP 4.20 cluster"]
   end
 
@@ -69,11 +70,12 @@ flowchart LR
   Dockerfile --> Images
   Bundle --> Images
   Claim --> Cluster
-  Sanitize --> Cluster
-  Images --> Cluster
-  E2Esh --> Cluster
-  Pytest --> Cluster
-  IQE --> Cluster
+  Sanitize --> CiPod
+  Images --> CiPod
+  E2Esh --> CiPod
+  Pytest --> CiPod
+  IQE --> CiPod
+  CiPod --> Cluster
 ```
 
 1. Prow checks out this PR and runs **ci-operator** with the config from `openshift/release`.
@@ -109,18 +111,19 @@ On a PR against `main`:
 ```text
 /test build
 /test images
+/test ci-bundle-koku-service-operator-bundle
 /test e2e-olm
 /test e2e-pytest
 /test e2e-iqe
 ```
 
-`/test ?` lists available tests. `/retest` retriggers failed required jobs; it does **not** retrigger optional e2e jobs unless you name them.
+`/test ?` lists available tests. `/retest` reruns **failed** jobs, including optional e2e that already ran and failed. It does **not** start optional e2e that never ran — comment `/test e2e-pytest` (or `e2e-olm` / `e2e-iqe`) for those.
 
 Prow job index: [prow.ci.openshift.org/?repo=project-koku/koku-service-operator](https://prow.ci.openshift.org/?repo=project-koku%2Fkoku-service-operator).
 
 Job names look like `pull-ci-project-koku-koku-service-operator-main-e2e-pytest`. The PR check context is the shorter `ci/prow/<test>` name.
 
-Artifacts (JUnit, pytest HTML, operator logs, CMSC status) land in the job’s GCS bucket, linked from the Prow UI as **Artifacts**. Redaction rules for those files: [openshift-ci-redactions.md](openshift-ci-redactions.md).
+Artifacts (JUnit, pytest HTML, operator logs, CMSC status) land in the job’s GCS bucket, linked from the Prow UI as **Artifacts** (one folder per step). Redaction rules for those files: [openshift-ci-redactions.md](openshift-ci-redactions.md).
 
 ## Images Prow builds
 
@@ -144,7 +147,7 @@ The catalog Dockerfile pins CSV `koku-service-operator.v0.0.1` on channel `beta`
 | Check | GitHub Actions | Prow |
 |-------|----------------|------|
 | `go build` / lint / `make test` | Yes | `build` only (no golangci-lint) |
-| `make test-hack` (issuer injection, RHBK port-forward) | Yes (`hack-scripts`) | No |
+| `make test-hack` (issuer injection, RHBK port-forward, other no-cluster hack tests) | Yes (`hack-scripts`) | No |
 | Kind cluster `make test-e2e` | Yes (`e2e` job) | No |
 | OLM on real OCP | No | `e2e-olm`, `e2e-pytest`, `e2e-iqe` |
 | BYOI + CMSC Ready + pytest | No (use Cluster Bot) | `e2e-pytest` |
@@ -155,7 +158,7 @@ The Go CMSC lifecycle suite (`make test-e2e-cmsc`, [cmsc-e2e.md](../development/
 
 ## Prow plugins and merge
 
-[`_pluginconfig.yaml`](https://github.com/openshift/release/blob/master/core-services/prow/02_config/project-koku/koku-service-operator/_pluginconfig.yaml) enables `approve`, `lgtm` (reviews count as LGTM), `trigger`, `hold`, `wip`, `override`, and the Jira lifecycle plugin. [`_prowconfig.yaml`](https://github.com/openshift/release/blob/master/core-services/prow/02_config/project-koku/koku-service-operator/_prowconfig.yaml) leaves GitHub branch protection **unmanaged** (`unmanaged: true`) so rules stay in GitHub.
+[`_pluginconfig.yaml`](https://github.com/openshift/release/blob/master/core-services/prow/02_config/project-koku/koku-service-operator/_pluginconfig.yaml) enables `approve` (`require_self_approval: true`), `lgtm` (reviews count as LGTM), `trigger`, `hold`, `wip`, `override`, and the Jira lifecycle plugin, among others. [`_prowconfig.yaml`](https://github.com/openshift/release/blob/master/core-services/prow/02_config/project-koku/koku-service-operator/_prowconfig.yaml) leaves GitHub branch protection **unmanaged** (`unmanaged: true`) so rules stay in GitHub.
 
 OWNERS files under `openshift/release` for this repo are generated from this repo’s root [`OWNERS`](../../OWNERS).
 

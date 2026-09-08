@@ -108,7 +108,7 @@ Options:
     --help               Show this help message
 
 Test Profiles (use --profile):
-    smoke      Source + cost model tests (~43 tests, ~17 min) - PR checks
+    smoke      Source + cost model tests (~71 selected, ~17 min) - PR checks
     extended   All except infra tests (~2100 tests, ~33 min) - Daily CI
     stable     All validated tests (~2350 tests, ~40 min) - Weekly CI
     full       All cost_ocp_on_prem tests (~3324 tests, ~60 min) - Release
@@ -163,17 +163,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate IQE_TIMEOUT: must be a positive integer (seconds). In CI it must also stay
-# under the ci-operator step timeout (2h/7200s) or the step is SIGKILLed before this
-# script's poll loop can collect junit/artifacts. We warn rather than hard-clamp so
-# local runs (which have no step cap) can still override for large or debug runs.
+# Validate IQE_TIMEOUT: must be a positive integer (seconds). On Prow the Hive
+# cluster_claim is 2h (7200s) for e2e-iqe; if IQE_TIMEOUT is larger, the claim can
+# expire (job aborted) before this poll loop collects junit. We warn rather than
+# hard-clamp so local runs (no claim cap) can still override.
 if ! [[ "${IQE_TIMEOUT}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: --timeout/IQE_TIMEOUT must be a positive integer (seconds); got '${IQE_TIMEOUT}'"
     exit 1
 fi
 if [ "${IQE_TIMEOUT}" -gt 7200 ]; then
-    echo "WARNING: IQE_TIMEOUT=${IQE_TIMEOUT}s exceeds the ci-operator step cap (7200s);"
-    echo "         in CI the step will be SIGKILLed before the poll loop collects artifacts."
+    echo "WARNING: IQE_TIMEOUT=${IQE_TIMEOUT}s exceeds the Prow cluster_claim (7200s);"
+    echo "         in CI the Hive lease can expire before the poll loop collects artifacts."
 fi
 
 # Apply profile settings if specified (overrides individual SKIP_* defaults)
