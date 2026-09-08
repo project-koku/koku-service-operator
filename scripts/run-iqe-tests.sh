@@ -909,15 +909,10 @@ spec:
       echo "DYNACONF_ONPREM_OAUTH_URL: \${DYNACONF_ONPREM_OAUTH_URL}"
       echo ""
 
-      # nise (the data generator) uploads generated payloads over HTTPS and verifies
-      # TLS against a hardcoded /tmp/router-ca.crt (baked into nise/the cost_onprem
-      # IQE config; it ignores REQUESTS_CA_BUNDLE). Stage the mounted ingress/router
-      # CA bundle there so uploads succeed; otherwise every ingest test fails to upload
-      # and then polls "No stats" until the CI step's 2h timeout SIGKILLs the run.
-      # Fail fast if the CA bundle isn't staged: without it every nise upload fails
-      # TLS verification and each ingest test then polls "No stats" until the step
-      # timeout. Better to exit now (pod -> Failed, poll loop reports it) than burn
-      # the whole timeout on a run that cannot ingest data.
+      # nise uploads payloads over HTTPS and verifies TLS against a hardcoded
+      # /tmp/router-ca.crt (it ignores REQUESTS_CA_BUNDLE).  Stage the cluster's
+      # CA bundle there; without it every ingest test fails TLS verification and
+      # polls "No stats" until the step timeout — fail fast instead.
       if ! cp /etc/pki/tls/certs/ca-bundle.crt /tmp/router-ca.crt; then
         echo "ERROR: could not stage /tmp/router-ca.crt from the mounted CA bundle"
         echo "       (/etc/pki/tls/certs/ca-bundle.crt missing or unreadable)."
