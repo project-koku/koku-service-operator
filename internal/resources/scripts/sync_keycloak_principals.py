@@ -224,7 +224,8 @@ def sync(org_id, account_number, kc_users, prune_orphans):
         call_command("bootstrap_tenants", "--org-id", org_id, "--force", verbosity=0)
         log.info("[%s] bootstrap_tenants completed", org_id)
     except Exception:
-        log.warning("[%s] bootstrap_tenants failed (non-fatal)", org_id, exc_info=True)
+        log.warning("[%s] bootstrap_tenants failed", org_id, exc_info=True)
+        return False
 
     elapsed = time.monotonic() - t0
     log.info(
