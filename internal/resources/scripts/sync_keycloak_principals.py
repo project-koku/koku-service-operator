@@ -155,6 +155,7 @@ def sync(org_id, account_number, kc_users, prune_orphans):
         prune_orphans: Whether to delete RBAC principals absent from kc_users.
     """
     from api.models import Tenant
+    from django.core.management import call_command
     from django.db import transaction
     from management.models import Principal
 
@@ -218,6 +219,12 @@ def sync(org_id, account_number, kc_users, prune_orphans):
                     log.info("[%s] AUDIT action=pruned user=\"%s\"", org_id, name)
                 orphans.delete()
             counters["pruned"] = orphan_count
+
+    try:
+        call_command("bootstrap_tenants", "--org-id", org_id, "--force", verbosity=0)
+        log.info("[%s] bootstrap_tenants completed", org_id)
+    except Exception:
+        log.warning("[%s] bootstrap_tenants failed (non-fatal)", org_id, exc_info=True)
 
     elapsed = time.monotonic() - t0
     log.info(
@@ -283,7 +290,6 @@ def discover_and_sync(kc, org_group_prefix, org_admin_subgroup, prune_orphans):
             all_ok = False
             continue
 
-        admin_usernames = set()
         try:
             subgroups = kc.get_subgroups(group_id)
             admin_sg = next(
@@ -292,8 +298,7 @@ def discover_and_sync(kc, org_group_prefix, org_admin_subgroup, prune_orphans):
             )
             if admin_sg:
                 admin_members = kc.get_group_members(admin_sg["id"])
-                admin_usernames = {u["username"] for u in admin_members if u.get("username")}
-                log.info("[%s] Admin sub-group '%s' members: %d", org_id, org_admin_subgroup, len(admin_usernames))
+                log.info("[%s] Admin sub-group '%s' members: %d", org_id, org_admin_subgroup, len(admin_members))
             else:
                 log.warning("[%s] No '%s' sub-group found", org_id, org_admin_subgroup)
         except Exception:
