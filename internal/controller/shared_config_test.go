@@ -360,6 +360,35 @@ func TestReconcileSharedConfig_DoesNotOverwriteExistingStorageSecret(t *testing.
 	}
 }
 
+func TestReconcileSharedConfig_AppliesRBACSeedConfigMaps(t *testing.T) {
+	const ns = "test"
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-shared-rbac-seed"},
+	}
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClientWithApplySupport(sharedConfigScheme(t)),
+		Recorder: &noopRecorder{},
+	}
+
+	if _, err := r.reconcileSharedConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileSharedConfig: %v", err)
+	}
+
+	for _, name := range []string{
+		resources.NameRBACSeedPermissionsConfigMap(cfg),
+		resources.NameRBACSeedDefinitionsConfigMap(cfg),
+	} {
+		cm := &corev1.ConfigMap{}
+		if err := r.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, cm); err != nil {
+			t.Fatalf("expected ConfigMap %q: %v", name, err)
+		}
+		if len(cm.Data) == 0 {
+			t.Fatalf("ConfigMap %q has no data", name)
+		}
+	}
+}
+
 // noopRecorder satisfies record.EventRecorder for tests that don't inspect events.
 type noopRecorder struct{}
 

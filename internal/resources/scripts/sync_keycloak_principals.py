@@ -142,31 +142,27 @@ class KeycloakClient:
         return group.get("subGroups", [])
 
 
-def sync(org_id, account_number, kc_users, admin_usernames, prune_orphans):
+def sync(org_id, account_number, kc_users, prune_orphans):
     """Core sync loop: Keycloak users -> RBAC Principals for a single org.
+
+    Org-admin access is granted at request time via JWT is_org_admin and the
+    public tenant "Default admin access" group — not via per-tenant RBAC groups.
 
     Args:
         org_id: Organization identifier for the RBAC tenant.
         account_number: Account number for tenant naming.
         kc_users: Pre-fetched list of Keycloak user dicts for this org.
-        admin_usernames: Set of usernames that should have admin access.
         prune_orphans: Whether to delete RBAC principals absent from kc_users.
     """
     from api.models import Tenant
     from django.core.management import call_command
     from django.db import transaction
-    from management.models import Group, Policy, Principal, Role
+    from management.models import Principal
 
     t0 = time.monotonic()
 
     if not Tenant.objects.filter(tenant_name="public").exists():
         log.error("[%s] Public tenant does not exist; RBAC migrations have not completed yet. "
-                  "This is expected on first install -- the CronJob will retry.", org_id)
-        return False
-    public_tenant = Tenant.objects.get(tenant_name="public")
-    admin_default_roles = Role.objects.filter(admin_default=True, tenant=public_tenant)
-    if not admin_default_roles.exists():
-        log.error("[%s] No admin_default roles found in public tenant; RBAC migrations may not have completed. "
                   "This is expected on first install -- the CronJob will retry.", org_id)
         return False
 
@@ -176,21 +172,6 @@ def sync(org_id, account_number, kc_users, admin_usernames, prune_orphans):
     )
     if created:
         log.info("[%s] Created tenant", org_id)
-
-    admin_group, _ = Group.objects.get_or_create(
-        name="Cost Admin Default", tenant=tenant,
-        defaults={"admin_default": True, "system": True,
-                  "description": "Admin default: grants admin_default roles to org-admin users"},
-    )
-    if not admin_group.admin_default:
-        admin_group.admin_default = True
-        admin_group.save(update_fields=["admin_default"])
-
-    admin_policy, _ = Policy.objects.get_or_create(
-        name="Cost Admin Default Policy", tenant=tenant, group=admin_group,
-    )
-    for role in admin_default_roles:
-        admin_policy.roles.add(role)
 
     counters = {"created": 0, "updated": 0, "unchanged": 0, "pruned": 0, "skipped_disabled": 0}
     synced_usernames = set()
@@ -207,24 +188,12 @@ def sync(org_id, account_number, kc_users, admin_usernames, prune_orphans):
                 continue
 
             synced_usernames.add(username)
-            principal, was_created = Principal.objects.get_or_create(
+            _, was_created = Principal.objects.get_or_create(
                 username=username, tenant=tenant,
                 defaults={"type": "user"},
             )
 
-            is_admin = username in admin_usernames
-            in_admin_group = admin_group.principals.filter(pk=principal.pk).exists()
-
-            if is_admin and not in_admin_group:
-                admin_group.principals.add(principal)
-                action = "created" if was_created else "updated"
-                counters[action] += 1
-                log.info("[%s] AUDIT action=%s user=\"%s\" admin_group=added", org_id, action, username)
-            elif not is_admin and in_admin_group:
-                admin_group.principals.remove(principal)
-                counters["updated"] += 1
-                log.info("[%s] AUDIT action=updated user=\"%s\" admin_group=removed", org_id, username)
-            elif was_created:
+            if was_created:
                 counters["created"] += 1
                 log.info("[%s] AUDIT action=created user=\"%s\"", org_id, username)
             else:
@@ -255,7 +224,8 @@ def sync(org_id, account_number, kc_users, admin_usernames, prune_orphans):
         call_command("bootstrap_tenants", "--org-id", org_id, "--force", verbosity=0)
         log.info("[%s] bootstrap_tenants completed", org_id)
     except Exception:
-        log.warning("[%s] bootstrap_tenants failed (non-fatal)", org_id, exc_info=True)
+        log.warning("[%s] bootstrap_tenants failed", org_id, exc_info=True)
+        return False
 
     elapsed = time.monotonic() - t0
     log.info(
@@ -275,7 +245,7 @@ def discover_and_sync(kc, org_group_prefix, org_admin_subgroup, prune_orphans):
         {prefix}{orgId}          -- top-level org group with attributes:
             attributes.org_id    -- org identifier
             attributes.account_number -- account number
-            org-admin/           -- sub-group whose members get admin access
+            org-admin/           -- sub-group (logged for observability; admin access is JWT-based)
     """
     log.info("Discovering organizations from Keycloak groups with prefix '%s'", org_group_prefix)
 
@@ -321,7 +291,6 @@ def discover_and_sync(kc, org_group_prefix, org_admin_subgroup, prune_orphans):
             all_ok = False
             continue
 
-        admin_usernames = set()
         try:
             subgroups = kc.get_subgroups(group_id)
             admin_sg = next(
@@ -330,14 +299,13 @@ def discover_and_sync(kc, org_group_prefix, org_admin_subgroup, prune_orphans):
             )
             if admin_sg:
                 admin_members = kc.get_group_members(admin_sg["id"])
-                admin_usernames = {u["username"] for u in admin_members if u.get("username")}
-                log.info("[%s] Admin sub-group '%s' members: %d", org_id, org_admin_subgroup, len(admin_usernames))
+                log.info("[%s] Admin sub-group '%s' members: %d", org_id, org_admin_subgroup, len(admin_members))
             else:
-                log.warning("[%s] No '%s' sub-group found; no users will be org-admin", org_id, org_admin_subgroup)
+                log.warning("[%s] No '%s' sub-group found", org_id, org_admin_subgroup)
         except Exception:
             log.exception("[%s] Failed to fetch admin sub-group members", org_id)
 
-        ok = sync(org_id, account_number, members, admin_usernames, prune_orphans)
+        ok = sync(org_id, account_number, members, prune_orphans)
         if not ok:
             all_ok = False
 
