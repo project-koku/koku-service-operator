@@ -180,26 +180,88 @@ For each claim:
 Do **not** map `organization_id`, `tenant_id`, `account_id`, or `account`.
 Lua does not read those names.
 
-### Optional claims and roles
+### Optional claims
 
-| Claim / role | If missing |
-|--------------|------------|
+| Claim | If missing |
+|-------|------------|
 | `preferred_username` | Lua uses `sub`, then `"user"` |
 | `email` | Lua synthesizes `{username}@example.com` |
-| Realm role `org-admin` | `is_org_admin` in `X-Rh-Identity` is `false` |
 
-To grant org-admin: **Realm roles** → create `org-admin` if needed → assign
-it to the user (UI) or the service-account user (CMMO) under **Role
-mapping**.
+## Org-admin realm role (first administrator)
+
+The operator **does not create human users**. A Keycloak (or IdP) admin
+provisions users, sets `org_id` and `account_number` attributes (above), and
+assigns the **`org-admin` realm role** to anyone who should administer Cost
+Management or delegate access to others.
+
+### What it does
+
+On each request, Envoy Lua reads the access token. If the token includes the
+**realm role** `org-admin`, Envoy sets `is_org_admin: true` in the
+`X-Rh-Identity` header it forwards to koku and insights-rbac. Without that
+role, `is_org_admin` is `false`.
+
+insights-rbac uses `is_org_admin` to apply the **admin_default** role bundle
+at runtime. That bundle includes permissions such as:
+
+| Role | Permission |
+|------|------------|
+| Cost Administrator | `cost-management:*:*` |
+| User Access administrator | `rbac:*:*` |
+| Sources administrator | `sources:*:*` |
+
+Plus other platform admin roles seeded by the operator's RBAC migration Job.
+The migrate Job seeds roles into the database; it does **not** assign them
+to a named user. The realm role is what grants them on login.
+
+### Why it is required
+
+Without `org-admin`, a user can authenticate (valid JWT with `org_id` and
+`account_number`) but receives **no** admin_default permissions — they cannot
+manage Cost data or use the User Access UI to delegate roles. There is no
+chicken-and-egg for the **first** administrator: assigning the realm role is
+enough; the user does not need a pre-existing RBAC group membership.
+
+RBAC migration alone does not make anyone an admin. Keycloak user creation
+plus the `org-admin` realm role is the supported first-admin path.
+
+### How to assign it
+
+1. **Realm roles** → create realm role `org-admin` if it does not exist.
+2. **Users** → select the user → **Role mapping** → **Assign role** →
+   `org-admin`.
+3. Confirm the user has `org_id` and `account_number` attributes (protocol
+   mappers above).
+4. User logs in through the UI (oauth2-proxy → Keycloak).
+
+Service-account users (CMMO) follow the same steps if they need org-admin
+claims; most reporting clusters only need the attribute mappers, not
+`org-admin`.
+
+### Not the same as the `org-admin` Keycloak subgroup
+
+If you enable `spec.rbac.keycloakSync`, labs often create a group layout such
+as `org-{orgId}/org-admin/`. That **subgroup name is for observability only**
+in the sync CronJob — it does **not** grant admin access and is not a
+substitute for the realm role.
+
+| Mechanism | Grants admin access? |
+|-----------|----------------------|
+| **`org-admin` realm role** | **Yes** — JWT → `is_org_admin=true` → admin_default |
+| **`org-admin` Keycloak subgroup** | **No** — sync logs membership; admin stays JWT-based |
+
+For gateway authentication, assign the **realm role**.
 
 ## Authorization
 
 Koku runs with `ENHANCED_ORG_ADMIN=False`. Authorization goes through
-insights-rbac. Do not disable that path or treat `org-admin` as a bypass for
-RBAC.
+insights-rbac. The `org-admin` realm role is the supported way to receive
+admin_default permissions at login; it is not a bypass of RBAC.
 
 Keycloak-to-RBAC principal sync (`spec.rbac.keycloakSync`) is a separate
-CronJob. It is not required for the JWT gateway.
+CronJob. It copies top-level `org-{orgId}` group members into RBAC
+Principals. It is not required for JWT gateway auth and does not replace
+assigning the `org-admin` realm role to administrators.
 
 ## Upgrade note
 
