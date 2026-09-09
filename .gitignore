@@ -6,6 +6,8 @@
 *.dylib
 /bin
 Dockerfile.cross
+index.Dockerfile
+database/
 
 # Test binary, built with `go test -c`
 *.test
