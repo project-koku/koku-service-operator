@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,11 +59,14 @@ func (r *CostManagementServiceConfigReconciler) resolveS3(ctx context.Context, c
 		return s3, nil
 	}
 
-	if s3, err := r.discoverNooBaa(ctx, cfg); err == nil {
+	// NooBaa is the terminal fallback; surface its specific error (missing
+	// admin secret, or the required koku bucket) rather than a generic message.
+	s3, noobaaErr := r.discoverNooBaa(ctx, cfg)
+	if noobaaErr == nil {
 		return s3, nil
 	}
 
-	return nil, fmt.Errorf("no S3 backend found — set spec.objectStorage.secretName (and endpoint), create a Bound ObjectBucketClaim in %s, or install ODF/NooBaa", cfg.Namespace)
+	return nil, fmt.Errorf("no usable S3 backend — set spec.objectStorage.secretName (and endpoint), create a Bound ObjectBucketClaim in %s, or install ODF/NooBaa (NooBaa fallback: %w)", cfg.Namespace, noobaaErr)
 }
 
 func userProvidedS3(cfg *costv1alpha1.CostManagementServiceConfig) *costv1alpha1.DiscoveredS3 {
@@ -198,6 +202,16 @@ func (r *CostManagementServiceConfigReconciler) discoverNooBaa(ctx context.Conte
 	secretKey := string(src.Data["AWS_SECRET_ACCESS_KEY"])
 	if accessKey == "" || secretKey == "" {
 		return nil, fmt.Errorf("noobaa-admin secret missing AWS credentials")
+	}
+
+	// NooBaa discovery resolves the endpoint and credentials but not the bucket:
+	// the operator does not create buckets, so the cost bucket must be named
+	// explicitly. Guard here (mirroring the OBC path) so an unset bucket fails
+	// with an actionable error instead of silently propagating an empty bucket
+	// that requiredStorageBuckets later rejects. Checked before upserting
+	// credentials so an unusable config leaves no orphan Secret.
+	if strings.TrimSpace(cfg.Spec.ObjectStorage.Buckets.Koku) == "" {
+		return nil, fmt.Errorf("spec.objectStorage.buckets.koku is required for NooBaa discovery: the operator does not create buckets — set it to the name of a pre-created cost bucket")
 	}
 
 	destName := resources.NameStorageSecret(cfg)

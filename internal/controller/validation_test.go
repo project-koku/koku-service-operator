@@ -637,6 +637,50 @@ func TestReconcileValidation_KafkaSASLSecretInvalid(t *testing.T) {
 	}
 }
 
+func TestReconcileValidation_KafkaSASLPlainWithoutTLSRejected(t *testing.T) {
+	// PLAIN sends credentials base64-encoded but unencrypted; over a non-TLS
+	// connection that is cleartext transmission (CWE-319). The dialer build must
+	// refuse it even when the SASL Secret itself is valid.
+	saslSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "kafka-sasl", Namespace: testNamespace},
+		Data: map[string][]byte{
+			"username": []byte("svc-account"),
+			"password": []byte("s3cr3t"),
+		},
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: truePtr()},
+			Cache:    costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{
+				BootstrapServers: "kafka.example.com:9092",
+				SecurityProtocol: "PLAINTEXT",
+				SASL: costv1alpha1.KafkaSASLSpec{
+					Mechanism:      "PLAIN",
+					ExistingSecret: "kafka-sasl",
+				},
+			},
+		},
+	}
+
+	r := newValidationReconciler(t, saslSecret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("rejected SASL mechanism should not block pipeline, got result %+v", result)
+	}
+	kCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionKafkaReady)
+	if kCond == nil || kCond.Status != metav1.ConditionFalse || kCond.Reason != "KafkaSASLSecretInvalid" {
+		t.Fatalf("expected KafkaReady=False KafkaSASLSecretInvalid, got %+v", kCond)
+	}
+	if !strings.Contains(kCond.Message, "requires TLS") {
+		t.Errorf("expected message to explain TLS requirement, got %q", kCond.Message)
+	}
+}
+
 func TestReconcileValidation_KafkaTLSCACertInvalid(t *testing.T) {
 	badCASecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "bad-kafka-ca", Namespace: testNamespace},

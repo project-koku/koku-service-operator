@@ -62,6 +62,8 @@ Replace at least:
 - `spec.cache.host` / `auth.secretName`
 - `spec.kafka.bootstrapServers`
 - `spec.objectStorage.endpoint` / `secretName`
+- `spec.objectStorage.buckets.koku` (required; name of your pre-created cost
+  bucket — the operator does not create buckets)
 - `spec.auth.keycloak.url` (required; see [keycloak.md](keycloak.md))
 - `spec.auth.keycloak.issuerURL` if token `iss` is the public Route
 - Image `repository` / `tag` values for your environment
@@ -101,6 +103,8 @@ spec:
     port: 443
     useSSL: true
     secretName: "my-s3-credentials"
+    buckets:
+      koku: "koku-bucket"   # REQUIRED — pre-created; operator does not create it
   auth:
     keycloak:
       url: "https://keycloak.auth.svc.cluster.local"

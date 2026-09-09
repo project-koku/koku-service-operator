@@ -166,6 +166,11 @@ func TestResolveS3_NooBaa(t *testing.T) {
 	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{Koku: "koku-bucket"},
+			},
+		},
 	}
 
 	got, err := r.resolveS3(context.Background(), cfg)
@@ -186,8 +191,33 @@ func TestResolveS3_NooBaa(t *testing.T) {
 	if string(sec.Data["access-key"]) != "ak-nb" {
 		t.Errorf("access-key: got %q", sec.Data["access-key"])
 	}
-	if got.Bucket != "" {
-		t.Errorf("Bucket: got %q, want empty (spec objectStorage.buckets.koku unset)", got.Bucket)
+	if got.Bucket != "koku-bucket" {
+		t.Errorf("Bucket: got %q, want koku-bucket", got.Bucket)
+	}
+}
+
+// TestResolveS3_NooBaaRequiresBucket asserts the NooBaa fallback refuses to
+// resolve with an empty spec.objectStorage.buckets.koku (the operator does not
+// create buckets) and leaves no orphan storage-credentials Secret behind.
+func TestResolveS3_NooBaaRequiresBucket(t *testing.T) {
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(noobaaAdminSecret("ak-nb", "sk-nb")).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	got, err := r.resolveS3(context.Background(), cfg)
+	if err == nil {
+		t.Fatalf("expected NooBaa fallback to fail without buckets.koku, got %+v", got)
+	}
+	wantSecret := testCRName + "-storage-credentials"
+	sec := &corev1.Secret{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNamespace, Name: wantSecret}, sec); err == nil {
+		t.Fatalf("must not create %s/%s when NooBaa config is unusable", testNamespace, wantSecret)
 	}
 }
 
@@ -204,6 +234,11 @@ func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
 	r := &CostManagementServiceConfigReconciler{Client: cached, APIReader: apiReader, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{Koku: "koku-bucket"},
+			},
+		},
 	}
 
 	got, err := r.resolveS3(context.Background(), cfg)
@@ -415,6 +450,7 @@ func TestResolveS3_NooBaaCustomNamespace(t *testing.T) {
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
 			ObjectStorage: costv1alpha1.ObjectStorageConfig{
 				NoobaaNamespace: "noobaa",
+				Buckets:         costv1alpha1.ObjectStorageBucketsSpec{Koku: "koku-bucket"},
 			},
 		},
 	}
@@ -509,6 +545,7 @@ func TestResolveS3_NooBaaCustomEndpoint(t *testing.T) {
 				Endpoint: "s3.apps.example.com",
 				Port:     443,
 				UseSSL:   new(true),
+				Buckets:  costv1alpha1.ObjectStorageBucketsSpec{Koku: "koku-bucket"},
 			},
 		},
 	}

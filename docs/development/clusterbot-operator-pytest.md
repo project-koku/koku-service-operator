@@ -234,26 +234,24 @@ KEYCLOAK_HOST="$(oc get route keycloak -n keycloak -o jsonpath='{.spec.host}')"
 test -n "$KEYCLOAK_HOST"
 KEYCLOAK_URL="https://${KEYCLOAK_HOST}"
 
-oc apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
-
-oc patch cmsc cost-onprem -n cost-onprem --type merge -p "{
-  \"spec\": {
-    \"global\": {\"clusterDomain\": \"${DOMAIN}\"},
-    \"objectStorage\": {
-      \"endpoint\": \"s4.s4-test.svc.cluster.local\",
-      \"port\": 7480,
-      \"useSSL\": false,
-      \"secretName\": \"cost-onprem-storage-credentials\",
-      \"s3\": {\"region\": \"us-east-1\"}
-    },
-    \"auth\": {
-      \"keycloak\": {
-        \"url\": \"http://keycloak-service.keycloak.svc.cluster.local:8080\",
-        \"issuerURL\": \"${KEYCLOAK_URL}\"
-      }
-    }
-  }
-}"
+# The default sample is a BYOI template that admission rejects unedited (empty
+# auth.keycloak.url; objectStorage.buckets.koku is required once secretName is
+# set). Merge the cluster-bot values into the sample and apply once — applying
+# the raw template and patching afterwards fails at the first apply.
+DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
+  .metadata.namespace = "cost-onprem" |
+  .metadata.name = "cost-onprem" |
+  .spec.global.clusterDomain = strenv(DOMAIN) |
+  .spec.objectStorage.endpoint = "s4.s4-test.svc.cluster.local" |
+  .spec.objectStorage.port = 7480 |
+  .spec.objectStorage.useSSL = false |
+  .spec.objectStorage.secretName = "cost-onprem-storage-credentials" |
+  .spec.objectStorage.buckets.koku = "koku-bucket" |
+  .spec.objectStorage.s3.region = "us-east-1" |
+  .spec.auth.keycloak.url = "http://keycloak-service.keycloak.svc.cluster.local:8080" |
+  .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL)
+' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml \
+  | oc apply -f -
 ```
 
 `hack/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
