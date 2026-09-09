@@ -254,6 +254,20 @@ jobs:
           username: ${{ secrets.QUAY_USER }}
           password: ${{ secrets.QUAY_TOKEN }}
 
+      - name: Cache bundle build tools
+        uses: actions/cache@v5
+        with:
+          path: bin
+          key: bundle-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - name: Regenerate bundle with published operator image
+        # Committed bundle/ embeds IMG=v0.0.1 (Makefile default). container-build
+        # publishes latest/main/<sha> only — regenerate here so catalog installs pull
+        # an image that exists on Quay.
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          make bundle IMG="quay.io/project-koku/koku-service-operator:${SHORT_SHA}"
+
       - name: Bundle image metadata
         id: bundle-meta
         uses: docker/metadata-action@v5

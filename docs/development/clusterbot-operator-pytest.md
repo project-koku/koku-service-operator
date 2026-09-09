@@ -17,6 +17,62 @@ cluster-bot reproduction are tracked in
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
 | [openshift-ci.md](../openshift-ci/openshift-ci.md) | Prow analogue: OLM catalog install + same stack/pytest scripts |
+| [olm-bundle-testing.md](olm-bundle-testing.md) | Personal Quay bundle/catalog build (`catalog-build-amd64` on Mac ARM) |
+
+## IQE OLM smoke only (no full stack)
+
+Use this path to validate **OLM catalog install** (CatalogSource → Subscription
+→ CSV → controller Deployment → CRD) **without** RHBK, Kafka, S3, or CMSC
+reconcile. Tracked in [COST-8166](https://redhat.atlassian.net/browse/COST-8166)
+(iqe-cost-management-plugin).
+
+| Path | Infra needed | Validates |
+|------|----------------|-----------|
+| **IQE OLM smoke** (this section) | cluster-bot + `oc login` only | OLM wiring, operator pod, CRD, RBAC |
+| **Full pytest** (below) | RHBK + Kafka + S4 + CMSC Ready | Application/day-one stack |
+
+### Prerequisites
+
+- MCE / cluster-bot cluster (OCP **4.18+**, **amd64** workers)
+- IQE venv with `iqe-cost-management-plugin` checked out
+- Pullable catalog image (see [catalog image](#catalog-image))
+
+### Catalog image
+
+| Source | When |
+|--------|------|
+| `quay.io/project-koku/koku-service-operator-catalog:latest` | After [operator CI](https://github.com/project-koku/koku-service-operator) publishes a bundle whose CSV references a pullable operator tag (see project PRs fixing `bundle-publish`) |
+| Personal Quay (`quay.io/<user>/koku-service-operator-catalog:<tag>`) | PR branches, Mac-built catalogs — must be **public** (or cluster pull secret) and **linux/amd64** on cluster-bot |
+
+Build personal catalog on Mac ARM: [olm-bundle-testing.md](olm-bundle-testing.md#build-and-push-catalog-personal-quay).
+
+### Run IQE smoke
+
+From `iqe-cost-management-plugin` (does not need local koku API or full `iqe tests plugin`):
+
+```bash
+export SERVICE_OPERATOR_CATALOG_IMAGE=quay.io/project-koku/koku-service-operator-catalog:latest
+
+pytest --noconftest -p iqe_cost_management.fixtures.operator_fixtures \
+  iqe_cost_management/tests/operator/test_service_operator.py::test_service_operator_clean_olm_catalog_installation \
+  -vv -s --log-cli-level=INFO
+```
+
+Expect ~1–3 min after catalog is READY: CSV `Succeeded`, controller pod in
+`openshift-operators`, operand namespace `cost-byoi` (default).
+
+**Note:** The published CSV uses **AllNamespaces** install mode — controller in
+`openshift-operators`, not OwnNamespace `cost-onprem`. Full CMSC pytest still
+follows [Critical rules](#critical-rules-read-first) below.
+
+### OLM cleanup between runs
+
+```bash
+oc delete subscription koku-service-operator -n openshift-operators --ignore-not-found
+oc delete csv -n openshift-operators -l operators.coreos.com/koku-service-operator.openshift-operators --ignore-not-found
+oc delete catalogsource koku-service-operator-catalog -n openshift-marketplace --ignore-not-found
+oc delete namespace cost-byoi --ignore-not-found
+```
 
 ## Goal
 
