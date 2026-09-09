@@ -33,7 +33,7 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "koku-service-operator-system"
+const namespace = "cost-onprem"
 
 // serviceAccountName created for the project
 const serviceAccountName = "koku-service-operator-controller-manager"

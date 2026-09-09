@@ -129,7 +129,9 @@ make bundle-run BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION}"
 
 What this does: unpacks the bundle image, creates temporary OLM catalog
 wiring, Subscribes to package `koku-service-operator` (channel `beta`), and
-lets OLM install the CSV (CRD, RBAC, controller Deployment).
+lets OLM install the CSV (CRD, RBAC, controller Deployment). The CSV is
+**AllNamespaces** only — `operator-sdk run bundle` and CatalogSource do not
+need OwnNamespace. Suggested operator NS is `cost-onprem`.
 
 ### Verify operator install
 
@@ -190,7 +192,13 @@ the operator and leaves the CR finalizer stuck. Full order and recovery:
 ```bash
 # --all covers both samples in this file (bundled `cost-onprem`, BYOI `cost-management`)
 oc delete cmsc -n cost-onprem --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-onprem --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to bundle-cleanup on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-onprem --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not running bundle-cleanup." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not running bundle-cleanup. See uninstall.md recovery." >&2
   exit 1
 fi

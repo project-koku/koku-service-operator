@@ -19,8 +19,8 @@ metadata:
   namespace: system
 spec:
   dnsNames:
-  - koku-service-operator-webhook-service.koku-service-operator-system.svc
-  - koku-service-operator-webhook-service.koku-service-operator-system.svc.cluster.local
+  - koku-service-operator-webhook-service.cost-onprem.svc
+  - koku-service-operator-webhook-service.cost-onprem.svc.cluster.local
   issuerRef:
     kind: Issuer
     name: selfsigned-issuer

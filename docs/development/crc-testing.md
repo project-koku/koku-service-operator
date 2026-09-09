@@ -96,20 +96,44 @@ oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
 # or: make crc-dev CRC_NAMESPACE=cost-onprem
 ```
 
-This script installs the CRD and OwnNamespace RBAC. Run it once per CRC restart.
+This script installs the CRD and AllNamespaces RBAC: `manager-role` via a
+**ClusterRoleBinding**, plus `manager-cluster-role` via a ClusterRoleBinding
+(StorageClass/Ingress discovery, ConsoleLink, Kruize, narrow NooBaa
+`noobaa-admin` Secret get). Run it once per CRC restart.
+
+Alternatively, do it manually:
+
+```bash
+oc new-project cost-onprem
+make install   # regenerates manifests and applies CRDs via config/crd kustomize
+oc apply -f config/rbac/role.yaml
+oc apply -f config/rbac/cluster_access_role.yaml
+oc create clusterrolebinding koku-operator-dev \
+  --clusterrole=manager-role \
+  --serviceaccount=cost-onprem:default
+oc create clusterrolebinding koku-operator-dev-cluster \
+  --clusterrole=manager-cluster-role \
+  --serviceaccount=cost-onprem:default
+oc adm policy add-scc-to-user anyuid -z default -n cost-onprem
+```
 
 ## Run the operator
 
-`--operator-image` is **required** for wait-for init containers. The tag
-`quay.io/project-koku/koku-service-operator:v0.0.1` is **not** published — build
-and push to the CRC internal registry instead:
+Local dev `make run` pins the informer cache with `NAMESPACE`. Prefer
+`NAMESPACE=… IMG=… make run` (`make run` passes `--dev` and `--operator-image=$(IMG)`):
 
 ```bash
 make crc-operator-image CRC_NAMESPACE=cost-onprem
 NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev make run
 ```
 
-`--dev` skips admission webhook registration (no TLS certs needed on the laptop).
+`--dev` skips admission webhook registration (no TLS certs needed for
+local dev). `--operator-image` is **required** for wait-for init containers.
+
+The operator reads `~/.kube/config` (set by `eval "$(crc oc-env)"`) and
+restricts its informer cache to the `cost-onprem` namespace (`NAMESPACE`).
+In-cluster OLM installs watch every namespace. See
+[allnamespaces.md](allnamespaces.md).
 
 **Cluster Bot / remote OpenShift:** do not use `make run` with BYOI
 `*.svc.cluster.local` hosts — use [clusterbot.md](clusterbot.md) /
@@ -219,4 +243,4 @@ Legacy fixes (already in operator):
 |---------|-----|
 | `No module named listener` | Uses `python manage.py listener` |
 | Django file log on read-only FS | `readOnlyRootFilesystem` not set on koku pods |
-| BYOI probes fail under `make run` | `*.svc` not resolvable from laptop — use cluster-bot |
+| BYOI probes fail under `make run` | `*.svc` not resolvable from local dev — use cluster-bot |

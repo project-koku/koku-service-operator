@@ -12,7 +12,7 @@ cluster-bot reproduction are tracked in
 | Related docs | When to use |
 |--------------|-------------|
 | [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`hack/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
-| [ownnamespace.md](ownnamespace.md) | Why operator install NS must equal CR NS |
+| [allnamespaces.md](allnamespaces.md) | AllNamespaces watch vs suggested install NS |
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
@@ -97,27 +97,26 @@ PostgreSQL and Valkey** in `cost-onprem` (lab/CI — not production BYOI).
 
 ## Critical rules (read first)
 
-### 1. OwnNamespace — one namespace for everything
+### 1. AllNamespaces — suggested install NS `cost-onprem`
 
-The operator watches **only** the namespace where it is installed. The
-`CostManagementServiceConfig` CR **must** live in that same namespace.
+The operator watches **every** namespace. Recommended lab layout is still one
+NS for operator + CR + pytest:
 
 ```text
-operator NS  ==  CR NS  ==  NAMESPACE for pytest
+operator NS  ==  CR NS  ==  NAMESPACE for pytest  ==  cost-onprem
 ```
 
-Use **`cost-onprem`** (or any single name) consistently. Do **not** deploy the
-operator with `make deploy` into `koku-service-operator-system` while applying
-the CR in `cost-onprem` — the operator will not reconcile it.
+BYOI (Kafka, RHBK, S4) may live in other namespaces. `make deploy` scaffolds
+into `cost-onprem`.
 
-See [ownnamespace.md](ownnamespace.md).
+See [allnamespaces.md](allnamespaces.md).
 
 ### 2. Use `hack/deploy-incluster.sh`, not `make deploy` from a laptop
 
 | Path | Cluster Bot pytest? |
 |------|---------------------|
-| `IMG=quay.io/... ./hack/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, OwnNamespace |
-| `make deploy` / `install-cmsc.sh` operator step | **No** — integrated registry push from laptop, cert-manager, wrong NS default |
+| `IMG=quay.io/... ./hack/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, AllNamespaces |
+| `make deploy` / `install-cmsc.sh` operator step | **No** — integrated registry push from laptop, cert-manager |
 | `make run` / `go run ./cmd/main.go` | **No** — `*.svc.cluster.local` not reachable from laptop |
 
 `deploy-incluster.sh` calls `hack/deploy-dev.sh` (CRDs + RBAC), creates a
@@ -441,9 +440,10 @@ registry Route. **Fix:** Quay + `deploy-incluster.sh`.
 
 Apple Silicon built `arm64` image. **Fix:** `docker buildx build --platform linux/amd64`.
 
-### Operator in `koku-service-operator-system`, CR in `cost-onprem`
+### Split operator NS vs CR NS
 
-Operator never reconciles. **Fix:** `deploy-incluster.sh cost-onprem` — one NS.
+AllNamespaces reconciles a CMSC outside the operator pod NS. The recommended
+lab is still one NS: `deploy-incluster.sh cost-onprem`.
 
 ### S3 preflight: 301 pytest errors
 
@@ -467,7 +467,13 @@ Full order and recovery: [uninstall.md](../install/uninstall.md).
 ```bash
 # Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
 oc delete cmsc -n cost-onprem --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-onprem --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to deleting namespaces on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-onprem --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
   exit 1
 fi

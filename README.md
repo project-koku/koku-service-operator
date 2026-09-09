@@ -15,7 +15,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | [docs/install/](docs/install/) | **Install and configure** (prerequisites, quickstart, production, CMMO) |
 | [docs/development/clusterbot.md](docs/development/clusterbot.md) | Cluster Bot day-one: Redpanda BYOI → in-cluster operator |
 | [docs/development/pre-prod-install.md](docs/development/pre-prod-install.md) | Pre-prod BYOI → operator → UI install walkthrough |
-| [docs/development/ownnamespace.md](docs/development/ownnamespace.md) | OwnNamespace install/watch model and RBAC shape |
+| [docs/development/allnamespaces.md](docs/development/allnamespaces.md) | AllNamespaces install/watch model and RBAC shape |
 | [docs/development/crc-testing.md](docs/development/crc-testing.md) | Local development and CRC testing guide |
 | [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
 | [config/samples/byoi/README.md](config/samples/byoi/README.md) | BYOI fixture (Postgres, Valkey, Kafka, MinIO, OAuth mirror) |
@@ -34,7 +34,7 @@ Contributor local loop:
 ```bash
 make generate manifests    # regenerate CRD and deep-copy code
 make build                 # compile to bin/manager
-NAMESPACE=<cr-ns> IMG=<operator-image> make run # local (OwnNamespace; requires IMG)
+NAMESPACE=<cr-ns> IMG=<operator-image> make run # local (pins cache; requires IMG)
 ```
 
 See [docs/development/clusterbot.md](docs/development/clusterbot.md) for Cluster Bot,
@@ -43,7 +43,8 @@ See [docs/development/clusterbot.md](docs/development/clusterbot.md) for Cluster
 for a full in-cluster BYOI + UI smoke.
 
 **CRD:** `service.costmanagement.openshift.io/v1alpha1` — Kind `CostManagementServiceConfig` (short name `cmsc`).
-Installs in OwnNamespace mode ([docs](docs/development/ownnamespace.md)).
+Installs in AllNamespaces mode ([docs](docs/development/allnamespaces.md)).
+OwnNamespace is not supported.
 
 ## Project status
 

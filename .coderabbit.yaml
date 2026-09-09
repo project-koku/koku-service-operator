@@ -16,7 +16,7 @@ knowledge_base:
         applyTo: "internal/resources/**/*.go"
       - files: docs/design/koku-django-log-handler-problem.md
         applyTo: "internal/resources/{pod,volumes,koku,database,rbac}*.go"
-      - files: docs/development/ownnamespace.md
+      - files: docs/development/allnamespaces.md
         applyTo: "{cmd,config/rbac,internal/controller}/**"
       - files: config/rbac/CLAUDE.md
         applyTo: "{config/rbac,internal/controller}/**"
@@ -102,7 +102,7 @@ reviews:
         for objects apply() already owns.
 
         Cross-namespace reads (e.g. NooBaa admin Secret) must use APIReader,
-        not the namespaced informer cache (OwnNamespace).
+        not assume the object is in the CMSC namespace.
 
         Status: patch via the status subresource; do not flip condition
         reasons in a later phase that overwrite an earlier failure.
@@ -147,28 +147,29 @@ reviews:
 
     - path: "cmd/**/*.go"
       instructions: |
-        OwnNamespace: watch namespace is the install namespace (SA file
-        in-cluster, NAMESPACE env out-of-cluster). Do not widen the
-        informer cache to all namespaces. --dev must never be the default
-        for in-cluster. wait-for is shipped in the operator image for
-        init containers; keep it a static binary with no extra runtime.
+        AllNamespaces: empty WATCH_NAMESPACE in-cluster watches every
+        namespace. Do not pin the informer cache from the SA namespace file.
+        WATCH_NAMESPACE (or out-of-cluster NAMESPACE) may pin for laptop
+        make run. --dev must never be the default for in-cluster. wait-for
+        is shipped in the operator image for init containers; keep it a
+        static binary with no extra runtime.
 
     - path: "config/rbac/**"
       instructions: |
-        OwnNamespace split: role.yaml is generated and must contain only
-        namespaced resources. cluster_access_role.yaml is hand-maintained
-        cluster-scoped grants only. Flag cluster-scoped rules added to
-        generated role.yaml, and namespaced CRUD added to
-        cluster_access_role.yaml. New cluster-scoped kinds need a
-        ClusterRoleBinding plus finalizer cleanup in the controller.
+        AllNamespaces split: role.yaml is generated and must contain only
+        namespaced resource kinds. Bind it with a ClusterRoleBinding.
+        cluster_access_role.yaml is hand-maintained cluster-scoped grants
+        only. Flag cluster-scoped rules added to generated role.yaml, and
+        namespaced CRUD added to cluster_access_role.yaml. New cluster-scoped
+        kinds need a ClusterRoleBinding plus finalizer cleanup in the
+        controller.
 
     - path: "config/manifests/**"
       instructions: |
         CSV is the OLM contract. Flag permission drift vs
         config/rbac, missing owned CRDs, and installModes changes.
-        CSV still scaffolds AllNamespaces; OwnNamespace (COST-7695) is
-        documented separately — do not re-raise that as a new finding
-        unless this PR claims to implement it.
+        AllNamespaces must stay supported; OwnNamespace/Single/Multi stay
+        false. Do not add OperatorConditions.
 
     - path: "config/samples/**"
       instructions: |
@@ -304,14 +305,16 @@ reviews:
           with empty namespace via applyClusterScoped) that is not added
           to the clusterScoped slice in reconcileDelete(). Pass if no new
           cluster-scoped resource is introduced.
-      - name: OwnNamespace RBAC split
+      - name: AllNamespaces RBAC split
         mode: warning
         instructions: >-
           Fail if +kubebuilder:rbac markers grant cluster-scoped
           resources (consolelinks, clusterroles, clusterrolebindings,
           ingresses, storageclasses, or cluster-wide secrets). Those
           belong in config/rbac/cluster_access_role.yaml. Pass if markers
-          stay namespaced and cluster grants stay in cluster_access_role.yaml.
+          stay namespaced kinds and cluster grants stay in
+          cluster_access_role.yaml. manager-role must be bound with a
+          ClusterRoleBinding (AllNamespaces).
 
 code_generation:
   unit_tests:

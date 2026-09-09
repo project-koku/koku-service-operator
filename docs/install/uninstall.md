@@ -9,9 +9,15 @@ that deletes cluster-scoped objects the operator created: the ConsoleLink, and
 (only if ROS was enabled) the Kruize ClusterRole and ClusterRoleBinding. That
 cleanup runs **only while the operator pod is still running**.
 
-The operator is installed in the **same namespace as the CR**. Deleting that
-namespace (or the operator Deployment / CSV) first kills the manager before it
-can strip the finalizer. The namespace then stays `Terminating` and the
+So delete the CR **while the operator pod is still running**, wherever that pod
+lives. Under AllNamespaces the manager runs cluster-wide and reconciles a CMSC
+in any namespace — it need not share the CR's namespace. What matters is that
+the pod is alive when the CR is deleted, so the finalizer can strip.
+
+Colocating the operator and CR in one namespace (the recommended lab layout) is
+the specific case where deleting that namespace also kills the manager: if you
+delete the namespace (or the operator Deployment / CSV) first, the manager dies
+before it can strip the finalizer, the namespace stays `Terminating`, and the
 ConsoleLink leaks cluster-wide.
 
 This does **not** delete your PostgreSQL, Kafka, object storage, or Keycloak.
@@ -32,7 +38,14 @@ oc -n "$NAMESPACE" get deploy,pods
 
 # Delete the CR and wait for finalizer cleanup
 oc -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s
-if oc -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+# Fail closed: --ignore-not-found returns success + empty only when the CR is
+# truly gone; a real query failure (auth, API down) is nonzero and must NOT
+# fall through to deleting the namespace.
+if ! remaining=$(oc -n "$NAMESPACE" get cmsc "$CR_NAME" --ignore-not-found -o name 2>/dev/null); then
+  echo "Could not query the CMSC (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See recovery below." >&2
   exit 1
 fi
