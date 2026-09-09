@@ -255,7 +255,7 @@ def perf_result(
         test_id=f"{request.node.nodeid}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
         test_name=request.node.name,
         profile=performance_profile,
-        chart_version=chart_version,
+        operator_version=chart_version,
         timestamp=datetime.now(timezone.utc).isoformat(),
         cluster_info=cluster_info,
     )

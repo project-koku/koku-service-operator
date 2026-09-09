@@ -60,7 +60,7 @@ class PerformanceResult:
     test_id: str
     test_name: str
     profile: str
-    chart_version: str
+    operator_version: str
     timestamp: str
     cluster_info: ClusterInfo
     timings: List[TimingMetric] = field(default_factory=list)

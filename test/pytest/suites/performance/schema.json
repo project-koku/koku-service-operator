@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/insights-onprem/cost-onprem-chart/tests/performance-result",
+  "$id": "https://github.com/project-koku/koku-service-operator/test/pytest/suites/performance-result",
   "title": "Performance Test Result",
   "description": "Schema for Cost On-Prem performance test results (FLPATH-4036)",
   "type": "object",
-  "required": ["test_id", "test_name", "profile", "chart_version", "timestamp", "cluster_info", "passed"],
+  "required": ["test_id", "test_name", "profile", "operator_version", "timestamp", "cluster_info", "passed"],
   "properties": {
     "test_id": {
       "type": "string",
@@ -19,9 +19,9 @@
       "description": "Performance profile used (small, medium, large, xlarge, etc.)",
       "enum": ["baseline", "small", "medium", "large", "xlarge", "stress_p99", "stress_max", "single_source_burst"]
     },
-    "chart_version": {
+    "operator_version": {
       "type": "string",
-      "description": "Helm chart version under test"
+      "description": "Operator image tag under test (e.g. quay.io/…:tag)"
     },
     "timestamp": {
       "type": "string",

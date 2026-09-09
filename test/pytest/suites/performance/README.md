@@ -107,7 +107,7 @@ Each test result follows this structure:
   "test_id": "test_perf_ing_001-20260415123456",
   "test_name": "test_perf_ing_001_single_source_baseline",
   "profile": "small",
-  "chart_version": "0.2.20-rc1",
+  "operator_version": "0.2.20-rc1",
   "timestamp": "2026-04-15T12:34:56.789Z",
   "cluster_info": {
     "ocp_version": "4.20.0",

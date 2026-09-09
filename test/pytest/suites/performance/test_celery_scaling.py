@@ -675,12 +675,15 @@ def capture_warm_state_indicators(
         except (ValueError, IndexError):
             indicators["pg_active_connections"] = -1
 
-    # Worker pod ages — use the actual chart labels:
-    #   Workers: app.kubernetes.io/component=cost-worker, cost-onprem.io/worker-queue=<queue>
+    # Worker pod ages — operator uses per-queue component labels and a shared
+    # metrics-role label.  The old Helm chart used a single component=cost-worker
+    # label, but the operator splits workers by queue (cost-worker-celery,
+    # cost-worker-ocp, etc.).  Use the metrics-role label to select all workers.
+    #   Workers: cost-management.openshift.io/metrics-role=celery-worker
     #   Listener: app.kubernetes.io/component=listener
     worker_ages: Dict[str, float] = {}
     label_selectors = [
-        f"app.kubernetes.io/instance={helm_release},app.kubernetes.io/component=cost-worker",
+        f"app.kubernetes.io/instance={helm_release},cost-management.openshift.io/metrics-role=celery-worker",
         f"app.kubernetes.io/instance={helm_release},app.kubernetes.io/component=listener",
     ]
     for selector in label_selectors:
