@@ -11,8 +11,8 @@ import (
 
 const (
 	sampleDefault    = "service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
-	sampleMinimal    = "service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml"
-	sampleProduction = "service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml"
+	sampleMinimal    = "install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml"
+	sampleProduction = "install/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml"
 	sampleCommunity  = "service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml"
 
 	redhatRegistry = "registry.redhat.io"

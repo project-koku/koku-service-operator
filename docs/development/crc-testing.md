@@ -26,7 +26,7 @@ NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testin
 
 # 4. Terminal B — minimal CR (bundled DB/cache; no UI/Kafka/Keycloak)
 oc apply -n cost-onprem \
-  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
+  -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
 
 oc get pods -n cost-onprem -w
 ```
@@ -119,7 +119,7 @@ NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testin
 
 | Goal | Sample |
 |------|--------|
-| Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
+| Koku API + celery only (recommended on CRC) | `config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
 | BYOI template — fill in external infra (Kafka, Keycloak, S3, UI secrets) before applying; rejected by admission unedited | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
 | Turnkey bundled stack (Postgres/Valkey + public images) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml` |
 | BYOI smoke | `config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml` |
