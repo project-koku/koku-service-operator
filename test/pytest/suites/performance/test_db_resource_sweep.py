@@ -39,6 +39,7 @@ from e2e_helpers import (
 )
 from utils import get_pod_by_label, run_oc_command
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import (
     APIProbeThread,
@@ -509,6 +510,7 @@ class TestAPIUnderLoad:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
         jwt_token: JWTToken,
     ):
         """Measure API latency with and without active ingestion processing."""
@@ -543,8 +545,9 @@ class TestAPIUnderLoad:
 
         with perf_timer.measure("source_registration"):
             source = register_source(
-                self.namespace, ingress_pod, koku_api_url,
+                self.namespace, koku_api_pod, koku_api_url,
                 rh_identity_header, cluster_id, "org1234567", source_name,
+                container=_KOKU_API_CONTAINER,
             )
 
         perf_cleanup.track(

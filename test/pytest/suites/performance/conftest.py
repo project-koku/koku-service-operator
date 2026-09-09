@@ -26,6 +26,12 @@ import requests
 from conftest import ClusterConfig, DatabaseConfig, obtain_jwt_token
 from utils import get_pod_by_label
 
+# Operator NetworkPolicy does not allow the ingress pod to reach koku-api.
+# Exec API curls (source registration, source-type lookup) from the koku-api
+# pod instead — same pattern used by suites/cost_management/conftest.py.
+_KOKU_API_LABEL = "app.kubernetes.io/component=cost-management-api"
+_KOKU_API_CONTAINER = "koku-api"
+
 from .data_classes import ClusterInfo, PerformanceResult
 from .helpers import (
     PERF_CONFIG,
@@ -205,6 +211,23 @@ def ingress_pod(cluster_config: ClusterConfig) -> str:
 
 
 @pytest.fixture(scope="session")
+def koku_api_pod(cluster_config: ClusterConfig) -> str:
+    """Get the koku-api pod name for in-cluster API calls.
+
+    The operator NetworkPolicy blocks the ingress pod from reaching koku-api
+    on port 8000, so source registration and source-type lookups must be exec'd
+    from the koku-api pod itself.  Use this fixture (with container=_KOKU_API_CONTAINER)
+    wherever register_source / get_source_type_id is called.
+
+    See: suites/cost_management/conftest.py for the same pattern.
+    """
+    pod = get_pod_by_label(cluster_config.namespace, _KOKU_API_LABEL)
+    if not pod:
+        pytest.skip("koku-api pod not found")
+    return pod
+
+
+@pytest.fixture(scope="session")
 def authenticated_session(keycloak_config) -> requests.Session:
     """Get a requests.Session with a fresh JWT token."""
     return create_authenticated_session(keycloak_config)
@@ -296,6 +319,7 @@ def labeled_nise_source(
     ensure_tags_enabled,
     koku_api_url: str,
     ingress_pod: str,
+    koku_api_pod: str,
 ):
     """Create a NISE source with labeled data for tag filtering tests.
 
@@ -329,8 +353,9 @@ def labeled_nise_source(
     print(f"\n[labeled_nise_source] Creating source {source_name} with labeled data")
 
     source = register_source(
-        namespace, ingress_pod, koku_api_url,
+        namespace, koku_api_pod, koku_api_url,
         rh_identity_header, cluster_id, "org1234567", source_name,
+        container=_KOKU_API_CONTAINER,
     )
 
     perf_cleanup.track(

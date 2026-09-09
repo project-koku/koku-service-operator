@@ -70,6 +70,7 @@ from utils import (
     run_oc_command,
 )
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import PerfResultCollector, PerfTestConfig, save_perf_result
 from .profiles import ACTIVE_PROFILE as _ACTIVE_PROFILE
@@ -836,6 +837,7 @@ class TestSoakStability:
         gateway_url,
         upload_url,
         ingress_pod,
+        koku_api_pod,
         koku_api_url,
         jwt_token: JWTToken,
         keycloak_config,
@@ -859,12 +861,13 @@ class TestSoakStability:
         # Register source
         source = register_source(
             cluster_config.namespace,
-            ingress_pod,
+            koku_api_pod,
             koku_api_url,
             rh_identity_header,
             cluster_id,
             "org1234567",
             source_name,
+            container=_KOKU_API_CONTAINER,
         )
         
         perf_cleanup.track(

@@ -42,6 +42,7 @@ from utils import (
     run_oc_command,
 )
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import (
     PerfResultCollector,
@@ -842,6 +843,7 @@ class TestRBACPerf:
         koku_api_url: str,
         rh_identity_header: str,
         ingress_pod: str,
+        koku_api_pod: str,
         perf_timer: PerfTimer,
         perf_result: PerformanceResult,
         perf_collector: PerfResultCollector,
@@ -880,12 +882,13 @@ class TestRBACPerf:
                 source_name = f"rbac-ing-{i}-{cluster_id[-6:]}"
                 source = register_source(
                     self.namespace,
-                    ingress_pod,
+                    koku_api_pod,
                     koku_api_url,
                     rh_identity_header,
                     cluster_id,
                     "org1234567",
                     source_name,
+                    container=_KOKU_API_CONTAINER,
                 )
                 perf_cleanup.track(
                     source_id=source.source_id,

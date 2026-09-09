@@ -51,6 +51,7 @@ from e2e_helpers import (
 )
 from utils import run_oc_command
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import (
     APIProbeThread,
@@ -218,6 +219,7 @@ class TestStress:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
         keycloak_config,
         gateway_url: str,
     ):
@@ -270,12 +272,13 @@ class TestStress:
 
                     source = register_source(
                         self.namespace,
-                        ingress_pod,
+                        koku_api_pod,
                         koku_api_url,
                         rh_identity_header,
                         cluster_id,
                         "org1234567",
                         source_name,
+                        container=_KOKU_API_CONTAINER,
                     )
                     perf_cleanup.track(
                         source_id=source.source_id,
@@ -489,6 +492,7 @@ class TestStress:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
         keycloak_config,
         gateway_url: str,
     ):
@@ -578,12 +582,13 @@ class TestStress:
 
                     source = register_source(
                         self.namespace,
-                        ingress_pod,
+                        koku_api_pod,
                         koku_api_url,
                         rh_identity_header,
                         cluster_id,
                         "org1234567",
                         source_name,
+                        container=_KOKU_API_CONTAINER,
                     )
                     perf_cleanup.track(
                         source_id=source.source_id,

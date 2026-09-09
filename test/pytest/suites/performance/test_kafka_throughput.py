@@ -25,6 +25,7 @@ from e2e_helpers import (
 )
 from utils import run_oc_command
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import (
     PerfResultCollector,
@@ -130,6 +131,7 @@ class TestKafkaThroughputCeiling:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """Concurrent uploads with Kafka consumer lag monitoring.
 
@@ -157,12 +159,13 @@ class TestKafkaThroughputCeiling:
                 source_name = f"perf-kaf-001-{i:02d}-{cluster_id[-8:]}"
                 source = register_source(
                     self.namespace,
-                    ingress_pod,
+                    koku_api_pod,
                     koku_api_url,
                     rh_identity_header,
                     cluster_id,
                     "org1234567",
                     source_name,
+                    container=_KOKU_API_CONTAINER,
                 )
                 perf_cleanup.track(
                     source_id=source.source_id,
@@ -422,16 +425,19 @@ class TestKafkaPartitionScaling:
         database_config,
         perf_cleanup: PerfCleanupTracker,
         label: str,
+        koku_api_pod: str = None,
     ) -> Dict[str, Any]:
         """Run a batch of concurrent uploads and return throughput metrics."""
+        api_pod = koku_api_pod or ingress_pod
         sources: List[Dict[str, Any]] = []
         for i in range(concurrent_sources):
             cluster_id = generate_cluster_id()
             source_name = f"perf-kaf-002-{label}-{i:02d}-{cluster_id[-8:]}"
             source = register_source(
-                self.namespace, ingress_pod,
+                self.namespace, api_pod,
                 koku_api_url, rh_identity_header,
                 cluster_id, "org1234567", source_name,
+                container=_KOKU_API_CONTAINER,
             )
             perf_cleanup.track(
                 source_id=source.source_id,
@@ -537,6 +543,7 @@ class TestKafkaPartitionScaling:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """Scale partitions and listener replicas, measuring throughput delta.
 
@@ -561,6 +568,7 @@ class TestKafkaPartitionScaling:
                     concurrent, ingress_url, ingress_pod,
                     koku_api_url, rh_identity_header,
                     database_config, perf_cleanup, "baseline",
+                    koku_api_pod=koku_api_pod,
                 )
                 results.append(baseline)
 
@@ -577,6 +585,7 @@ class TestKafkaPartitionScaling:
                     concurrent, ingress_url, ingress_pod,
                     koku_api_url, rh_identity_header,
                     database_config, perf_cleanup, "3part-3rep",
+                    koku_api_pod=koku_api_pod,
                 )
                 results.append(scaled)
 
