@@ -68,7 +68,7 @@ follows [Critical rules](#critical-rules-read-first) below.
 
 ```bash
 oc delete subscription koku-service-operator -n openshift-operators --ignore-not-found
-oc delete csv -n openshift-operators -l operators.coreos.com/koku-service-operator.koku-service-operator --ignore-not-found
+oc delete csv -n openshift-operators -l operators.coreos.com/koku-service-operator.openshift-operators --ignore-not-found
 oc delete catalogsource koku-service-operator-catalog -n openshift-marketplace --ignore-not-found
 oc delete namespace cost-byoi --ignore-not-found
 ```

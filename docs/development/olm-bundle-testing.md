@@ -81,20 +81,26 @@ export CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION}"
 
 # Bundle must already be pushed and listable (steps above).
 make catalog-build-amd64 BUNDLE_IMGS="$BUNDLE_IMG" CATALOG_IMG="$CATALOG_IMG"
-docker push "$CATALOG_IMG"
 
 # Sanity check before pushing to a remote cluster:
 docker inspect "$CATALOG_IMG" --format '{{.Architecture}}'   # expect: amd64
+
+make catalog-push CATALOG_IMG="$CATALOG_IMG"
 ```
 
 `DOCKER_DEFAULT_PLATFORM=linux/amd64` does **not** fix `make catalog-build` —
 opm does not forward that to its internal build.
 
+If your container engine adds attestation tags that break registry or cluster
+pulls, rebuild the catalog image manually with `--provenance=false --sbom=false`
+(same flags as the bundle steps above) instead of relying on `catalog-build-amd64`'s
+internal `docker build`.
+
 ### Same architecture (CRC on Apple Silicon, local arm64)
 
 ```bash
 make catalog-build BUNDLE_IMGS="$BUNDLE_IMG" CATALOG_IMG="$CATALOG_IMG"
-docker push "$CATALOG_IMG"
+make catalog-push CATALOG_IMG="$CATALOG_IMG"
 ```
 
 Wire the cluster:
