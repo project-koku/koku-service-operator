@@ -59,6 +59,54 @@ docker build --platform "$PLATFORM" --provenance=false --sbom=false \
 docker push "${IMAGE_TAG_BASE}-bundle:v${VERSION}"
 ```
 
+## Build and push catalog (personal Quay)
+
+Use this when the cluster installs via **CatalogSource** + **Subscription** (IQE
+OLM fixtures, cluster-bot) instead of `make bundle-run`.
+
+### Mac ARM → amd64 cluster (cluster-bot, MCE, most cloud OpenShift)
+
+`make catalog-build` runs `opm index add`, which calls your container engine
+**without** `--platform`. On Apple Silicon the catalog image is **arm64** and
+fails on amd64 workers with `exec /bin/opm: Exec format error`.
+
+Use `make catalog-build-amd64` (generates `index.Dockerfile`, then builds with
+`--platform linux/amd64`):
+
+```bash
+export IMAGE_TAG_BASE=quay.io/<user>/koku-service-operator
+export VERSION=0.0.1-test
+export BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION}"
+export CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION}"
+
+# Bundle must already be pushed and listable (steps above).
+make catalog-build-amd64 BUNDLE_IMGS="$BUNDLE_IMG" CATALOG_IMG="$CATALOG_IMG"
+docker push "$CATALOG_IMG"
+
+# Sanity check before pushing to a remote cluster:
+docker inspect "$CATALOG_IMG" --format '{{.Architecture}}'   # expect: amd64
+```
+
+`DOCKER_DEFAULT_PLATFORM=linux/amd64` does **not** fix `make catalog-build` —
+opm does not forward that to its internal build.
+
+### Same architecture (CRC on Apple Silicon, local arm64)
+
+```bash
+make catalog-build BUNDLE_IMGS="$BUNDLE_IMG" CATALOG_IMG="$CATALOG_IMG"
+docker push "$CATALOG_IMG"
+```
+
+Wire the cluster:
+
+```bash
+# CatalogSource spec.image = $CATALOG_IMG
+# Subscription: package koku-service-operator, channel beta,
+# source <your-catalog-name>, sourceNamespace openshift-marketplace
+```
+
+See also [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md#iqe-olm-smoke-only-no-full-stack).
+
 Optional check (single Docker v2 manifest, not an OCI index):
 
 ```bash

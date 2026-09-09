@@ -420,9 +420,20 @@ endif
 # Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
 # This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
 # https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
+#
+# On Mac ARM building for an amd64 OpenShift lab/cluster-bot node, use catalog-build-amd64 instead —
+# opm's internal container build does not pass --platform and produces an arm64 catalog (Exec format error on amd64).
+CATALOG_INDEX_DOCKERFILE ?= index.Dockerfile
+OPM_BINARY_IMAGE ?= quay.io/operator-framework/opm:v1.55.0
+
 .PHONY: catalog-build
 catalog-build: opm ## Build a catalog image.
 	$(OPM) index add --container-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+
+.PHONY: catalog-build-amd64
+catalog-build-amd64: opm ## Build a linux/amd64 catalog image (Mac ARM → remote amd64 cluster).
+	$(OPM) index add --pull-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT) --generate --out-dockerfile $(CATALOG_INDEX_DOCKERFILE) --binary-image $(OPM_BINARY_IMAGE)
+	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_INDEX_DOCKERFILE) -t $(CATALOG_IMG) .
 
 # Push the catalog image.
 .PHONY: catalog-push
