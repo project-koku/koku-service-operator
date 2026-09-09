@@ -395,12 +395,47 @@ dto_parse_duration_seconds() {
 }
 
 dto_run_pytest() {
-  dto_log_step "Running pytest suite"
   export NAMESPACE HELM_RELEASE_NAME KEYCLOAK_NAMESPACE
   if [[ "${VERBOSE:-false}" == "true" ]]; then
     export VERBOSE=true
   fi
 
+  # Homebrew Python often sets REQUESTS_CA_BUNDLE; breaks in-cluster TLS in pytest.
+  unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
+
+  # ── Performance-only path ──────────────────────────────────────────────────
+  # Sources scripts/lib/perf-testing.sh which handles profile config, listener
+  # CPU tuning, suite→flag mapping, and result upload.  Mirrors the entrypoint
+  # used by the legacy deploy-test-cost-onprem.sh --perf-only path.
+  if [[ "${PERF_ONLY:-false}" == "true" ]]; then
+    dto_log_step "Running performance tests (profile: ${PERF_PROFILE:-baseline}, suite: ${PERF_SUITE:-all})"
+    local perf_lib="${ROOT}/scripts/lib/perf-testing.sh"
+    if [[ ! -f "$perf_lib" ]]; then
+      dto_log_error "perf-testing lib not found: ${perf_lib}"
+      exit 1
+    fi
+    # shellcheck disable=SC1090
+    source "$perf_lib"
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+      dto_log_info "DRY RUN: would call apply_perf_profile_config + run_performance_tests"
+      dto_log_info "  PERF_PROFILE=${PERF_PROFILE:-baseline}"
+      dto_log_info "  PERF_SUITE=${PERF_SUITE:-all}"
+      dto_log_info "  LISTENER_CPU_LIMIT=${LISTENER_CPU_LIMIT:-<auto>}"
+      dto_log_info "  SKIP_PROFILE_CONFIG=${SKIP_PROFILE_CONFIG:-false}"
+      return 0
+    fi
+
+    if ! run_performance_tests; then
+      dto_log_error "Performance tests failed — see test/pytest/perf-runs/"
+      exit 1
+    fi
+    dto_log_success "Performance tests completed"
+    return 0
+  fi
+
+  # ── Standard pytest path ──────────────────────────────────────────────────
+  dto_log_step "Running pytest suite"
   local pytest_script="${ROOT}/scripts/run-pytest.sh"
   if [[ ! -f "$pytest_script" ]]; then
     dto_log_error "pytest runner not found: ${pytest_script}"
@@ -420,9 +455,6 @@ dto_run_pytest() {
     dto_log_info "DRY RUN: would execute: ${pytest_script} ${pytest_args[*]:-}"
     return 0
   fi
-
-  # Homebrew Python often sets REQUESTS_CA_BUNDLE; breaks in-cluster TLS in pytest.
-  unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
 
   if ! "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
     dto_log_error "pytest failed — see test/pytest/reports/"
