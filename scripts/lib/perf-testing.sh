@@ -7,11 +7,11 @@
 #           validate_cpu_limit, set_listener_cpu (from lib/listener-cpu.sh)
 # Requires: start_metrics_collection, stop_metrics_collection,
 #           upload_perf_results_to_s3, generate_metadata_json (from lib/perf-observability.sh)
-# Globals:  NAMESPACE, HELM_RELEASE_NAME, DRY_RUN, PERF_PROFILE, PERF_SUITE,
+# Globals:  NAMESPACE, CMSC_NAME, DRY_RUN, PERF_PROFILE, PERF_SUITE,
 #           VERBOSE, LISTENER_CPU_LIMIT, CPU_BOOST_APPLIED,
 #           ORIGINAL_LISTENER_CPU_LIMIT, MAX_LISTENER_CPU,
 #           TEST_RUN_ID, PERF_OUTPUT_DIR, LOCAL_SCRIPTS_DIR,
-#           USE_LOCAL_CHART, PROJECT_ROOT, SKIP_GRAFANA_LINKS,
+#           PROJECT_ROOT, SKIP_GRAFANA_LINKS,
 #           GRAFANA_URL, GRAFANA_USER, GRAFANA_PASSWORD, GRAFANA_NAMESPACE
 
 [[ -n "${_PERF_TESTING_SOURCED:-}" ]] && return 0
@@ -25,19 +25,15 @@ _PERF_TESTING_SOURCED=1
 # the given PERF_PROFILE before tests run.  Called at the start of
 # run_performance_tests() unless --skip-profile-config is set (COST-7599).
 #
-# Two-phase approach:
-#   Phase 1 — helm upgrade --reuse-values --set …
-#     Applies all values.yaml-driven settings that differ from chart defaults:
-#       · resource limits (cpu/memory) for kruize, ros-processor, listener
-#       · ingress max upload size
-#       · HAProxy route timeout (via annotation override)
-#       · Envoy ingress route timeouts (via templated values)
-#     This issues a single Helm release revision so changes are tracked.
+# Operator path (COST-8147): resource limits and ingress timeouts are managed
+# via the CostManagementServiceConfig CR — not via helm upgrade.  Phase 1 is
+# intentionally a no-op stub.  To adjust resources for a profile, patch the
+# CMSC spec before invoking this script.
 #
-#   Phase 2 — oc scale
-#     Replica counts are set directly (idempotent, faster than helm upgrade).
-#     Kruize is always kept at replicas=1 (scaling degrades throughput,
-#     see PERF-FINDING-004).
+# Phase 2 — oc scale
+#   Replica counts are set directly (idempotent, fast).
+#   Kruize is always kept at replicas=1 (scaling degrades throughput,
+#   see PERF-FINDING-004).
 #
 # Profile matrix (chart defaults = small since COST-7599):
 #   baseline/small : chart defaults (no-op — 2 replicas, 180s timeouts, etc.)
@@ -45,7 +41,7 @@ _PERF_TESTING_SOURCED=1
 #   large          : replicas=3; raised resources, 500MB upload, 600s timeouts
 #   xlarge         : replicas=3; higher worker CPU (1000m/2000m) for tag processing
 apply_perf_profile_config() {
-    local release="${HELM_RELEASE_NAME:-cost-onprem}"
+    local release="${CMSC_NAME:-cost-onprem}"
     local namespace="${NAMESPACE:-cost-onprem}"
 
     # Baseline defaults match the chart's values.yaml (small profile).
@@ -145,63 +141,20 @@ apply_perf_profile_config() {
     log_info "  haproxy/envoy ingress timeout             = ${haproxy_timeout}"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_info "DRY RUN: Would run helm upgrade --reuse-values --set <all overrides above>"
         log_info "DRY RUN: Would scale: processor=${ros_processor_replicas} listener=${listener_replicas} ocp=${ocp_worker_replicas} summary=${summary_worker_replicas} kruize=1"
+        log_info "DRY RUN: Resource limits (cpu/memory) and ingress timeouts are managed via the CMSC CR — patch spec before running."
         return 0
     fi
 
-    # Phase 1: helm upgrade — apply resource/timeout/size overrides
-    local chart_ref
-    if [[ "${USE_LOCAL_CHART:-false}" == "true" ]]; then
-        chart_ref="${PROJECT_ROOT}/cost-onprem"
-    else
-        chart_ref="cost-onprem-chart/cost-onprem"
-    fi
+    # Phase 1 — STUB (operator path)
+    # Resource limits, ingress upload sizes, and timeouts are driven by the
+    # CostManagementServiceConfig CR, not by helm upgrade.  Patch the CMSC spec
+    # before invoking this function if profile-specific resource overrides are
+    # needed.  The suggested per-profile values are logged above for reference.
+    log_info "Phase 1 skipped: resource/timeout configuration is owned by the CMSC CR (operator path)."
+    log_info "  To apply profile overrides, patch spec.CostManagement.* in the CMSC before running tests."
 
-    log_info "Applying resource/timeout overrides via helm upgrade..."
-    if ! helm upgrade "${release}" "${chart_ref}" \
-            --reuse-values \
-            --no-hooks \
-            --namespace "${namespace}" \
-            --set "resources.kruize.requests.cpu=${kruize_cpu_req}" \
-            --set "resources.kruize.limits.cpu=${kruize_cpu_lim}" \
-            --set "resources.rosProcessor.requests.memory=${ros_mem_req}" \
-            --set "resources.rosProcessor.limits.memory=${ros_mem_lim}" \
-            --set "costManagement.listener.resources.requests.memory=${listener_mem_req}" \
-            --set "costManagement.listener.resources.limits.memory=${listener_mem_lim}" \
-            --set "costManagement.celery.workers.ocp.resources.requests.cpu=${ocp_worker_cpu_req}" \
-            --set "costManagement.celery.workers.ocp.resources.limits.cpu=${ocp_worker_cpu_lim}" \
-            --set "costManagement.celery.workers.ocp.resources.requests.memory=${ocp_worker_mem_req}" \
-            --set "costManagement.celery.workers.ocp.resources.limits.memory=${ocp_worker_mem_lim}" \
-            --set "costManagement.celery.workers.summary.resources.requests.cpu=${summary_worker_cpu_req}" \
-            --set "costManagement.celery.workers.summary.resources.limits.cpu=${summary_worker_cpu_lim}" \
-            --set "ingress.upload.maxUploadSize=${max_upload_size}" \
-            --set "ingress.upload.maxMemory=${max_upload_mem}" \
-            --set "resources.application.requests.memory=${app_mem_req}" \
-            --set "resources.application.limits.memory=${app_mem_lim}" \
-            --set "jwtAuth.envoy.ingressTimeout=${ingress_timeout}" \
-            --set "jwtAuth.envoy.ingressPerTryTimeout=${ingress_per_try_timeout}" \
-            --set "gatewayRoute.annotations.haproxy\\.router\\.openshift\\.io/timeout=${haproxy_timeout}" \
-            --wait --timeout 10m 2>&1; then
-        log_warning "helm upgrade for profile config failed — continuing with oc scale only; resource limits may not match profile"
-    else
-        log_success "Resource/timeout overrides applied"
-    fi
-
-    # Envoy reads its config at startup only — restart the gateway pod so the
-    # ConfigMap changes (ingress timeout, per-try timeout) actually take effect.
-    local gw_deploy="${release}-gateway"
-    if oc rollout restart deployment "${gw_deploy}" -n "${namespace}" 2>/dev/null; then
-        if oc rollout status deployment "${gw_deploy}" -n "${namespace}" --timeout=2m 2>/dev/null; then
-            log_success "Gateway pod restarted (Envoy config reloaded)"
-        else
-            log_warning "Gateway rollout did not stabilize — Envoy may still use old timeouts"
-        fi
-    else
-        log_warning "Could not restart gateway deployment — Envoy may still use old timeouts"
-    fi
-
-    # Phase 2: oc scale — replica counts (faster than helm upgrade)
+    # Phase 2: oc scale — replica counts (idempotent)
     local scale_failed=false
     _scale_deploy() {
         local name="$1" replicas="$2"
@@ -387,23 +340,29 @@ run_performance_tests() {
 
     local perf_args=()
     if [[ "${PERF_SUITE}" == "all" ]]; then
-        perf_args+=("--performance")
+        # "all" runs every suite EXCEPT stress and soak tests (which can
+        # take hours to days). Request those explicitly when needed.
+        # NOTE: When adding a new perf suite, add it here too.
+        perf_args+=("--perf-api" "--perf-ros" "--perf-ingestion" "--perf-scale"
+                    "--perf-valkey" "--perf-db" "--perf-kafka"
+                    "--perf-celery" "--perf-rbac")
     else
         IFS=',' read -ra suites <<< "${PERF_SUITE}"
         for suite in "${suites[@]}"; do
             case "${suite}" in
-                api)       perf_args+=("--perf-api") ;;
-                ros)       perf_args+=("--perf-ros") ;;
-                ingestion) perf_args+=("--perf-ingestion") ;;
-                scale)     perf_args+=("--perf-scale") ;;
-                soak)      perf_args+=("--perf-soak") ;;
-                valkey)    perf_args+=("--perf-valkey") ;;
-                db)        perf_args+=("--perf-db") ;;
-                kafka)     perf_args+=("--perf-kafka") ;;
-                celery)    perf_args+=("--perf-celery") ;;
-                stress)    perf_args+=("--perf-stress") ;;
-                stress_ramp)    perf_args+=("--perf-stress-ramp") ;;
-                stress_recovery) perf_args+=("--perf-stress-recovery") ;;
+                api)              perf_args+=("--perf-api") ;;
+                ros)              perf_args+=("--perf-ros") ;;
+                ingestion)        perf_args+=("--perf-ingestion") ;;
+                scale)            perf_args+=("--perf-scale") ;;
+                soak)             perf_args+=("--perf-soak") ;;
+                valkey)           perf_args+=("--perf-valkey") ;;
+                db)               perf_args+=("--perf-db") ;;
+                kafka)            perf_args+=("--perf-kafka") ;;
+                celery)           perf_args+=("--perf-celery") ;;
+                stress)           perf_args+=("--perf-stress") ;;
+                stress_ramp)      perf_args+=("--perf-stress-ramp") ;;
+                stress_recovery)  perf_args+=("--perf-stress-recovery") ;;
+                rbac)             perf_args+=("--perf-rbac") ;;
             esac
         done
     fi
@@ -447,7 +406,7 @@ run_performance_tests() {
 
         local run_report_script="${scripts_dir}/generate-perf-run-report.py"
         local _report_python=""
-        local _venv_py="$(dirname "${BASH_SOURCE[0]}")/../../tests/.venv/bin/python"
+        local _venv_py="$(dirname "${BASH_SOURCE[0]}")/../../test/pytest/.venv/bin/python"
         if [[ -x "${_venv_py}" ]]; then
             _report_python="${_venv_py}"
         elif command -v python3 &>/dev/null; then
@@ -524,9 +483,15 @@ generate_metadata_json() {
         fi
     fi
 
-    local chart_version="unknown"
-    if command -v helm &>/dev/null; then
-        chart_version=$(helm list -n "${NAMESPACE}" -o json 2>/dev/null | jq -r ".[0].app_version // .[0].chart // \"unknown\"" 2>/dev/null || echo "unknown")
+    local operator_version="unknown"
+    if command -v oc &>/dev/null; then
+        local _img
+        _img=$(oc get deploy -n "${NAMESPACE}" \
+            -l control-plane=controller-manager \
+            -o jsonpath='{.items[0].spec.template.spec.containers[0].image}' 2>/dev/null || true)
+        if [[ -n "${_img}" ]]; then
+            operator_version="${_img##*:}"
+        fi
     fi
 
     local metrics_count=$(find "${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/metrics" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
@@ -536,7 +501,7 @@ generate_metadata_json() {
     cat > "${metadata_file}" <<EOF
 {
   "test_run_id": "${TEST_RUN_ID}",
-  "chart_version": "${chart_version}",
+  "operator_version": "${operator_version}",
   "perf_profile": "${PERF_PROFILE}",
   "perf_suite": "${PERF_SUITE}",
   "listener_cpu_limit": "${LISTENER_CPU:-default}",

@@ -1,0 +1,222 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/insights-onprem/cost-onprem-chart/tests/performance-result",
+  "title": "Performance Test Result",
+  "description": "Schema for Cost On-Prem performance test results (FLPATH-4036)",
+  "type": "object",
+  "required": ["test_id", "test_name", "profile", "chart_version", "timestamp", "cluster_info", "passed"],
+  "properties": {
+    "test_id": {
+      "type": "string",
+      "description": "Unique identifier for this test run (test_name + timestamp)"
+    },
+    "test_name": {
+      "type": "string",
+      "description": "Name of the test function"
+    },
+    "profile": {
+      "type": "string",
+      "description": "Performance profile used (small, medium, large, xlarge, etc.)",
+      "enum": ["baseline", "small", "medium", "large", "xlarge", "stress_p99", "stress_max", "single_source_burst"]
+    },
+    "chart_version": {
+      "type": "string",
+      "description": "Helm chart version under test"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of test execution"
+    },
+    "cluster_info": {
+      "$ref": "#/definitions/ClusterInfo"
+    },
+    "timings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/TimingMetric"
+      },
+      "description": "Timing measurements for test operations"
+    },
+    "resource_snapshots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ResourceSnapshot"
+      },
+      "description": "Point-in-time resource usage snapshots"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Test-specific metrics (varies by test type)",
+      "additionalProperties": true
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "Whether the test passed"
+    },
+    "error_message": {
+      "type": ["string", "null"],
+      "description": "Error message if test failed"
+    }
+  },
+  "definitions": {
+    "ClusterInfo": {
+      "type": "object",
+      "description": "Information about the target cluster",
+      "properties": {
+        "ocp_version": {
+          "type": "string",
+          "description": "OpenShift cluster version"
+        },
+        "node_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of nodes"
+        },
+        "worker_node_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of worker nodes"
+        },
+        "total_cpu_cores": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total CPU cores across all nodes"
+        },
+        "total_memory_gib": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total memory in GiB"
+        },
+        "storage_class": {
+          "type": "string",
+          "description": "Storage class name"
+        },
+        "storage_type": {
+          "type": "string",
+          "description": "Storage type (ODF, S4, HPP, etc.)"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Cluster platform (AWS, GCP, bare-metal, etc.)"
+        }
+      }
+    },
+    "TimingMetric": {
+      "type": "object",
+      "required": ["name", "duration_seconds", "start_time", "end_time"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the timed operation"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Duration in seconds"
+        },
+        "start_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 start timestamp"
+        },
+        "end_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 end timestamp"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional metadata for the timing",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ResourceSnapshot": {
+      "type": "object",
+      "required": ["timestamp", "pod_name"],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of snapshot"
+        },
+        "pod_name": {
+          "type": "string",
+          "description": "Pod name (may include container: pod/container)"
+        },
+        "cpu_usage_cores": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Current CPU usage in cores"
+        },
+        "cpu_request_cores": {
+          "type": "number",
+          "minimum": 0,
+          "description": "CPU request in cores"
+        },
+        "cpu_limit_cores": {
+          "type": "number",
+          "minimum": 0,
+          "description": "CPU limit in cores"
+        },
+        "memory_usage_mib": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Current memory usage in MiB"
+        },
+        "memory_request_mib": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Memory request in MiB"
+        },
+        "memory_limit_mib": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Memory limit in MiB"
+        }
+      }
+    },
+    "LatencyPercentiles": {
+      "type": "object",
+      "description": "Latency statistics",
+      "properties": {
+        "p50": {
+          "type": "number",
+          "minimum": 0,
+          "description": "50th percentile (median) latency in seconds"
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0,
+          "description": "95th percentile latency in seconds"
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0,
+          "description": "99th percentile latency in seconds"
+        },
+        "min": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Minimum latency in seconds"
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum latency in seconds"
+        },
+        "avg": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Average latency in seconds"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of samples"
+        }
+      }
+    }
+  }
+}
