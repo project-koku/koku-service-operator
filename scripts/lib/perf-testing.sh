@@ -17,6 +17,9 @@
 [[ -n "${_PERF_TESTING_SOURCED:-}" ]] && return 0
 _PERF_TESTING_SOURCED=1
 
+[[ -f "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh" ]] \
+    && source "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh"
+
 ################################################################################
 # Per-Profile Cluster Configuration
 ################################################################################
@@ -41,8 +44,14 @@ _PERF_TESTING_SOURCED=1
 #   large          : replicas=3; raised resources, 500MB upload, 600s timeouts
 #   xlarge         : replicas=3; higher worker CPU (1000m/2000m) for tag processing
 apply_perf_profile_config() {
-    local release="${CMSC_NAME:-cost-onprem}"
+    perf_sync_release_env
+    local release
+    release="$(perf_release_prefix)"
     local namespace="${NAMESPACE:-cost-onprem}"
+    local ros_workloads_required=false
+    if perf_ros_workloads_required; then
+        ros_workloads_required=true
+    fi
 
     # Baseline defaults match the chart's values.yaml (small profile).
     # After COST-7599 these are the new chart defaults — the baseline/small
@@ -157,48 +166,78 @@ apply_perf_profile_config() {
     # Phase 2: oc scale — replica counts (idempotent)
     local scale_failed=false
     _scale_deploy() {
-        local name="$1" replicas="$2"
-        if oc scale deployment "${name}" --replicas="${replicas}" -n "${namespace}" 2>/dev/null; then
+        local name="$1" replicas="$2" required="${3:-true}"
+
+        if ! perf_deployment_exists "${name}"; then
+            if [[ "${required}" == "true" ]]; then
+                log_error "  deployment ${name} not found — cannot scale to ${replicas}"
+                if [[ "${name}" == *"-ros-processor" || "${name}" == *"-kruize" ]]; then
+                    log_error "  ROS workloads require spec.ros.enabled=true on CMSC ${namespace}/${release}"
+                fi
+                scale_failed=true
+            else
+                log_verbose "  skipping ${name} (not deployed)"
+            fi
+            return
+        fi
+
+        if perf_kubectl scale deployment "${name}" --replicas="${replicas}" -n "${namespace}" 2>/dev/null; then
             log_info "  scaled ${name} → ${replicas}"
         else
-            log_warning "  could not scale ${name} (may not exist yet)"
+            log_error "  could not scale ${name}"
             scale_failed=true
         fi
     }
 
-    _scale_deploy "${release}-ros-processor"          "${ros_processor_replicas}"
-    _scale_deploy "${release}-koku-listener"          "${listener_replicas}"
-    _scale_deploy "${release}-celery-worker-ocp"      "${ocp_worker_replicas}"
-    _scale_deploy "${release}-celery-worker-summary"  "${summary_worker_replicas}"
-    _scale_deploy "${release}-kruize"                 "1"
+    _scale_deploy "${release}-koku-listener"          "${listener_replicas}"          true
+    _scale_deploy "${release}-celery-worker-ocp"      "${ocp_worker_replicas}"        true
+    _scale_deploy "${release}-celery-worker-summary"  "${summary_worker_replicas}"    true
+    _scale_deploy "${release}-ros-processor"          "${ros_processor_replicas}"     "${ros_workloads_required}"
+    _scale_deploy "${release}-kruize"                 "1"                             "${ros_workloads_required}"
 
     if [[ "${scale_failed}" == "true" ]]; then
-        log_warning "One or more deployments could not be scaled — verify cluster state before running tests"
+        log_error "One or more deployments could not be scaled — verify cluster state before running tests"
         return 1
     fi
 
     log_info "Waiting for replica rollouts..."
     local rollout_ok=true
-    for deploy in \
-        "${release}-ros-processor" \
-        "${release}-koku-listener" \
-        "${release}-celery-worker-ocp" \
-        "${release}-celery-worker-summary" \
-        "${release}-kruize"; do
-        if ! oc rollout status deployment "${deploy}" -n "${namespace}" --timeout=3m 2>/dev/null; then
+    _wait_rollout() {
+        local deploy="$1" required="${2:-true}"
+        if ! perf_deployment_exists "${deploy}"; then
+            if [[ "${required}" == "true" ]]; then
+                log_error "  rollout skipped — ${deploy} not found"
+                rollout_ok=false
+            fi
+            return
+        fi
+        if ! perf_kubectl rollout status deployment "${deploy}" -n "${namespace}" --timeout=3m 2>/dev/null; then
             log_warning "  rollout timeout for ${deploy}"
             rollout_ok=false
         fi
-    done
+    }
+
+    _wait_rollout "${release}-koku-listener"          true
+    _wait_rollout "${release}-celery-worker-ocp"      true
+    _wait_rollout "${release}-celery-worker-summary"  true
+    _wait_rollout "${release}-ros-processor"          "${ros_workloads_required}"
+    _wait_rollout "${release}-kruize"                 "${ros_workloads_required}"
     [[ "${rollout_ok}" == "true" ]] && log_success "Rollouts complete" || log_warning "Some rollouts timed out"
 
     # Verify replica counts
     log_info "Verifying deployed replica counts..."
     local verified=true
     _verify_replicas() {
-        local deploy_name="$1" expected="$2"
+        local deploy_name="$1" expected="$2" required="${3:-true}"
+        if ! perf_deployment_exists "${deploy_name}"; then
+            if [[ "${required}" == "true" ]]; then
+                log_warning "  ✗ ${deploy_name}: not found (expected ${expected} replica(s))"
+                verified=false
+            fi
+            return
+        fi
         local actual
-        actual=$(oc get deployment "${deploy_name}" -n "${namespace}" \
+        actual=$(perf_kubectl get deployment "${deploy_name}" -n "${namespace}" \
                     -o jsonpath='{.spec.replicas}' 2>/dev/null)
         if [[ "${actual}" == "${expected}" ]]; then
             log_info "  ✓ ${deploy_name}: ${actual} replica(s)"
@@ -208,11 +247,11 @@ apply_perf_profile_config() {
         fi
     }
 
-    _verify_replicas "${release}-ros-processor"          "${ros_processor_replicas}"
-    _verify_replicas "${release}-koku-listener"          "${listener_replicas}"
-    _verify_replicas "${release}-celery-worker-ocp"      "${ocp_worker_replicas}"
-    _verify_replicas "${release}-celery-worker-summary"  "${summary_worker_replicas}"
-    _verify_replicas "${release}-kruize"                 "1"
+    _verify_replicas "${release}-koku-listener"          "${listener_replicas}"          true
+    _verify_replicas "${release}-celery-worker-ocp"      "${ocp_worker_replicas}"        true
+    _verify_replicas "${release}-celery-worker-summary"  "${summary_worker_replicas}"    true
+    _verify_replicas "${release}-ros-processor"          "${ros_processor_replicas}"     "${ros_workloads_required}"
+    _verify_replicas "${release}-kruize"                 "1"                             "${ros_workloads_required}"
 
     if [[ "${verified}" == "true" ]]; then
         log_success "All replica counts verified for ${PERF_PROFILE} profile"
@@ -223,7 +262,12 @@ apply_perf_profile_config() {
     # Verify Kruize pod actually has the expected CPU limit (catches scheduling
     # failures where the old ReplicaSet's pod keeps running with default resources)
     local actual_kruize_cpu_lim
-    actual_kruize_cpu_lim=$(oc get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+    if ! perf_deployment_exists "${release}-kruize"; then
+        log_verbose "  skipping Kruize CPU verification (not deployed)"
+        return 0
+    fi
+
+    actual_kruize_cpu_lim=$(perf_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
         --field-selector=status.phase=Running -o jsonpath='{.items[0].spec.containers[0].resources.limits.cpu}' 2>/dev/null)
     if [[ -n "${actual_kruize_cpu_lim}" ]]; then
         log_info "  Kruize running pod CPU limit: ${actual_kruize_cpu_lim} (expected: ${kruize_cpu_lim})"
@@ -242,16 +286,16 @@ apply_perf_profile_config() {
         if [[ "${actual_m}" != "${expected_m}" ]]; then
             log_warning "  Kruize pod has stale CPU limit — cleaning up stuck ReplicaSet"
             # Delete any Pending Kruize pods (from failed scheduling)
-            oc delete pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+            perf_kubectl delete pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
                 --field-selector=status.phase=Pending --grace-period=0 2>/dev/null || true
             # Scale stale ReplicaSets to 0
-            for rs in $(oc get rs -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+            for rs in $(perf_kubectl get rs -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
                 -o jsonpath='{range .items[?(@.status.readyReplicas==0)]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-                oc scale rs "${rs}" -n "${namespace}" --replicas=0 2>/dev/null || true
+                perf_kubectl scale rs "${rs}" -n "${namespace}" --replicas=0 2>/dev/null || true
             done
             # Restart the deployment to pick up new resources
-            oc rollout restart deployment "${release}-kruize" -n "${namespace}" 2>/dev/null || true
-            if oc rollout status deployment "${release}-kruize" -n "${namespace}" --timeout=3m 2>/dev/null; then
+            perf_kubectl rollout restart deployment "${release}-kruize" -n "${namespace}" 2>/dev/null || true
+            if perf_kubectl rollout status deployment "${release}-kruize" -n "${namespace}" --timeout=3m 2>/dev/null; then
                 log_success "  Kruize restarted with correct CPU limit"
             else
                 log_warning "  Kruize restart timed out — ROS tests may be slower than expected"
@@ -266,6 +310,7 @@ apply_perf_profile_config() {
 
 run_performance_tests() {
     log_step "Running performance tests (FLPATH-4036)"
+    perf_sync_release_env
 
     local pytest_script="${LOCAL_SCRIPTS_DIR}/run-pytest.sh"
     if [[ ! -x "${pytest_script}" ]]; then

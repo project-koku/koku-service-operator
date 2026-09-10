@@ -400,6 +400,8 @@ dto_setup_perf_lib() {
   LOCAL_SCRIPTS_DIR="${ROOT}/scripts"
   PROJECT_ROOT="${ROOT}"
   CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  HELM_RELEASE_NAME="${CMSC_NAME}"
+  export TEST_RUNNER="${TEST_RUNNER:-operator}"
   PERF_OUTPUT_DIR="${PERF_OUTPUT_DIR:-${PROJECT_ROOT}/tests/perf-runs}"
   TEST_RUN_ID="${TEST_RUN_ID:-}"
   CPU_BOOST_APPLIED="${CPU_BOOST_APPLIED:-false}"
@@ -414,6 +416,9 @@ dto_setup_perf_lib() {
   log_verbose() { dto_log_verbose "$@"; }
 
   local scripts_lib="${ROOT}/scripts/lib"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-common.sh" ]] && source "${scripts_lib}/perf-common.sh"
+  perf_sync_release_env
   # shellcheck disable=SC1090
   [[ -f "${scripts_lib}/listener-cpu.sh" ]] && source "${scripts_lib}/listener-cpu.sh"
   # shellcheck disable=SC1090
@@ -435,8 +440,64 @@ dto_perf_cleanup_on_exit() {
   exit "$exit_code"
 }
 
+dto_ensure_ros_for_perf() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would enable spec.ros.enabled=true on CMSC ${namespace}/${cr_name} and wait for ${cr_name}-kruize"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_error "CMSC ${namespace}/${cr_name} not found — cannot enable ROS for performance tests"
+    exit 1
+  fi
+
+  local enabled
+  enabled="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.spec.ros.enabled}' 2>/dev/null || true)"
+  if [[ "$enabled" == "true" ]]; then
+    dto_log_info "ROS already enabled on CMSC ${namespace}/${cr_name}"
+  else
+    dto_log_step "Enabling ROS on CMSC for performance tests (${namespace}/${cr_name})"
+    dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p '{"spec":{"ros":{"enabled":true}}}'
+  fi
+
+  local deploy="${cr_name}-kruize"
+  local deadline=$(( $(date +%s) + 600 ))
+  while (( $(date +%s) < deadline )); do
+    local cond
+    cond="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="ROSEnabled")].status}' 2>/dev/null || true)"
+    if [[ "$cond" == "True" ]]; then
+      dto_log_success "ROSEnabled condition is True"
+      break
+    fi
+    sleep 10
+  done
+
+  if ! dto_kubectl rollout status deployment "${deploy}" -n "${namespace}" --timeout=600s 2>/dev/null; then
+    dto_log_error "Kruize deployment ${namespace}/${deploy} not ready — ROS performance tests require Kruize"
+    dto_kubectl get deployment "${deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    dto_kubectl describe cmsc "${cr_name}" -n "${namespace}" 2>/dev/null | tail -40 || true
+    exit 1
+  fi
+
+  if ! dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+      --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+    dto_log_error "No Running Kruize pod found after ${deploy} rollout"
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    exit 1
+  fi
+
+  export ROS_ENABLED=true
+  dto_log_success "Kruize is ready for ROS performance tests (${deploy})"
+}
+
 dto_run_pytest() {
-  export NAMESPACE HELM_RELEASE_NAME KEYCLOAK_NAMESPACE CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  export NAMESPACE KEYCLOAK_NAMESPACE
+  export CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  export HELM_RELEASE_NAME="${CMSC_NAME}"
   if [[ "${VERBOSE:-false}" == "true" ]]; then
     export VERBOSE=true
   fi
@@ -463,7 +524,14 @@ dto_run_pytest() {
       dto_log_info "  PERF_SUITE=${PERF_SUITE:-all}"
       dto_log_info "  LISTENER_CPU_LIMIT=${LISTENER_CPU_LIMIT:-<auto>}"
       dto_log_info "  SKIP_PROFILE_CONFIG=${SKIP_PROFILE_CONFIG:-false}"
+      if perf_suite_needs_ros; then
+        dto_ensure_ros_for_perf
+      fi
       return 0
+    fi
+
+    if perf_suite_needs_ros; then
+      dto_ensure_ros_for_perf
     fi
 
     if ! run_performance_tests; then

@@ -31,6 +31,73 @@ from utils import get_pod_by_label
 # pod instead — same pattern used by suites/cost_management/conftest.py.
 _KOKU_API_LABEL = "app.kubernetes.io/component=cost-management-api"
 _KOKU_API_CONTAINER = "koku-api"
+_KRUIZE_LABEL = "app.kubernetes.io/component=ros-optimization"
+
+
+def find_kruize_pod(namespace: str, release_name: str) -> Optional[str]:
+    """Return the Kruize (ros-optimization) pod name, with operator label fallback."""
+    from utils import get_pod_by_label
+
+    pod = get_pod_by_label(namespace, _KRUIZE_LABEL)
+    if pod:
+        return pod
+    return get_pod_by_label(
+        namespace,
+        f"app.kubernetes.io/name={release_name},{_KRUIZE_LABEL}",
+    )
+
+
+def require_kruize_pod(
+    namespace: str,
+    release_name: str,
+    *,
+    cr_name: Optional[str] = None,
+) -> str:
+    """Return the Kruize pod name or fail with CMSC/deployment diagnostics."""
+    pod = find_kruize_pod(namespace, release_name)
+    if pod:
+        return pod
+
+    from utils import run_oc_command
+
+    cr = cr_name or os.environ.get("CMSC_NAME", release_name)
+    deploy = f"{cr}-kruize"
+
+    def _oc_output(args: list) -> str:
+        result = run_oc_command(args, check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        if result.stderr.strip():
+            return f"(oc exit {result.returncode}) {result.stderr.strip()}"
+        return "(not found)"
+
+    spec_ros = _oc_output([
+        "get", "cmsc", cr, "-n", namespace,
+        "-o", "jsonpath={.spec.ros.enabled}",
+    ])
+    ros_cond = _oc_output([
+        "get", "cmsc", cr, "-n", namespace,
+        "-o", "jsonpath={.status.conditions[?(@.type=='ROSEnabled')].status}",
+    ])
+    deploy_status = _oc_output([
+        "get", "deployment", deploy, "-n", namespace,
+        "-o", "jsonpath={.status.readyReplicas}/{.spec.replicas} ready",
+    ])
+    pods = _oc_output([
+        "get", "pods", "-n", namespace,
+        "-l", "app.kubernetes.io/component=ros-optimization",
+        "--no-headers",
+    ])
+
+    pytest.fail(
+        "Kruize pod required for ROS performance tests but none is Running.\n"
+        f"  CMSC: {namespace}/{cr}\n"
+        f"  spec.ros.enabled: {spec_ros}\n"
+        f"  ROSEnabled condition: {ros_cond}\n"
+        f"  deployment {deploy}: {deploy_status}\n"
+        f"  pods (ros-optimization):\n    "
+        + pods.replace("\n", "\n    ")
+    )
 
 from .data_classes import ClusterInfo, PerformanceResult
 from .helpers import (
@@ -225,6 +292,16 @@ def koku_api_pod(cluster_config: ClusterConfig) -> str:
     if not pod:
         pytest.skip("koku-api pod not found")
     return pod
+
+
+@pytest.fixture(scope="session")
+def kruize_pod(cluster_config: ClusterConfig) -> str:
+    """Get the Kruize (ros-optimization) pod name for memory/limit checks."""
+    return require_kruize_pod(
+        cluster_config.namespace,
+        cluster_config.helm_release_name,
+        cr_name=os.environ.get("CMSC_NAME"),
+    )
 
 
 @pytest.fixture(scope="session")

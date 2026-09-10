@@ -31,6 +31,7 @@ from utils import (
     run_oc_command,
 )
 
+from .conftest import _KOKU_API_CONTAINER, find_kruize_pod
 from .data_classes import PerformanceResult
 from .helpers import PerfResultCollector, PerfTimer, generate_and_upload_data
 from .profiles import ACTIVE_PROFILE as _ACTIVE_PROFILE, PROFILES
@@ -53,7 +54,11 @@ def _get_profile_workload_count(profile_name: str) -> int:
 # Helper Functions
 # =============================================================================
 
-def get_kruize_heap_usage(namespace: str) -> Optional[Dict[str, float]]:
+def get_kruize_heap_usage(
+    namespace: str,
+    release_name: str = "cost-onprem",
+    kruize_pod: Optional[str] = None,
+) -> Optional[Dict[str, float]]:
     """Get Kruize JVM heap usage metrics.
     
     Returns:
@@ -61,7 +66,8 @@ def get_kruize_heap_usage(namespace: str) -> Optional[Dict[str, float]]:
     """
     from .helpers import parse_memory_mib
 
-    kruize_pod = get_pod_by_label(namespace, "app.kubernetes.io/component=ros-optimization")
+    if not kruize_pod:
+        kruize_pod = find_kruize_pod(namespace, release_name)
     if not kruize_pod:
         return None
     
@@ -379,6 +385,23 @@ class TestROSPerformance:
     """ROS/Kruize performance tests (PERF-ROS-*)."""
 
     @pytest.fixture(scope="class", autouse=True)
+    def _require_ros_stack(self, cluster_config) -> None:
+        """ROS perf tests require Kruize — fail if ROS is disabled or missing."""
+        from ros_feature import ROS_DISABLED_SKIP_REASON, detect_ros_enabled
+
+        if not detect_ros_enabled(
+            namespace=cluster_config.namespace,
+            cr_name=os.environ.get("CMSC_NAME", cluster_config.helm_release_name),
+            helm_release_name=cluster_config.helm_release_name,
+        ):
+            pytest.fail(
+                "ROS performance tests require spec.ros.enabled=true on the CMSC. "
+                f"{ROS_DISABLED_SKIP_REASON}. "
+                "Operator perf runs should use deploy-test-operator.sh --perf-suite "
+                "including ros (which enables ROS before pytest)."
+            )
+
+    @pytest.fixture(scope="class", autouse=True)
     def ensure_clean_ros_queue(self, cluster_config):
         """Ensure ROS queue is healthy at the start of the test class.
         
@@ -489,8 +512,8 @@ class TestROSPerformance:
         # gateway_url from conftest already includes /api (e.g. https://host/api)
         return f"{gateway_url}/ingress/v1/upload"
 
-    # ingress_pod and koku_api_url are provided by session-scoped fixtures
-    # in conftest.py
+    # koku_api_pod and koku_api_url are provided by session-scoped fixtures
+    # in conftest.py (ingress pod cannot reach koku-api under operator NetworkPolicy).
 
     def test_perf_ros_001_recommendation_baseline(
         self,
@@ -503,7 +526,7 @@ class TestROSPerformance:
         db_pod,
         upload_url,
         gateway_url,
-        ingress_pod,
+        koku_api_pod,
         koku_api_url,
         jwt_token: JWTToken,
         rh_identity_header: str,
@@ -523,12 +546,13 @@ class TestROSPerformance:
         with perf_timer.measure("source_registration"):
             source = register_source(
                 cluster_config.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
         
         perf_cleanup.track(
@@ -632,7 +656,7 @@ class TestROSPerformance:
         db_pod,
         upload_url,
         gateway_url,
-        ingress_pod,
+        koku_api_pod,
         koku_api_url,
         jwt_token: JWTToken,
         rh_identity_header: str,
@@ -652,19 +676,22 @@ class TestROSPerformance:
         num_workloads = _get_profile_workload_count(_ACTIVE_PROFILE)
         
         # Capture initial Kruize memory
-        initial_heap = get_kruize_heap_usage(cluster_config.namespace)
+        initial_heap = get_kruize_heap_usage(
+            cluster_config.namespace, cluster_config.helm_release_name,
+        )
         initial_queue = get_ros_queue_depth(cluster_config.namespace)
         
         # Register source
         with perf_timer.measure("source_registration"):
             source = register_source(
                 cluster_config.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
         
         perf_cleanup.track(
@@ -702,7 +729,9 @@ class TestROSPerformance:
                 if q and q > peak_metrics["queue"]:
                     peak_metrics["queue"] = q
                 
-                m = get_kruize_heap_usage(cluster_config.namespace)
+                m = get_kruize_heap_usage(
+                    cluster_config.namespace, cluster_config.helm_release_name,
+                )
                 if m and m.get("used_mb", 0) > peak_metrics["memory"]:
                     peak_metrics["memory"] = m["used_mb"]
                 
@@ -740,7 +769,9 @@ class TestROSPerformance:
             monitor.join(timeout=10)
         
         # Final memory measurement
-        final_heap = get_kruize_heap_usage(cluster_config.namespace)
+        final_heap = get_kruize_heap_usage(
+            cluster_config.namespace, cluster_config.helm_release_name,
+        )
         
         # Collect metrics
         perf_result.metrics = {
@@ -785,7 +816,7 @@ class TestROSPerformance:
         db_pod,
         upload_url,
         gateway_url,
-        ingress_pod,
+        koku_api_pod,
         koku_api_url,
         jwt_token: JWTToken,
         rh_identity_header: str,
@@ -804,12 +835,13 @@ class TestROSPerformance:
         # Register source
         source = register_source(
             cluster_config.namespace,
-            ingress_pod,
+            koku_api_pod,
             koku_api_url,
             rh_identity_header,
             cluster_id,
             "org1234567",
             source_name,
+            container=_KOKU_API_CONTAINER,
         )
         
         perf_cleanup.track(
@@ -937,8 +969,9 @@ class TestROSPerformance:
         db_pod,
         upload_url,
         gateway_url,
-        ingress_pod,
+        koku_api_pod,
         koku_api_url,
+        kruize_pod,
         jwt_token: JWTToken,
         rh_identity_header: str,
     ):
@@ -956,9 +989,6 @@ class TestROSPerformance:
         # Use workload count from active profile
         num_workloads = _get_profile_workload_count(_ACTIVE_PROFILE)
         
-        # Get Kruize pod limits
-        kruize_pod = get_pod_by_label(cluster_config.namespace, "app.kubernetes.io/component=ros-optimization")
-        
         result = run_oc_command([
             "get", "pod", "-n", cluster_config.namespace, kruize_pod,
             "-o", "jsonpath={.spec.containers[0].resources.limits.memory}"
@@ -966,18 +996,23 @@ class TestROSPerformance:
         memory_limit = result.stdout.strip() if result.returncode == 0 else "unknown"
         
         # Initial memory snapshot
-        initial_heap = get_kruize_heap_usage(cluster_config.namespace)
+        initial_heap = get_kruize_heap_usage(
+            cluster_config.namespace,
+            cluster_config.helm_release_name,
+            kruize_pod=kruize_pod,
+        )
         memory_samples = []
         
         # Register source
         source = register_source(
             cluster_config.namespace,
-            ingress_pod,
+            koku_api_pod,
             koku_api_url,
             rh_identity_header,
             cluster_id,
             "org1234567",
             source_name,
+            container=_KOKU_API_CONTAINER,
         )
 
         perf_cleanup.track(
@@ -992,7 +1027,11 @@ class TestROSPerformance:
         
         def collect_memory():
             while not monitor_stop.is_set():
-                m = get_kruize_heap_usage(cluster_config.namespace)
+                m = get_kruize_heap_usage(
+                    cluster_config.namespace,
+                    cluster_config.helm_release_name,
+                    kruize_pod=kruize_pod,
+                )
                 if m:
                     memory_samples.append({
                         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1039,7 +1078,11 @@ class TestROSPerformance:
             monitor.join(timeout=10)
         
         # Final memory snapshot
-        final_heap = get_kruize_heap_usage(cluster_config.namespace)
+        final_heap = get_kruize_heap_usage(
+            cluster_config.namespace,
+            cluster_config.helm_release_name,
+            kruize_pod=kruize_pod,
+        )
         
         # Analyze memory samples
         if memory_samples:

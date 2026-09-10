@@ -12,6 +12,9 @@ _LISTENER_CPU_SOURCED=1
 
 set -euo pipefail
 
+[[ -f "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh" ]] \
+    && source "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh"
+
 ORIGINAL_LISTENER_CPU_LIMIT=""
 ORIGINAL_LISTENER_CPU_REQUEST=""
 MAX_LISTENER_CPU=""
@@ -29,8 +32,8 @@ parse_cpu_to_millicores() {
 
 calculate_max_listener_cpu() {
     MAX_LISTENER_CPU=""
-    local release="${HELM_RELEASE_NAME:-cost-onprem}"
-    local listener_deploy="${release}-koku-listener"
+    local listener_deploy
+    listener_deploy="$(perf_deploy_name koku-listener)"
 
     local listener_node
     listener_node=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/component=listener" \
@@ -116,8 +119,8 @@ set_listener_cpu() {
 
     log_step "Setting listener CPU limit to ${new_limit}"
 
-    local release="${HELM_RELEASE_NAME:-cost-onprem}"
-    local listener_deploy="${release}-koku-listener"
+    local listener_deploy
+    listener_deploy="$(perf_deploy_name koku-listener)"
 
     ORIGINAL_LISTENER_CPU_LIMIT=$(kubectl get deploy "${listener_deploy}" -n "${NAMESPACE}" \
         -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null || echo "")
@@ -178,8 +181,8 @@ reset_listener_cpu() {
 
     log_step "Resetting listener CPU to original values"
 
-    local release="${HELM_RELEASE_NAME:-cost-onprem}"
-    local listener_deploy="${release}-koku-listener"
+    local listener_deploy
+    listener_deploy="$(perf_deploy_name koku-listener)"
 
     log_info "Resetting listener CPU: limit=${ORIGINAL_LISTENER_CPU_LIMIT}, request=${ORIGINAL_LISTENER_CPU_REQUEST}"
 

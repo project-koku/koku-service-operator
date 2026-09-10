@@ -14,6 +14,9 @@ _PERF_OBSERVABILITY_SOURCED=1
 
 set -euo pipefail
 
+[[ -f "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh" ]] \
+    && source "$(dirname "${BASH_SOURCE[0]}")/perf-common.sh"
+
 METRICS_COLLECTOR_PID=""
 
 ################################################################################
@@ -34,8 +37,8 @@ deploy_observability() {
         return 1
     fi
 
+    perf_sync_release_env
     export NAMESPACE="${NAMESPACE}"
-    export HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-cost-onprem}"
     export SKIP_GRAFANA="true"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
@@ -65,23 +68,16 @@ start_metrics_collection() {
 
     # Generate TEST_RUN_ID if not already set
     if [[ -z "${TEST_RUN_ID:-}" ]]; then
-        local chart_version="unknown"
+        local version_slug
+        version_slug="$(perf_detect_version_slug)"
         local epoch_time
         epoch_time=$(date +%s)
 
-        if command -v helm &>/dev/null; then
-            local helm_chart
-            helm_chart=$(helm list -n "${NAMESPACE}" -o json 2>/dev/null | jq -r ".[0].chart // empty" 2>/dev/null)
-            if [[ -n "$helm_chart" ]]; then
-                chart_version=$(echo "$helm_chart" | sed 's/.*-\([0-9][0-9.]*\)/\1/' | tr '.' '-')
-            fi
-        fi
-
         if [[ "${PERF_SUITE}" != "all" ]]; then
             local suite_slug="${PERF_SUITE//,/+}"
-            TEST_RUN_ID="${chart_version}-${PERF_PROFILE}-${suite_slug}-${epoch_time}"
+            TEST_RUN_ID="${version_slug}-${PERF_PROFILE}-${suite_slug}-${epoch_time}"
         else
-            TEST_RUN_ID="${chart_version}-${PERF_PROFILE}-${epoch_time}"
+            TEST_RUN_ID="${version_slug}-${PERF_PROFILE}-${epoch_time}"
         fi
     fi
 
@@ -89,9 +85,9 @@ start_metrics_collection() {
     mkdir -p "${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/results"
     mkdir -p "${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/reports"
 
+    perf_sync_release_env
     export NAMESPACE="${NAMESPACE}"
     export PERF_PROFILE="${PERF_PROFILE}"
-    export HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-cost-onprem}"
     export TEST_RUN_ID="${TEST_RUN_ID}"
     export PERF_OUTPUT_DIR="${PERF_OUTPUT_DIR}"
     export OUTPUT_DIR="${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/metrics"
