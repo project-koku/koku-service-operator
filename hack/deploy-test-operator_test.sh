@@ -47,6 +47,12 @@ out="$("$SCRIPT" --tests-only --dry-run --no-ui 2>&1)"
 assert_contains "$out" "tests only:" "tests-only in plan"
 assert_contains "$out" "DRY RUN" "dry-run banner"
 
+# --- perf-only dry-run loads perf-testing lib (log_step / LOCAL_SCRIPTS_DIR) ---
+out="$("$SCRIPT" --perf-only --dry-run --perf-profile small --perf-suite api,ros 2>&1)"
+assert_contains "$out" "Running performance tests" "perf-only dry-run banner"
+assert_contains "$out" "PERF_PROFILE=small" "perf-only shows profile"
+assert_contains "$out" "PERF_SUITE=api,ros" "perf-only shows suite"
+
 # --- dry-run full plan with IMG ---
 out="$(IMG=quay.io/example/op:test "$SCRIPT" --dry-run --deploy-s4 --verbose 2>&1)"
 assert_contains "$out" "Deploying Red Hat Build of Keycloak" "plans RHBK"

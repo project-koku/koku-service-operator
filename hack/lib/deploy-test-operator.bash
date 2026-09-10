@@ -394,8 +394,48 @@ dto_parse_duration_seconds() {
   fi
 }
 
+# scripts/lib/perf-testing.sh expects logging helpers and globals from its parent
+# orchestrator (LOCAL_SCRIPTS_DIR, log_step, listener-cpu, perf-observability).
+dto_setup_perf_lib() {
+  LOCAL_SCRIPTS_DIR="${ROOT}/scripts"
+  PROJECT_ROOT="${ROOT}"
+  CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  PERF_OUTPUT_DIR="${PERF_OUTPUT_DIR:-${PROJECT_ROOT}/tests/perf-runs}"
+  CPU_BOOST_APPLIED="${CPU_BOOST_APPLIED:-false}"
+  SKIP_GRAFANA_LINKS="${SKIP_GRAFANA_LINKS:-true}"
+  METRICS_INTERVAL="${METRICS_INTERVAL:-30}"
+
+  log_info() { dto_log_info "$@"; }
+  log_success() { dto_log_success "$@"; }
+  log_warning() { dto_log_warning "$@"; }
+  log_error() { dto_log_error "$@"; }
+  log_step() { dto_log_step "$@"; }
+  log_verbose() { dto_log_verbose "$@"; }
+
+  local scripts_lib="${ROOT}/scripts/lib"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/listener-cpu.sh" ]] && source "${scripts_lib}/listener-cpu.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-observability.sh" ]] && source "${scripts_lib}/perf-observability.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-testing.sh" ]] && source "${scripts_lib}/perf-testing.sh"
+}
+
+dto_perf_cleanup_on_exit() {
+  local exit_code=$?
+  if [[ -n "${METRICS_COLLECTOR_PID:-}" ]]; then
+    dto_log_warning "Stopping metrics collection..."
+    kill -TERM "${METRICS_COLLECTOR_PID}" 2>/dev/null || true
+  fi
+  if [[ "${CPU_BOOST_APPLIED:-false}" == "true" ]] && [[ -n "${ORIGINAL_LISTENER_CPU_LIMIT:-}" ]]; then
+    dto_log_warning "Resetting listener CPU to original values..."
+    reset_listener_cpu 2>/dev/null || true
+  fi
+  exit "$exit_code"
+}
+
 dto_run_pytest() {
-  export NAMESPACE HELM_RELEASE_NAME KEYCLOAK_NAMESPACE
+  export NAMESPACE HELM_RELEASE_NAME KEYCLOAK_NAMESPACE CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
   if [[ "${VERBOSE:-false}" == "true" ]]; then
     export VERBOSE=true
   fi
@@ -406,16 +446,15 @@ dto_run_pytest() {
   # ── Performance-only path ──────────────────────────────────────────────────
   # Sources scripts/lib/perf-testing.sh which handles profile config, listener
   # CPU tuning, suite→flag mapping, and result upload.  Mirrors the entrypoint
-  # used by the legacy deploy-test-cost-onprem.sh --perf-only path.
+  # used by the legacy chart orchestrator --perf-only path.
   if [[ "${PERF_ONLY:-false}" == "true" ]]; then
     dto_log_step "Running performance tests (profile: ${PERF_PROFILE:-baseline}, suite: ${PERF_SUITE:-all})"
-    local perf_lib="${ROOT}/scripts/lib/perf-testing.sh"
-    if [[ ! -f "$perf_lib" ]]; then
-      dto_log_error "perf-testing lib not found: ${perf_lib}"
+    dto_setup_perf_lib
+    if ! declare -F run_performance_tests >/dev/null; then
+      dto_log_error "perf-testing lib not loaded (expected ${ROOT}/scripts/lib/perf-testing.sh)"
       exit 1
     fi
-    # shellcheck disable=SC1090
-    source "$perf_lib"
+    trap dto_perf_cleanup_on_exit EXIT
 
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
       dto_log_info "DRY RUN: would call apply_perf_profile_config + run_performance_tests"
@@ -427,7 +466,7 @@ dto_run_pytest() {
     fi
 
     if ! run_performance_tests; then
-      dto_log_error "Performance tests failed — see test/pytest/perf-runs/"
+      dto_log_error "Performance tests failed — see tests/perf-runs/"
       exit 1
     fi
     dto_log_success "Performance tests completed"
