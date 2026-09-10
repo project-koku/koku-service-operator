@@ -64,7 +64,7 @@ start_metrics_collection() {
     fi
 
     # Generate TEST_RUN_ID if not already set
-    if [[ -z "${TEST_RUN_ID}" ]]; then
+    if [[ -z "${TEST_RUN_ID:-}" ]]; then
         local chart_version="unknown"
         local epoch_time
         epoch_time=$(date +%s)
