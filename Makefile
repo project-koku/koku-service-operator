@@ -405,19 +405,10 @@ OPM = $(shell which opm)
 endif
 endif
 
-# A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
-# These images MUST exist in a registry and be pull-able.
-BUNDLE_IMGS ?= $(BUNDLE_IMG)
-
 # The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=example.com/operator-catalog:v0.2.0).
 CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)
 
-# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
-ifneq ($(origin CATALOG_BASE_IMG), undefined)
-FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
-endif
-
-# Build a File-Based Catalog (FBC) image from the bundle images listed in BUNDLE_IMGS.
+# Build a File-Based Catalog (FBC) image from the bundle image, BUNDLE_IMG.
 CATALOG_DIR ?= catalog
 
 .PHONY: catalog-render
@@ -425,7 +416,7 @@ catalog-render: opm ## Render bundle images into an FBC catalog directory.
 	rm -rf $(CATALOG_DIR) $(CATALOG_DIR).Dockerfile
 	mkdir -p $(CATALOG_DIR)
 	$(OPM) init koku-service-operator --default-channel=$(DEFAULT_CHANNEL) -o yaml > $(CATALOG_DIR)/index.yaml
-	$(OPM) render $(BUNDLE_IMGS) -o yaml >> $(CATALOG_DIR)/index.yaml
+	$(OPM) render $(BUNDLE_IMG) -o yaml >> $(CATALOG_DIR)/index.yaml
 	@BUNDLE_NAME=$$(grep -B 1 "^package:" $(CATALOG_DIR)/index.yaml | grep "^name:" | head -n 1 | awk '{print $$2}') ; \
 	echo "Detected Bundle Entry: $$BUNDLE_NAME" ; \
 	echo "---"                                                        >> $(CATALOG_DIR)/index.yaml ; \
@@ -439,11 +430,11 @@ catalog-render: opm ## Render bundle images into an FBC catalog directory.
 
 .PHONY: catalog-build
 catalog-build: catalog-render ## Build an FBC catalog image.
-	$(CONTAINER_TOOL) build -f $(CATALOG_DIR)/Dockerfile -t $(CATALOG_IMG) $(CATALOG_DIR)
+	$(CONTAINER_TOOL) build -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
 
 .PHONY: catalog-build-amd64
 catalog-build-amd64: catalog-render ## Build a linux/amd64 FBC catalog image (Mac ARM → remote amd64 cluster).
-	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_DIR)/Dockerfile -t $(CATALOG_IMG) $(CATALOG_DIR)
+	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
 
 # Push the catalog image.
 .PHONY: catalog-push
