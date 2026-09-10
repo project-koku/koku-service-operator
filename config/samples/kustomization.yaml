@@ -1,12 +1,22 @@
 ## Append samples of your project ##
+# This kustomization is the source for the CSV's alm-examples annotation, NOT a
+# bulk apply target. Order matters: the first entry becomes alm-examples[0],
+# which OperatorHub pre-fills into the "Create instance" form. Keep the BYOI
+# default first — it is intentionally admission-rejected until its external
+# fields are filled in, so the console form blocks Save until the config is
+# valid. The community (turnkey) sample follows so both appear in the Samples
+# list.
+#
+# Do NOT `kubectl apply -k config/samples`: it would try to apply the BYOI
+# template unedited and fail admission. Apply an individual valid sample (or
+# create one from the console form) instead — see the per-file notes below.
 resources:
 - service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
+- service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # Additional samples use distinct metadata.name values — apply individually:
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
 #   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
-# Same metadata.name as the default sample — apply instead of it, not via kustomize:
-#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
 #   kubectl apply -k config/samples/byoi/infra
 #   kubectl apply -k config/samples/byoi/app

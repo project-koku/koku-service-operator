@@ -62,6 +62,8 @@ Replace at least:
 - `spec.cache.host` / `auth.secretName`
 - `spec.kafka.bootstrapServers`
 - `spec.objectStorage.endpoint` / `secretName`
+- `spec.objectStorage.buckets.koku` (required; name of your pre-created cost
+  bucket — the operator does not create buckets)
 - `spec.auth.keycloak.url` (required; see [keycloak.md](keycloak.md))
 - `spec.auth.keycloak.issuerURL` if token `iss` is the public Route
 - Image `repository` / `tag` values for your environment
@@ -101,6 +103,8 @@ spec:
     port: 443
     useSSL: true
     secretName: "my-s3-credentials"
+    buckets:
+      koku: "koku-bucket"   # REQUIRED — pre-created; operator does not create it
   auth:
     keycloak:
       url: "https://keycloak.auth.svc.cluster.local"
@@ -168,7 +172,7 @@ ConsoleLink when the UI Route exists.
 | `SchemaUpToDate` never True | Migration Job failed. List Jobs, then logs for the failed one: `oc -n "$NAMESPACE" get jobs` then `oc -n "$NAMESPACE" logs job/<cr>-koku-migrate` (beta Cost-only; RBAC is `{cr}-rbac-migrate`) |
 | `Available` True but `UIReady` False | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
 | `StorageReady` False | Missing `access-key` / `secret-key`, or bucket does not exist |
-| Uploads return 500 | Bucket `koku-bucket` (or your `bucketName`) was never created |
+| Uploads return 500 | Bucket in `spec.objectStorage.buckets.koku` was never created |
 
 ## Next
 

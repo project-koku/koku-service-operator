@@ -1,12 +1,15 @@
-# Public images for oauth2-proxy, Envoy, Postgres, and Valkey.
-# Same metadata.name as the default sample — apply this file instead of it.
+# Community / turnkey dev/ci/lab sample — bundled Postgres + Valkey, public
+# images (oauth2-proxy, Envoy, Postgres, Valkey). Unlike the BYOI default, this
+# CR is ready to apply: the operator provisions DB/cache in-cluster and object
+# storage is resolved by discovery. Not for production — bundled DB/cache have
+# no HA/backup story; use the BYOI default or _production sample there.
 #
 # Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
 # POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
-  name: cost-onprem
+  name: cost-onprem-community
   namespace: cost-onprem
 spec:
   global:

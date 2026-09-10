@@ -120,12 +120,25 @@ NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testin
 | Goal | Sample |
 |------|--------|
 | Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
-| Full bundled stack (needs Kafka, Keycloak, S3, UI secrets) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| BYOI template — fill in external infra (Kafka, Keycloak, S3, UI secrets) before applying; rejected by admission unedited | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| Turnkey bundled stack (Postgres/Valkey + public images) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml` |
 | BYOI smoke | `config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml` |
 
 ```bash
+eval "$(crc oc-env)"
+
+# Bundled mode (DB + Cache provisioned by operator — dev only). The community
+# sample (name: cost-onprem-community) is turnkey: bundled Postgres/Valkey +
+# public images + discovery-resolved storage.
+oc apply -n cost-onprem \
+  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+
+# The default sample is a BYOI template with empty external-infra fields and is
+# rejected by admission until you fill them in — do not apply it unedited.
+
+# Watch reconciliation
 oc get cmsc -n cost-onprem -w
-oc describe cmsc cost-management -n cost-onprem
+oc describe cmsc cost-onprem-community -n cost-onprem
 ```
 
 ### Do you need Kafka on CRC?

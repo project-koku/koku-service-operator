@@ -130,7 +130,7 @@ The operator does **not** back up or restore anything. You own:
 
 | Data | Typical backup |
 |------|----------------|
-| PostgreSQL (`costonprem_koku`, `costonprem_rbac`, and unused ROS/Kruize DBs) | Your DBA / Postgres operator |
+| PostgreSQL (`costonprem_koku`, `costonprem_rbac`; plus ROS/Kruize DBs only if enabled) | Your DBA / Postgres operator |
 | Object storage buckets | Bucket versioning / replication on the S3 provider |
 | Kafka topics | AMQ Streams / Kafka ops (offset and topic config) |
 | OIDC (Keycloak) | RHBK backup |

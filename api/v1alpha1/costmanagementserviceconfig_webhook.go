@@ -111,6 +111,33 @@ func (c *CostManagementServiceConfig) validateCostManagementServiceConfig() erro
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("ui", "oauthProxy", "resources"), spec.UI.OAuthProxy.Resources)...)
 	allErrs = append(allErrs, validateResourceRequirements(specPath.Child("ui", "app", "resources"), spec.UI.App.Resources)...)
 
+	// spec.auth.keycloak.url is validated by validateKeycloakURL above (scheme,
+	// host, and required checks); no additional inline check is needed here.
+
+	if spec.RBAC.KeycloakSync.Enabled && spec.RBAC.KeycloakSync.ClientSecretRef.Name == "" {
+		allErrs = append(allErrs, field.Required(
+			specPath.Child("rbac", "keycloakSync", "clientSecretRef", "name"),
+			"is required when rbac.keycloakSync.enabled is true",
+		))
+	}
+
+	if strings.TrimSpace(spec.ObjectStorage.SecretName) != "" {
+		if strings.TrimSpace(spec.ObjectStorage.Endpoint) == "" {
+			allErrs = append(allErrs, field.Required(specPath.Child("objectStorage", "endpoint"),
+				"endpoint is required when objectStorage.secretName is set"))
+		}
+		if strings.TrimSpace(spec.ObjectStorage.Buckets.Koku) == "" {
+			allErrs = append(allErrs, field.Required(specPath.Child("objectStorage", "buckets", "koku"),
+				"koku is required when objectStorage.secretName is set"))
+		}
+		// buckets.ingress is optional: uploads inherit the koku bucket unless
+		// a distinct upload bucket is set.
+	}
+	if ROSEnabled(c) && strings.TrimSpace(spec.ObjectStorage.Buckets.ROS) == "" {
+		allErrs = append(allErrs, field.Required(specPath.Child("objectStorage", "buckets", "ros"),
+			"ros is required when ros.enabled is true"))
+	}
+
 	if len(allErrs) == 0 {
 		return nil
 	}

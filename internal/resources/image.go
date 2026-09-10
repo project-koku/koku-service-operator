@@ -34,10 +34,10 @@ func MissingWorkloadImages(cfg *costv1alpha1.CostManagementServiceConfig) []stri
 		}
 	}
 
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		require(cfg.Spec.Database.Image, "spec.database.image")
 	}
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		require(cfg.Spec.Cache.Image, "spec.cache.image")
 	}
 	require(cfg.Spec.Auth.Envoy.Image, "spec.auth.envoy.image")

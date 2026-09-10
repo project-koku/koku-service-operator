@@ -122,7 +122,7 @@ type GlobalConfig struct {
 type DatabaseConfig struct {
 	// Deploy the bundled PostgreSQL StatefulSet (dev/CI only — not for production).
 	// Set false to connect to an external database.
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	Deploy  *bool               `json:"deploy,omitempty"`
 	Image   ImageSpec           `json:"image,omitempty"`
 	Storage DatabaseStorageSpec `json:"storage,omitempty"`
@@ -159,7 +159,7 @@ type DatabaseStorageSpec struct {
 type CacheConfig struct {
 	// Deploy the bundled Valkey instance (dev/CI only — not for production).
 	// Set false to connect to an external Redis/Valkey endpoint.
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	Deploy *bool     `json:"deploy,omitempty"`
 	Image  ImageSpec `json:"image,omitempty"`
 
@@ -199,7 +199,6 @@ type CachePersistenceSpec struct {
 
 type KafkaConfig struct {
 	// Bootstrap servers for the Kafka cluster.
-	// +kubebuilder:default:="cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
 	BootstrapServers string `json:"bootstrapServers"`
 	// +kubebuilder:default:=PLAINTEXT
 	// +kubebuilder:validation:Enum=PLAINTEXT;SSL;SASL_PLAINTEXT;SASL_SSL
@@ -228,7 +227,6 @@ type KafkaTLSSpec struct {
 type ObjectStorageConfig struct {
 	// S3 endpoint hostname (without protocol or port).
 	// Auto-detected by the Discovery phase (OBC → NooBaa → user-provided).
-	// +kubebuilder:default:="s3.openshift-storage.svc.cluster.local"
 	Endpoint string `json:"endpoint,omitempty"`
 	// +kubebuilder:default:=443
 	// +kubebuilder:validation:Minimum=1
@@ -255,12 +253,34 @@ type ObjectStorageConfig struct {
 	// from an arbitrary namespace chosen in the CR.
 	// +kubebuilder:default:="openshift-storage"
 	// +kubebuilder:validation:Enum=openshift-storage;noobaa
-	NoobaaNamespace string    `json:"noobaaNamespace,omitempty"`
-	S3              S3Options `json:"s3,omitempty"`
+	NoobaaNamespace string `json:"noobaaNamespace,omitempty"`
+	// Buckets used by operator-managed workloads against the external object
+	// storage service. The operator validates and consumes these buckets but
+	// does not create them.
+	Buckets ObjectStorageBucketsSpec `json:"buckets,omitempty"`
+	S3      S3Options                `json:"s3,omitempty"`
+}
+
+type ObjectStorageBucketsSpec struct {
+	// Primary Cost Management bucket (Koku REQUESTED_BUCKET). Required when
+	// objectStorage.secretName is set; otherwise resolved by Discovery.
+	Koku string `json:"koku,omitempty"`
+	// Upload bucket used by the operator-managed ingress pod. Optional:
+	// uploads land in the same bucket Koku reads, so when empty this inherits
+	// buckets.koku (or the discovered bucket). Set only to route uploads to a
+	// distinct bucket.
+	Ingress string `json:"ingress,omitempty"`
+	// ROS object-storage bucket. Required when ros.enabled is true.
+	ROS string `json:"ros,omitempty"`
 }
 
 type S3Options struct {
-	// +kubebuilder:default:=onprem
+	// Region is the SigV4 signing region. Defaults to us-east-1, which AWS S3
+	// and on-prem implementations (MinIO, Ceph RGW, NooBaa) accept — they ignore
+	// the region or treat us-east-1 as their default. Override only when your
+	// endpoint enforces a specific region; a non-existent placeholder is rejected
+	// by strict endpoints during SigV4 verification.
+	// +kubebuilder:default:=us-east-1
 	Region string `json:"region,omitempty"`
 	// +kubebuilder:default:=path
 	// +kubebuilder:validation:Enum=path;auto;virtual
@@ -268,7 +288,7 @@ type S3Options struct {
 }
 
 // -----------------------------------------------------------------------------
-// AuthConfig (JWT via Envoy + Keycloak/RHBK)
+// AuthConfig (JWT via Envoy + external identity provider)
 // -----------------------------------------------------------------------------
 
 type AuthConfig struct {
@@ -369,14 +389,8 @@ type IngressConfig struct {
 	MaxUploadSize int64 `json:"maxUploadSize,omitempty"`
 	// Comma-separated list of valid upload content types.
 	// +kubebuilder:default:="hccm"
-	ValidTypes string `json:"validTypes,omitempty"`
-	// Staging bucket name for uploads.
-	// When empty, the operator uses the same bucket as Koku REQUESTED_BUCKET
-	// (status.discoveredConfig.s3.bucket, else spec.costManagement.storage.bucketName),
-	// then "koku-bucket".
-	// The bucket must already exist; the operator will not create it.
-	StagingBucket string                      `json:"stagingBucket,omitempty"`
-	Resources     corev1.ResourceRequirements `json:"resources,omitempty"`
+	ValidTypes string                      `json:"validTypes,omitempty"`
+	Resources  corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -479,23 +493,11 @@ type CostManagementConfig struct {
 	// +kubebuilder:validation:Maximum=60
 	DataRetentionMonths int32 `json:"dataRetentionMonths,omitempty"`
 
-	Storage        CostManagementStorageSpec `json:"storage,omitempty"`
-	API            KokuAPISpec               `json:"api,omitempty"`
-	Masu           MasuSpec                  `json:"masu,omitempty"`
-	Listener       ListenerSpec              `json:"listener,omitempty"`
-	Celery         CelerySpec                `json:"celery,omitempty"`
-	ServiceAccount ServiceAccountSpec        `json:"serviceAccount,omitempty"`
-}
-
-type CostManagementStorageSpec struct {
-	// Bucket name for Cost Management object storage (Koku REQUESTED_BUCKET).
-	// The bucket must already exist; the operator will not create it.
-	// +kubebuilder:default:="koku-bucket"
-	BucketName string `json:"bucketName,omitempty"`
-	// ROS object-storage bucket. Required when ros.enabled is true.
-	// The bucket must already exist; the operator will not create it.
-	// +kubebuilder:default:="ros-data"
-	ROSBucketName string `json:"rosBucketName,omitempty"`
+	API            KokuAPISpec        `json:"api,omitempty"`
+	Masu           MasuSpec           `json:"masu,omitempty"`
+	Listener       ListenerSpec       `json:"listener,omitempty"`
+	Celery         CelerySpec         `json:"celery,omitempty"`
+	ServiceAccount ServiceAccountSpec `json:"serviceAccount,omitempty"`
 }
 
 type KokuAPISpec struct {

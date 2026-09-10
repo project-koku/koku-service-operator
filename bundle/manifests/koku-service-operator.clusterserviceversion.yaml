@@ -21,23 +21,17 @@ metadata:
                 "replicas": 2
               },
               "keycloak": {
-                "audiences": [
-                  "cost-management-operator",
-                  "cost-management-ui"
-                ],
-                "realm": "kubernetes",
-                "url": "http://keycloak-service.keycloak.svc.cluster.local:8080"
+                "url": ""
               }
             },
             "cache": {
-              "deploy": true,
-              "image": {
-                "repository": "registry.redhat.io/rhel10/valkey-8",
-                "tag": "10.1"
+              "auth": {
+                "enabled": true,
+                "secretName": ""
               },
-              "persistence": {
-                "size": "5Gi"
-              }
+              "deploy": false,
+              "host": "",
+              "port": 6379
             },
             "costManagement": {
               "api": {
@@ -78,10 +72,161 @@ metadata:
               }
             },
             "database": {
+              "deploy": false,
+              "host": "",
+              "port": 5432,
+              "secretName": "",
+              "sslMode": "require"
+            },
+            "global": {
+              "clusterDomain": "apps.cluster.local",
+              "storageClass": ""
+            },
+            "ingress": {
+              "image": {
+                "repository": "quay.io/iop/ingress",
+                "tag": "master"
+              }
+            },
+            "kafka": {
+              "bootstrapServers": ""
+            },
+            "kruize": {
+              "image": {
+                "repository": "quay.io/redhat-services-prod/kruize-autotune-tenant/autotune",
+                "tag": "d1f0140"
+              },
+              "replicas": 1
+            },
+            "monitoring": {
+              "enabled": true
+            },
+            "objectStorage": {
+              "buckets": {
+                "koku": ""
+              },
+              "endpoint": "",
+              "port": 443,
+              "secretName": "",
+              "useSSL": true
+            },
+            "rbac": {
+              "api": {
+                "replicas": 1
+              },
+              "image": {
+                "repository": "quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac",
+                "tag": "73870d8"
+              },
+              "worker": {
+                "replicas": 1
+              }
+            },
+            "ros": {
+              "enabled": false,
+              "image": {
+                "repository": "quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend",
+                "tag": "ae8c990"
+              },
+              "processor": {
+                "replicas": 1
+              }
+            },
+            "ui": {
+              "app": {
+                "image": {
+                  "repository": "quay.io/insights-onprem/koku-ui-onprem",
+                  "tag": "2f23c646581028bd385856b6713e6bf367baf953"
+                }
+              },
+              "oauthProxy": {
+                "image": {
+                  "repository": "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
+                  "tag": "v7.6.0"
+                }
+              },
+              "replicaCount": 1
+            }
+          }
+        },
+        {
+          "apiVersion": "service.costmanagement.openshift.io/v1alpha1",
+          "kind": "CostManagementServiceConfig",
+          "metadata": {
+            "name": "cost-onprem-community",
+            "namespace": "cost-onprem"
+          },
+          "spec": {
+            "auth": {
+              "envoy": {
+                "image": {
+                  "repository": "docker.io/envoyproxy/envoy",
+                  "tag": "v1.32.13"
+                },
+                "replicas": 2
+              },
+              "keycloak": {
+                "audiences": [
+                  "cost-management-operator",
+                  "cost-management-ui"
+                ],
+                "realm": "kubernetes",
+                "url": "http://keycloak-service.keycloak.svc.cluster.local:8080"
+              }
+            },
+            "cache": {
               "deploy": true,
               "image": {
-                "repository": "registry.redhat.io/rhel10/postgresql-16",
-                "tag": "10.1"
+                "repository": "quay.io/sclorg/valkey-8-c10s",
+                "tag": "c10s"
+              },
+              "persistence": {
+                "size": "5Gi"
+              }
+            },
+            "costManagement": {
+              "api": {
+                "image": {
+                  "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
+                  "tag": "d8055ac"
+                },
+                "replicas": 1
+              },
+              "celery": {
+                "workers": {
+                  "costModel": {
+                    "replicas": 1
+                  },
+                  "default": {
+                    "replicas": 1
+                  },
+                  "ocp": {
+                    "replicas": 2
+                  },
+                  "priority": {
+                    "replicas": 1
+                  },
+                  "summary": {
+                    "replicas": 2
+                  }
+                }
+              },
+              "listener": {
+                "replicas": 2
+              },
+              "masu": {
+                "image": {
+                  "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
+                  "tag": "d8055ac"
+                },
+                "replicas": 1
+              }
+            },
+            "database": {
+              "deploy": true,
+              "image": {
+                "repository": "quay.io/sclorg/postgresql-16-c10s",
+                "tag": "c10s"
               },
               "storage": {
                 "size": "30Gi"
@@ -146,7 +291,7 @@ metadata:
               },
               "oauthProxy": {
                 "image": {
-                  "repository": "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
+                  "repository": "quay.io/oauth2-proxy/oauth2-proxy",
                   "tag": "v7.6.0"
                 }
               },
@@ -156,7 +301,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-06T15:19:10Z"
+    createdAt: "2026-09-08T16:36:08Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
   name: koku-service-operator.v0.0.1

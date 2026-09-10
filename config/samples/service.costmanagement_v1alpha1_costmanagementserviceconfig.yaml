@@ -1,3 +1,23 @@
+# Default CostManagementServiceConfig — BYOI (Bring Your Own Infrastructure).
+#
+# This is a production-oriented TEMPLATE, not a ready-to-apply CR. External
+# dependencies (database, cache, Kafka, object storage, Keycloak) are left empty
+# on purpose: the operator never provisions or guesses infrastructure it does
+# not own, so it will not silently point you at endpoints you did not choose.
+# Fill in the empty required fields below for your environment.
+#
+# Admission intentionally REJECTS this CR until you provide, at minimum:
+#   - database.host + database.secretName        (or set database.deploy: true)
+#   - cache.host + cache.auth.secretName         (or set cache.deploy: true)
+#   - kafka.bootstrapServers
+#   - auth.keycloak.url
+#   - objectStorage.endpoint + secretName + buckets.koku
+#     (or leave all three empty to let discovery resolve an in-cluster bucket)
+#
+# For a turnkey dev/ci/lab config with bundled Postgres/Valkey and public
+# images, use the community sample instead (name: cost-onprem-community):
+#   service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+# For fuller external examples, see the _minimal, _byoi, and _production samples.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
@@ -9,33 +29,41 @@ spec:
     storageClass: ""  # empty = use cluster default; set to ocs-storagecluster-ceph-rbd on ODF clusters
 
   database:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/postgresql-16
-      tag: "10.1"
-    storage:
-      size: 30Gi
+    deploy: false
+    host: ""
+    port: 5432
+    sslMode: "require"
+    secretName: ""
 
   cache:
-    deploy: true
-    image:
-      repository: registry.redhat.io/rhel10/valkey-8
-      tag: "10.1"
-    persistence:
-      size: 5Gi
+    deploy: false
+    host: ""
+    port: 6379
+    auth:
+      enabled: true
+      secretName: ""
 
   kafka:
-    bootstrapServers: "cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    bootstrapServers: ""
 
   ingress:
     image:
       repository: quay.io/iop/ingress
       tag: "master"
 
+  # Object storage is BYOI: the operator never creates buckets. Provide your own
+  # S3-compatible endpoint + credentials, or leave endpoint/secretName empty to
+  # let discovery resolve an in-cluster ODF/NooBaa bucket (OBC).
   objectStorage:
-    endpoint: "s3.openshift-storage.svc.cluster.local"
+    endpoint: ""
     port: 443
     useSSL: true
+    secretName: ""
+    buckets:
+      # Required when objectStorage.secretName is set; otherwise resolved by
+      # discovery. Ingress uploads inherit this bucket unless buckets.ingress is
+      # set. Add buckets.ros only when ros.enabled: true.
+      koku: ""
 
   costManagement:
     api:
@@ -100,16 +128,17 @@ spec:
         tag: "2.6"
       replicas: 2
     keycloak:
+      # Required: URL the operator-managed gateway should use to reach your
+      # external Keycloak/RHBK identity provider for JWKS discovery.
+      # Prefer a cluster-reachable Service URL when available.
+      url: ""
       # Required JWKS fetch URL (prefer in-cluster Service). When RHBK sets a
       # public hostname, tokens use that URL as iss — set issuerURL to match.
       # For CRC + RHBK/BYOI, override to
       # http://keycloak-service.keycloak.svc.cluster.local:8080 (and TLS as needed).
-      url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
-      realm: kubernetes
-      audiences:
-        - "cost-management-operator"
-        - "cost-management-ui"
+      # tls:
+      #   caCertSecretName: "keycloak-ca"
 
   ui:
     replicaCount: 1
