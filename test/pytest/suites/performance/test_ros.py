@@ -22,7 +22,8 @@ from conftest import ClusterConfig, JWTToken
 from e2e_helpers import (
     generate_cluster_id,
     register_source,
-    wait_for_provider,
+    wait_for_processing_complete,
+    wait_for_summary_tables,
 )
 from utils import (
     execute_db_query,
@@ -33,7 +34,13 @@ from utils import (
 
 from .conftest import _KOKU_API_CONTAINER, find_kruize_pod
 from .data_classes import PerformanceResult
-from .helpers import PerfResultCollector, PerfTimer, generate_and_upload_data
+from .helpers import (
+    PERF_CONFIG,
+    PerfResultCollector,
+    PerfTimer,
+    generate_and_upload_data,
+    get_timeout_for_profile,
+)
 from .profiles import ACTIVE_PROFILE as _ACTIVE_PROFILE, PROFILES
 
 
@@ -162,7 +169,80 @@ def get_ros_queue_depth(namespace: str) -> Optional[int]:
         return None
 
 
-def reset_ros_queue_offset(namespace: str) -> bool:
+def _ros_processor_deploy(namespace: str, release_name: Optional[str] = None) -> str:
+    """Return the ros-processor Deployment name for the active stack."""
+    release = (
+        release_name
+        or os.environ.get("CMSC_NAME")
+        or os.environ.get("HELM_RELEASE_NAME", "cost-onprem")
+    )
+    return f"{release}-ros-processor"
+
+
+def wait_for_ros_ingestion(
+    namespace: str,
+    db_pod: str,
+    cluster_id: str,
+    profile_name: str,
+    *,
+    processing_timeout: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Wait for Koku to finish processing an upload before checking Kruize.
+
+    Provider rows exist as soon as a source is registered; ROS events are
+    emitted only after manifest processing completes.
+    """
+    if processing_timeout is None:
+        processing_timeout = get_timeout_for_profile(
+            PERF_CONFIG.timeout_summary_tables, profile_name
+        )
+
+    print(
+        f"[ros-ingestion] waiting for manifest processing "
+        f"(timeout={processing_timeout}s, cluster={cluster_id[:8]}…)"
+    )
+    proc_result = wait_for_processing_complete(
+        namespace,
+        db_pod,
+        cluster_id,
+        poll_interval=10,
+        max_wait_seconds=processing_timeout,
+    )
+    if not proc_result.get("complete"):
+        raise AssertionError(
+            f"Koku processing did not complete for cluster {cluster_id} "
+            f"after {proc_result.get('elapsed_s', processing_timeout)}s "
+            f"(processed={proc_result.get('num_processed_files', 0)} files)"
+        )
+
+    if not proc_result.get("schema_name"):
+        schema_name = wait_for_summary_tables(
+            namespace,
+            db_pod,
+            cluster_id,
+            timeout=min(300, processing_timeout // 2),
+            interval=10,
+        )
+        if schema_name:
+            proc_result["schema_name"] = schema_name
+
+    print(
+        f"[ros-ingestion] processing complete in {proc_result.get('elapsed_s')}s "
+        f"(schema={proc_result.get('schema_name')})"
+    )
+    return proc_result
+
+
+def kruize_experiment_timeout(profile_name: str, expected_count: int) -> int:
+    """Profile-scaled timeout for Kruize experiment creation."""
+    base = max(PERF_CONFIG.timeout_kruize_experiments, 600, expected_count * 10)
+    return get_timeout_for_profile(base, profile_name)
+
+
+def reset_ros_queue_offset(
+    namespace: str,
+    release_name: Optional[str] = None,
+) -> bool:
     """Reset the ROS processor Kafka consumer offset to latest.
     
     This clears any poison pill events that are blocking the queue by
@@ -182,10 +262,12 @@ def reset_ros_queue_offset(namespace: str) -> bool:
         print(f"[ros-queue-reset] Kafka pod {kafka_pod} is not ready (container may be crash-looping)")
         return False
     
+    ros_deploy = _ros_processor_deploy(namespace, release_name)
+
     # Step 1: Scale down ros-processor so consumer group becomes inactive
-    print("[ros-queue-reset] Scaling down ros-processor...")
+    print(f"[ros-queue-reset] Scaling down {ros_deploy}...")
     result = run_oc_command([
-        "scale", "deployment/cost-onprem-ros-processor",
+        "scale", f"deployment/{ros_deploy}",
         "-n", namespace, "--replicas=0"
     ], check=False)
     if result.returncode != 0:
@@ -217,7 +299,7 @@ def reset_ros_queue_offset(namespace: str) -> bool:
         print(f"[ros-queue-reset] Failed to reset offset: {result.stderr}")
         # Scale back up anyway
         run_oc_command([
-            "scale", "deployment/cost-onprem-ros-processor",
+            "scale", f"deployment/{ros_deploy}",
             "-n", namespace, "--replicas=1"
         ], check=False)
         return False
@@ -225,9 +307,9 @@ def reset_ros_queue_offset(namespace: str) -> bool:
     print(f"[ros-queue-reset] Offset reset output: {result.stdout.strip()}")
     
     # Step 4: Scale ros-processor back up
-    print("[ros-queue-reset] Scaling up ros-processor...")
+    print(f"[ros-queue-reset] Scaling up {ros_deploy}...")
     result = run_oc_command([
-        "scale", "deployment/cost-onprem-ros-processor",
+        "scale", f"deployment/{ros_deploy}",
         "-n", namespace, "--replicas=1"
     ], check=False)
     if result.returncode != 0:
@@ -380,7 +462,7 @@ def wait_for_kruize_recommendations(
 
 @pytest.mark.performance
 @pytest.mark.ros_perf
-@pytest.mark.timeout(900)
+@pytest.mark.timeout(1800)
 class TestROSPerformance:
     """ROS/Kruize performance tests (PERF-ROS-*)."""
 
@@ -430,7 +512,10 @@ class TestROSPerformance:
         
         # Queue is stalled - likely poisoned, reset it now
         print(f"[ros-suite-init] Queue stalled at {second_lag}, resetting...")
-        if reset_ros_queue_offset(cluster_config.namespace):
+        if reset_ros_queue_offset(
+            cluster_config.namespace,
+            cluster_config.helm_release_name,
+        ):
             print("[ros-suite-init] Queue reset successful")
         else:
             print("[ros-suite-init] Queue reset failed - tests may fail")
@@ -475,7 +560,10 @@ class TestROSPerformance:
                 elif time.time() - last_progress_time > stall_timeout:
                     # Queue is stalled - likely poisoned with FK errors (PERF-FINDING-013)
                     print(f"[ros-queue-drain] lag stalled at {lag} for {stall_timeout}s - resetting queue")
-                    if reset_ros_queue_offset(cluster_config.namespace):
+                    if reset_ros_queue_offset(
+                        cluster_config.namespace,
+                        cluster_config.helm_release_name,
+                    ):
                         print("[ros-queue-drain] queue reset successful, proceeding")
                     else:
                         print("[ros-queue-drain] queue reset failed, proceeding anyway")
@@ -484,7 +572,10 @@ class TestROSPerformance:
         
         # Timed out - also try to reset the queue
         print(f"[ros-queue-drain] timed out after {max_wait}s (lag={prev_lag}) - resetting queue")
-        if reset_ros_queue_offset(cluster_config.namespace):
+        if reset_ros_queue_offset(
+            cluster_config.namespace,
+            cluster_config.helm_release_name,
+        ):
             print("[ros-queue-drain] queue reset successful, proceeding")
         else:
             print("[ros-queue-drain] queue reset failed, proceeding anyway")
@@ -578,18 +669,16 @@ class TestROSPerformance:
         
         assert upload_result.get("upload_status") == 202, f"Upload failed: {upload_result}"
         
-        # Wait for processing
+        # Wait for Koku processing (provider exists before upload — not a completion signal)
         with perf_timer.measure("koku_processing"):
-            provider_ready = wait_for_provider(
+            wait_for_ros_ingestion(
                 cluster_config.namespace,
                 db_pod,
                 cluster_id,
-                timeout=180,
+                _ACTIVE_PROFILE,
             )
-        
-        assert provider_ready, "Provider not ready within timeout"
-        
-        # Wait for Kruize experiments
+
+        experiment_timeout = kruize_experiment_timeout(_ACTIVE_PROFILE, 1)
         with perf_timer.measure("kruize_experiment_creation"):
             exp_success, exp_count, exp_time = wait_for_kruize_experiments(
                 cluster_config.namespace,
@@ -598,7 +687,7 @@ class TestROSPerformance:
                 kruize_credentials.password,
                 cluster_id,
                 expected_count=1,
-                timeout=300,
+                timeout=experiment_timeout,
             )
         
         # Wait for recommendations
@@ -741,19 +830,15 @@ class TestROSPerformance:
         monitor.start()
         
         try:
-            # Wait for processing
             with perf_timer.measure("koku_processing"):
-                wait_for_provider(
+                wait_for_ros_ingestion(
                     cluster_config.namespace,
                     db_pod,
                     cluster_id,
-                    timeout=300,
+                    _ACTIVE_PROFILE,
                 )
-            
-            # Measured rate: ~8 experiments/min (7.5s each).
-            # For medium (160 workloads) at 90%: 144 * 7.5s ≈ 1080s.
-            # Budget: num_workloads * 10s gives ~33% headroom.
-            experiment_timeout = max(600, num_workloads * 10)
+
+            experiment_timeout = kruize_experiment_timeout(_ACTIVE_PROFILE, num_workloads)
             with perf_timer.measure("kruize_experiment_creation"):
                 exp_success, exp_count, exp_time = wait_for_kruize_experiments(
                     cluster_config.namespace,
@@ -866,17 +951,23 @@ class TestROSPerformance:
             )
         
         assert upload_result.get("upload_status") == 202, f"Initial upload failed: {upload_result}"
-        
-        # Wait for initial experiments
+
         with perf_timer.measure("initial_processing"):
+            wait_for_ros_ingestion(
+                cluster_config.namespace,
+                db_pod,
+                cluster_id,
+                "baseline",
+            )
+            initial_timeout = kruize_experiment_timeout("baseline", 1)
             exp_success, initial_exp_count, initial_time = wait_for_kruize_experiments(
                 cluster_config.namespace,
                 db_pod,
                 kruize_credentials.user,
                 kruize_credentials.password,
                 cluster_id,
-                expected_count=1,  # Based on baseline profile
-                timeout=300,
+                expected_count=1,
+                timeout=initial_timeout,
             )
         
         if not exp_success:
@@ -1059,10 +1150,16 @@ class TestROSPerformance:
                 )
 
             assert upload_result.get("upload_status") == 202, f"Upload failed: {upload_result}"
-            
-            # Measured rate: ~8 experiments/min (7.5s each).
-            # Budget: num_workloads * 10s gives ~33% headroom.
-            experiment_timeout = max(900, num_workloads * 10)
+
+            with perf_timer.measure("koku_processing"):
+                wait_for_ros_ingestion(
+                    cluster_config.namespace,
+                    db_pod,
+                    cluster_id,
+                    _ACTIVE_PROFILE,
+                )
+
+            experiment_timeout = kruize_experiment_timeout(_ACTIVE_PROFILE, num_workloads)
             with perf_timer.measure("processing"):
                 exp_success, exp_count, exp_time = wait_for_kruize_experiments(
                     cluster_config.namespace,

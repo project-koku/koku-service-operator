@@ -53,7 +53,9 @@ API_005_P95_THRESHOLD = _API_005_P95_THRESHOLDS.get(_ACTIVE_PROFILE, 10.0)
 # upload data, wait for Koku to process it AND summarize pod_labels, then poll
 # the tags API.  On larger profiles the celery workers are under heavier load,
 # so the summarization step takes much longer.
-_API_006_BASE_TIMEOUT = 300  # baseline: 5 min is sufficient
+# Fixture creates source, uploads, waits for manifest + summary pod_labels, then
+# enables tags via API — often exceeds 5 min on operator/small clusters.
+_API_006_BASE_TIMEOUT = 1200
 API_006_TIMEOUT = get_timeout_for_profile(_API_006_BASE_TIMEOUT, _ACTIVE_PROFILE)
 
 

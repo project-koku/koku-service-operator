@@ -504,7 +504,8 @@ def labeled_nise_source(
 
     print("[labeled_nise_source] Waiting for manifest processing...")
     _profile = os.environ.get("PERF_PROFILE", "baseline")
-    proc_deadline = time.time() + get_timeout_for_profile(300, _profile)
+    processing_timeout = get_timeout_for_profile(600, _profile)
+    proc_deadline = time.time() + processing_timeout
     proc_result = {"complete": False}
 
     while time.time() < proc_deadline:
@@ -527,6 +528,13 @@ def labeled_nise_source(
         f"files={proc_result.get('num_processed_files', 0)}, "
         f"elapsed={proc_result.get('elapsed_s', '?')}s"
     )
+    if not proc_result.get("complete"):
+        pytest.fail(
+            f"Manifest processing did not complete for cluster {cluster_id} "
+            f"after {processing_timeout}s "
+            f"(processed={proc_result.get('num_processed_files', 0)} files). "
+            "Check listener and celery-worker logs."
+        )
 
     # Confirm summary table rows with pod_labels
     print("[labeled_nise_source] Waiting for summary table rows with pod_labels...")
@@ -534,12 +542,14 @@ def labeled_nise_source(
 
     if not schema_name:
         schema_name = wait_for_summary_tables(
-            namespace, db_pod, cluster_id, timeout=300, interval=10,
+            namespace, db_pod, cluster_id,
+            timeout=get_timeout_for_profile(600, _profile),
+            interval=10,
         )
 
     if schema_name:
         label_wait_start = time.time()
-        label_wait_max = get_timeout_for_profile(300, _profile)
+        label_wait_max = get_timeout_for_profile(600, _profile)
         found_labels = False
 
         while time.time() - label_wait_start < label_wait_max:
