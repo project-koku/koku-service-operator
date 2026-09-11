@@ -124,10 +124,12 @@ certificates instead.
 ## Upload timing
 
 `spec.upload.upload_cycle` is in **minutes**. The example above uses `360`
-(six hours) between upload attempts. After a fresh CMMO install, the first
-successful upload may not happen until the next cycle. For lab testing only,
-you may lower `upload_cycle` (for example `15`) — do not use aggressive
-values in production.
+(six hours), the CMMO default. CMMO clamps values below **60** minutes up to
+60. For lab testing only, you may lower `upload_cycle` to `60` — keep
+production values conservative.
+
+How soon the first upload runs depends on CMMO startup and Prometheus
+collection; use `status.upload` (below) instead of assuming an immediate cycle.
 
 ## Check
 
@@ -136,11 +138,12 @@ On the **reporting** cluster:
 ```bash
 oc -n costmanagement-metrics-operator get costmanagementmetricsconfig -o yaml
 oc -n costmanagement-metrics-operator logs deploy/costmanagement-metrics-operator --tail=100
+oc -n costmanagement-metrics-operator get costmanagementmetricsconfig \
+  -o jsonpath='upload={.status.upload.last_upload_status} time={.status.upload.last_successful_upload_time}{"\n"}'
 ```
 
-Look at `status` on `CostManagementMetricsConfig`. A successful cycle often
-shows `last_upload_status` such as `202 Accepted` and a recent
-`last_successful_upload_time`.
+A successful cycle often shows `status.upload.last_upload_status` such as
+`202 Accepted` and a recent `status.upload.last_successful_upload_time`.
 
 On the **Cost Management** cluster:
 

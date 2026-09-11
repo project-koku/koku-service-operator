@@ -33,9 +33,11 @@ supports AllNamespaces. Working paths today:
 
 - **In-cluster** (this repo): `IMG=<image> ./hack/deploy-incluster.sh
   "$NAMESPACE"` after `./hack/deploy-dev.sh "$NAMESPACE"`.
-- **OLM + lab layout:** install the catalog Subscription in
-  `openshift-operators` (or another namespace OLM accepts), then run
-  `deploy-incluster.sh` so the manager Deployment and CR share `$NAMESPACE`.
+- **OLM + lab layout:** the catalog Subscription installs the **OLM package**
+  only; it does not place the manager Deployment in your app namespace. Install
+  the catalog Subscription in `openshift-operators` (or another namespace OLM
+  accepts), then run `deploy-incluster.sh` so the **runtime** manager
+  Deployment and CR share `$NAMESPACE`.
 
 Do not run `make run` on a laptop against `*.svc.cluster.local` hosts. Database
 and cache probes will stay False.
