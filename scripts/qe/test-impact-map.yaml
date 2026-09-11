@@ -5,7 +5,7 @@
 # test profiles to run for a given PR.
 #
 # Profiles (in ascending order of coverage):
-#   smoke     ~43 tests,  ~17 min  — source + cost model tests only
+#   smoke     ~71 selected, ~17 min  — source + cost model tests only
 #   extended  ~2100 tests, ~33 min — all except infrastructure tests
 #   stable    ~2350 tests, ~40 min — all validated tests
 #   full      ~3324 tests, ~3 hrs  — everything, no skip filters
