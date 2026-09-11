@@ -621,6 +621,13 @@ type GatewayRouteConfig struct {
 	TLS  RouteTLSSpec `json:"tls,omitempty"`
 }
 
+type GatewayNetworkPolicyConfig struct {
+	// ExternalNamespaces is a list of external namespace names allowed to
+	// access the gateway API. Add operators or services (e.g. metrics operators)
+	// that need direct gateway access here.
+	ExternalNamespaces []string `json:"externalNamespaces,omitempty"`
+}
+
 type RouteTLSSpec struct {
 	// Envoy's backend listener is plaintext HTTP, so only edge termination
 	// is valid — passthrough/reencrypt would break the TLS handshake.
@@ -639,6 +646,10 @@ type RouteTLSSpec struct {
 type MonitoringConfig struct {
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
+}
+
+type GatewayConfig struct {
+	NetworkPolicy GatewayNetworkPolicyConfig `json:"networkPolicy,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -665,6 +676,7 @@ type CostManagementServiceConfigSpec struct {
 	Kruize         KruizeConfig         `json:"kruize,omitempty"`
 	Ingress        IngressConfig        `json:"ingress,omitempty"`
 	UI             UIConfig             `json:"ui,omitempty"`
+	Gateway        GatewayConfig        `json:"gateway,omitempty"`
 	GatewayRoute   GatewayRouteConfig   `json:"gatewayRoute,omitempty"`
 	Monitoring     MonitoringConfig     `json:"monitoring,omitempty"`
 }

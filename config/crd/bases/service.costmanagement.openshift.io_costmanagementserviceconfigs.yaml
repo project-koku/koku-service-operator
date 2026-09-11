@@ -1473,6 +1473,20 @@ spec:
                     false
                   rule: self.deploy != false || (size(self.host) > 0 && size(self.secretName)
                     > 0)
+              gateway:
+                properties:
+                  networkPolicy:
+                    properties:
+                      externalNamespaces:
+                        description: |-
+                          ExternalNamespaces is a list of external namespace names allowed to
+                          access the gateway API. Add operators or services (e.g. metrics operators)
+                          that need direct gateway access here.
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                type: object
               gatewayRoute:
                 properties:
                   annotations:

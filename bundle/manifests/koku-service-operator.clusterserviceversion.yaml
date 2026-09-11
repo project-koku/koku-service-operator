@@ -301,7 +301,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-10T02:58:04Z"
+    createdAt: "2026-09-11T20:56:11Z"
     operatorframework.io/initialization-resource: |-
       {
         "apiVersion": "service.costmanagement.openshift.io/v1alpha1",

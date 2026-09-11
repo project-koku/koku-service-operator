@@ -109,11 +109,14 @@ func prometheusFrom(port int32) networkingv1.NetworkPolicyIngressRule {
 // GatewayNetworkPolicy allows traffic to the Envoy gateway from:
 //   - OpenShift router pods (external API access)
 //   - UI pods (nginx proxies /api/ through the gateway)
+//   - External namespaces configured in spec.gateway.networkPolicy.externalNamespaces
 //   - Prometheus / OpenShift monitoring (scrape the admin port)
 func GatewayNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
-	return netpol(cfg, cfg.Name+"-gateway", "gateway", []networkingv1.NetworkPolicyIngressRule{
+	// Preallocate: 2 fixed (router+UI) + externalNamespaces + 1 (monitoring)
+	rules := make([]networkingv1.NetworkPolicyIngressRule, 0, 3+len(cfg.Spec.Gateway.NetworkPolicy.ExternalNamespaces))
+	rules = append(rules,
 		// OpenShift router — external traffic through the Route
-		{
+		networkingv1.NetworkPolicyIngressRule{
 			From: []networkingv1.NetworkPolicyPeer{
 				{NamespaceSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"network.openshift.io/policy-group": "ingress"},
@@ -126,9 +129,24 @@ func GatewayNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networ
 		},
 		// UI nginx proxying /api/ to the gateway
 		podFrom(cfg, "ui", envoyHTTPPort),
-		// Prometheus scraping admin/metrics port
-		monitoringFrom(envoyAdminPort),
-	})
+	)
+
+	// Add rules for external namespaces that need gateway access
+	for _, ns := range cfg.Spec.Gateway.NetworkPolicy.ExternalNamespaces {
+		rules = append(rules, networkingv1.NetworkPolicyIngressRule{
+			From: []networkingv1.NetworkPolicyPeer{
+				{NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns},
+				}},
+			},
+			Ports: []networkingv1.NetworkPolicyPort{tcpPort(envoyHTTPPort)},
+		})
+	}
+
+	// Prometheus scraping admin/metrics port
+	rules = append(rules, monitoringFrom(envoyAdminPort))
+
+	return netpol(cfg, cfg.Name+"-gateway", "gateway", rules)
 }
 
 // -----------------------------------------------------------------------------
