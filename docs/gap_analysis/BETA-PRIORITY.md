@@ -6,7 +6,7 @@
 
 **Scope note (2026-08-10):** ROS and Kruize are **out of beta**. Name them separately in gaps (different secrets, migrate, readiness). Optional install, independent Kruize enablement, and day-2 enablement are owned by **[COST-8054](../jira/COST-8054.md)** — not by COST-7678–7692 closure.
 
-**Code progress since first draft:** `spec.ros.enabled` (`*bool`, **default `false`** for Cost-only beta) + `ROSEnabled()` gate Deployments/CronJobs/migrate/Envoy ROS routes/NPs; `reconcileROSFeature` sets condition `ROSEnabled` and cleans up when flipped off. Samples keep `ros.enabled: false`. **ServiceMonitors are not fully gated:** `reconcileMonitoring` still applies `KruizeServiceMonitor` after cleanup (Cost-only installs get a Kruize SM CR; `ros-api` on the App SM is a dead selector, not a live target) — see [COST-7686](COST-7686.md) G1 leftover / [COST-7692](COST-7692.md). **Still open for Cost-only honesty:** Validation **always** requires `ros-user` / `ros-password` (not conditional; not Kruize keys); Kruize is not independently toggleable (tied to ROS today). Opt in with `ros.enabled: true` + images. “Out of beta scope” means *do not treat ROS or Kruize readiness/hardening as Cost beta blockers*.
+**Code progress since first draft:** `spec.ros.enabled` (`*bool`, **default `false`** for Cost-only beta) + `ROSEnabled()` gate Deployments/CronJobs/migrate/Envoy ROS routes/NPs; `reconcileROSFeature` sets condition `ROSEnabled` and cleans up when flipped off. Samples keep `ros.enabled: false`. **ServiceMonitors are not fully gated:** `reconcileMonitoring` still applies `KruizeServiceMonitor` after cleanup (Cost-only installs get a Kruize SM CR; `ros-api` on the App SM is a dead selector, not a live target) — see [COST-7686](COST-7686.md) G1 leftover / [COST-7692](COST-7692.md). External DB Secret validation requires `ros-*` / `kruize-*` only when `ros.enabled=true`. Kruize is not independently toggleable (tied to ROS today). Opt in with `ros.enabled: true` + images. “Out of beta scope” means *do not treat ROS or Kruize readiness/hardening as Cost beta blockers*.
 
 Per-ticket detail stays in the linked audits. This doc is the cross-cut ranking.
 
@@ -37,8 +37,8 @@ Several paths report success while the underlying dependency is wrong or while a
 | S3 Secret keys never checked; `StorageReady=True` on user path | [7684 G2](COST-7684.md), [7683 R1](COST-7683.md) | Bad/missing credentials still “ready” |
 | No S3 connectivity probe | [7684 G1](COST-7684.md) | Endpoint/TLS/network failures invisible until upload fails |
 | OIDC HTTP probe accepts any status &lt; 500 | [7684 G3](COST-7684.md) | 401/404 still `AuthenticationReady=True` |
-| External DB secret validation omits `kruize-user` / `kruize-password` | [7684 R3](COST-7684.md) | **→ [COST-8054](../jira/COST-8054.md)** (Kruize); not a Cost beta blocker |
-| External DB secret validation always requires `ros-user` / `ros-password` | [7684](COST-7684.md), [8054](../jira/COST-8054.md) | **→ [COST-8054](../jira/COST-8054.md)** — blocks true Cost-only BYOI even when `ros.enabled=false` |
+| External DB secret validation omits `kruize-user` / `kruize-password` | [7684 R3](COST-7684.md) | **Closed** — required when `ros.enabled=true` |
+| External DB secret validation always requires `ros-user` / `ros-password` | [7684](COST-7684.md), [8054](../jira/COST-8054.md) | **Closed** — Cost-only BYOI may omit `ros-*` / `kruize-*` |
 | RBAC Deployments applied but never gated; no `RBACReady` | [7689 G2](COST-7689.md) | **Closed** — `RBACReady` gates on the RBAC API before `Available` |
 | `UIReady` / Celery workers not truly readiness-gated | [7690 R2](COST-7690.md), [7687](COST-7687.md) | Ingress is gated (`IngressReady`, COST-7688 R4 closed); UI/Celery still weaker than RBAC/S3 |
 
@@ -216,7 +216,6 @@ Track separately; do not conflate the two components. **Partial progress already
 
 | Gap | Impact |
 |-----|--------|
-| Validation always requires `ros-user` / `ros-password` | Cost-only BYOI secrets cannot omit ROS keys |
 | No independent Kruize flag (tied to ROS) | Product optionality incomplete |
 | Day-2 enable polish / docs | Full AC of 8054 |
 | Hardening (SA, NP, SM, profile rows, bucket discovery) | Post-beta ROS/Kruize quality |

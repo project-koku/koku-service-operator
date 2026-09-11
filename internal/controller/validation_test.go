@@ -97,6 +97,43 @@ func TestRequiredKafkaTopics(t *testing.T) {
 	})
 }
 
+func TestRequiredDBSecretKeys(t *testing.T) {
+	costOnly := []string{
+		"koku-user", "koku-password",
+		"rbac-user", "rbac-password",
+	}
+	rosOn := []string{
+		"koku-user", "koku-password",
+		"rbac-user", "rbac-password",
+		"ros-user", "ros-password",
+		"kruize-user", "kruize-password",
+	}
+
+	t.Run("cost only", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{}
+		if got := requiredDBSecretKeys(cfg); !slices.Equal(got, costOnly) {
+			t.Fatalf("requiredDBSecretKeys() = %v, want %v", got, costOnly)
+		}
+	})
+
+	t.Run("ros enabled false", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{}
+		cfg.Spec.ROS.Enabled = falsePtr()
+		if got := requiredDBSecretKeys(cfg); !slices.Equal(got, costOnly) {
+			t.Fatalf("requiredDBSecretKeys() = %v, want %v", got, costOnly)
+		}
+	})
+
+	t.Run("ros enabled", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{}
+		cfg.Spec.ROS.Enabled = truePtr()
+		got := requiredDBSecretKeys(cfg)
+		if !slices.Equal(got, rosOn) {
+			t.Fatalf("requiredDBSecretKeys() = %v, want %v", got, rosOn)
+		}
+	})
+}
+
 func TestTopicMissingFromPartitions(t *testing.T) {
 	partitions := []kafka.Partition{
 		{Topic: "platform.upload.announce"},
@@ -922,7 +959,7 @@ func TestReconcileValidation_DBSecretMissingKeys(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testDBSecret, Namespace: testNamespace},
 		Data: map[string][]byte{
-			// Only one key present; koku-user, koku-password, etc. are missing.
+			// postgres-user is not a Cost-only required key; koku/rbac are missing.
 			"postgres-user": []byte("admin"),
 		},
 	}
@@ -967,40 +1004,177 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 	return nil
 }
 
-// TestDBSecretValidationRequiresKruizeCredentials verifies that the database
-// Secret validation (getSecret) includes kruize-user and kruize-password.
-// Kruize connects to the same PostgreSQL instance; missing its credentials
-// causes Kruize pods to fail silently after migrations complete.
-func TestDBSecretValidationRequiresKruizeCredentials(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
+func costOnlyDBSecretData() map[string][]byte {
+	return map[string][]byte{
+		"koku-user":     []byte("koku"),
+		"koku-password": []byte("kokupass"),
+		"rbac-user":     []byte("rbac"),
+		"rbac-password": []byte("rbacpass"),
+	}
+}
 
-	// Secret with all required keys EXCEPT kruize credentials.
-	secretMissingKruize := &corev1.Secret{
+func TestReconcileValidation_CostOnlyDBSecretOmitsROSKeys(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testDBSecret, Namespace: testNamespace},
-		Data: map[string][]byte{ //nolint:goconst // test data — key names must match real values
-			"postgres-user": []byte("postgres"), "postgres-password": []byte("pgpass"),
-			"koku-user": []byte("koku"), "koku-password": []byte("kokupass"),
-			"ros-user": []byte("ros"), "ros-password": []byte("rospass"),
-			"rbac-user": []byte("rbac"), "rbac-password": []byte("rbacpass"),
-			// kruize-user and kruize-password intentionally absent
+		Data:       costOnlyDBSecretData(),
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy:     falsePtr(),
+				Host:       localHost,
+				Port:       int32(addr.Port),
+				SecretName: testDBSecret,
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
 		},
 	}
-	r := &CostManagementServiceConfigReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(secretMissingKruize).Build(),
+
+	r := newValidationReconciler(t, secret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("expected zero result (cost-only secret valid), got %+v", result)
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionTrue {
+		t.Errorf("expected DatabaseReady=True, got %+v", dbCond)
+	}
+}
+
+func TestReconcileValidation_ROSEnabledDBSecretRequiresROSKeys(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testDBSecret, Namespace: testNamespace},
+		Data:       costOnlyDBSecretData(),
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy:     falsePtr(),
+				Host:       localHost,
+				Port:       int32(addr.Port),
+				SecretName: testDBSecret,
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
+			ROS:   costv1alpha1.ROSConfig{Enabled: truePtr()},
+		},
 	}
 
-	// The required list in validation.go must include kruize credentials.
-	requiredKeys := []string{
-		"postgres-user", "postgres-password",
-		"koku-user", "koku-password",
-		"ros-user", "ros-password",
-		"rbac-user", "rbac-password",
-		"kruize-user", "kruize-password",
+	r := newValidationReconciler(t, secret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	_, err := r.getSecret(context.Background(), testNamespace, testDBSecret, requiredKeys)
-	if err == nil {
-		t.Error("getSecret should fail when kruize-user/kruize-password are absent, got nil")
+	if result.RequeueAfter == 0 {
+		t.Error("expected requeue (ROS keys missing from secret)")
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionFalse || dbCond.Reason != "DatabaseSecretInvalid" {
+		t.Errorf("expected DatabaseReady=False DatabaseSecretInvalid, got %+v", dbCond)
+	}
+	if dbCond != nil && (!strings.Contains(dbCond.Message, "ros-user") || !strings.Contains(dbCond.Message, "kruize-user")) {
+		t.Errorf("expected missing ros/kruize keys in message, got %q", dbCond.Message)
+	}
+}
+
+func rosDBSecretData() map[string][]byte {
+	data := costOnlyDBSecretData()
+	data["ros-user"] = []byte("ros")
+	data["ros-password"] = []byte("rospass")
+	data["kruize-user"] = []byte("kruize")
+	data["kruize-password"] = []byte("kruizepass")
+	return data
+}
+
+func TestReconcileValidation_ROSEnabledDBSecretAcceptsROSKeys(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testDBSecret, Namespace: testNamespace},
+		Data:       rosDBSecretData(),
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy:     falsePtr(),
+				Host:       localHost,
+				Port:       int32(addr.Port),
+				SecretName: testDBSecret,
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
+			ROS:   costv1alpha1.ROSConfig{Enabled: truePtr()},
+		},
+	}
+
+	r := newValidationReconciler(t, secret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsZero() {
+		t.Errorf("expected zero result (ROS secret valid), got %+v", result)
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionTrue {
+		t.Errorf("expected DatabaseReady=True, got %+v", dbCond)
+	}
+}
+
+func TestReconcileValidation_ROSEnabledDBSecretMissingKruize(t *testing.T) {
+	ln := listenLocalTCP(t)
+	addr := ln.Addr().(*net.TCPAddr)
+
+	data := costOnlyDBSecretData()
+	data["ros-user"] = []byte("ros")
+	data["ros-password"] = []byte("rospass")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testDBSecret, Namespace: testNamespace},
+		Data:       data,
+	}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy:     falsePtr(),
+				Host:       localHost,
+				Port:       int32(addr.Port),
+				SecretName: testDBSecret,
+			},
+			Cache: costv1alpha1.CacheConfig{Deploy: truePtr()},
+			Kafka: costv1alpha1.KafkaConfig{BootstrapServers: ""},
+			ROS:   costv1alpha1.ROSConfig{Enabled: truePtr()},
+		},
+	}
+
+	r := newValidationReconciler(t, secret)
+	result, err := r.reconcileValidation(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Error("expected requeue (kruize keys missing from secret)")
+	}
+	dbCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if dbCond == nil || dbCond.Status != metav1.ConditionFalse || dbCond.Reason != "DatabaseSecretInvalid" {
+		t.Errorf("expected DatabaseReady=False DatabaseSecretInvalid, got %+v", dbCond)
+	}
+	if dbCond != nil && !strings.Contains(dbCond.Message, "kruize-user") {
+		t.Errorf("expected missing kruize-user in message, got %q", dbCond.Message)
 	}
 }
 

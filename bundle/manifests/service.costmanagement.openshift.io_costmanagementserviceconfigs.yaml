@@ -1445,8 +1445,12 @@ spec:
                   secretName:
                     description: |-
                       Name of an existing Secret containing DB credentials.
-                      Keys: postgres-user, postgres-password, koku-user, koku-password,
-                      ros-user, ros-password, kruize-user, kruize-password, rbac-user, rbac-password.
+                      Always required: koku-user, koku-password, rbac-user, rbac-password.
+                      When spec.ros.enabled is true, also require ros-user, ros-password,
+                      kruize-user, and kruize-password.
+                      postgres-user and postgres-password are used only by bundled Postgres
+                      init and Kruize partition init; they are not required on this Secret
+                      for BYOI.
                       When empty the operator generates credentials into <cr-name>-db-credentials.
                     type: string
                   sslMode:

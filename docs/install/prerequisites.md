@@ -7,8 +7,8 @@ OIDC. It connects to services you already run.
 **Beta.** Leave `spec.ros.enabled: false`. ROS and Kruize workloads are not
 supported. Cost-only application databases are `costonprem_koku` and
 `costonprem_rbac`. Do not create a database named `postgres` for Cost
-Management. The operator currently still validates unused Secret keys
-(`postgres-user`, `ros-*`, `kruize-*`) even when ROS is off.
+Management. External DB Secrets need `koku-*` and `rbac-*` keys; `ros-*` and
+`kruize-*` are required only when `ros.enabled` is true.
 
 Companion guides: [quickstart](quickstart.md), [production](production.md),
 [Keycloak](keycloak.md), [CMMO](cmmo.md).
@@ -60,51 +60,42 @@ Beta (`ros.enabled: false`) needs only the koku and rbac databases. Do not
 create `postgres`, `costonprem_ros`, or `costonprem_kruize` as Cost Management
 application databases.
 
-The operator still requires extra Secret keys today (`postgres-user` /
-`postgres-password`, plus `ros-*` and `kruize-*` even when ROS is off).
-`postgres-user` is an admin/bootstrap pair for bundled DB init and Kruize
-partition init — not a fifth database. Schema migration Jobs use the
-application users (`koku-user`, `rbac-user`).
+`postgres-user` / `postgres-password` are an admin/bootstrap pair for bundled
+DB init and Kruize partition init — not a fifth database. They are not
+required on an external `spec.database.secretName` Secret. Schema migration
+Jobs use the application users (`koku-user`, `rbac-user`).
 
 `spec.database.sslMode` is one of `disable`, `require`, `verify-ca`,
 `verify-full` (CRD default `disable`). Use `require` or stricter in production.
 
 ### Secret: `spec.database.secretName`
 
-Create this Secret in the **CR namespace**. All ten keys are required today,
-including unused `postgres-*`, `ros-*`, and `kruize-*` keys. Missing keys set
+Create this Secret in the **CR namespace**. Missing required keys set
 `DatabaseReady=False` with reason `DatabaseSecretInvalid` and block
 migrations.
 
-| Key | Purpose |
-|-----|---------|
-| `koku-user` | Owner of `costonprem_koku` |
-| `koku-password` | |
-| `rbac-user` | Owner of `costonprem_rbac` |
-| `rbac-password` | |
-| `postgres-user` | Admin / bootstrap only (bundled init, Kruize). Unused by Cost-only workloads |
-| `postgres-password` | |
-| `ros-user` | Owner of `costonprem_ros` (validated even when ROS is off) |
-| `ros-password` | |
-| `kruize-user` | Owner of `costonprem_kruize` (validated even when ROS is off) |
-| `kruize-password` | |
+| Key | Purpose | Required |
+|-----|---------|----------|
+| `koku-user` | Owner of `costonprem_koku` | Always |
+| `koku-password` | | Always |
+| `rbac-user` | Owner of `costonprem_rbac` | Always |
+| `rbac-password` | | Always |
+| `ros-user` | Owner of `costonprem_ros` | Only if `ros.enabled: true` |
+| `ros-password` | | Only if `ros.enabled: true` |
+| `kruize-user` | Owner of `costonprem_kruize` | Only if `ros.enabled: true` |
+| `kruize-password` | | Only if `ros.enabled: true` |
 
 ```bash
 kubectl -n "$NAMESPACE" create secret generic my-db-credentials \
-  --from-literal=postgres-user=postgres \
-  --from-literal=postgres-password='<password>' \
   --from-literal=koku-user=koku \
   --from-literal=koku-password='<password>' \
   --from-literal=rbac-user=rbac_user \
-  --from-literal=rbac-password='<password>' \
-  --from-literal=ros-user=ros_user \
-  --from-literal=ros-password='<password>' \
-  --from-literal=kruize-user=kruize_user \
-  --from-literal=kruize-password='<password>'
+  --from-literal=rbac-password='<password>'
 ```
 
-Missing keys set `DatabaseReady=False` with reason `DatabaseSecretInvalid` and
-block migrations.
+When `ros.enabled: true`, also add `ros-user` / `ros-password` and
+`kruize-user` / `kruize-password`. Extra keys (including unused
+`postgres-*`) are ignored.
 
 ## Cache (Valkey / Redis)
 

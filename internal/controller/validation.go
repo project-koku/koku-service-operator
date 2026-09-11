@@ -33,17 +33,28 @@ const (
 var (
 	// s3SecretKeys are the required keys in an objectStorage Secret.
 	s3SecretKeys = []string{"access-key", "secret-key"}
-
-	// dbSecretKeys lists the credential keys the operator expects in an
-	// externally-provided database Secret (spec.database.secretName).
-	dbSecretKeys = []string{
-		"postgres-user", "postgres-password",
-		"koku-user", "koku-password",
-		"ros-user", "ros-password",
-		"rbac-user", "rbac-password",
-		"kruize-user", "kruize-password",
-	}
 )
+
+// requiredDBSecretKeys returns the credential keys an externally-provided
+// database Secret (spec.database.secretName) must contain. Cost-only installs
+// need koku and rbac. ROS/Kruize keys are required only when ros.enabled is
+// true. postgres-user/password are omitted: they exist for bundled Postgres
+// init and Kruize partition init, not the BYOI Secret contract.
+//
+//nolint:goconst // Secret key names are intentionally literal.
+func requiredDBSecretKeys(cfg *costv1alpha1.CostManagementServiceConfig) []string {
+	keys := []string{
+		"koku-user", "koku-password",
+		"rbac-user", "rbac-password",
+	}
+	if costv1alpha1.ROSEnabled(cfg) {
+		keys = append(keys,
+			"ros-user", "ros-password",
+			"kruize-user", "kruize-password",
+		)
+	}
+	return keys
+}
 
 // reconcileValidation probes all external dependencies and validates referenced
 // Secrets before the migration gate. DB and Cache failures block the pipeline;
@@ -70,8 +81,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 		} else {
 			// Validate secret keys when the user provided their own secret.
 			if cfg.Spec.Database.SecretName != "" {
-				required := dbSecretKeys
-				if _, err := r.getSecret(ctx, cfg.Namespace, cfg.Spec.Database.SecretName, required); err != nil {
+				if _, err := r.getSecret(ctx, cfg.Namespace, cfg.Spec.Database.SecretName, requiredDBSecretKeys(cfg)); err != nil {
 					r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
 						"DatabaseSecretInvalid", err.Error())
 					allReady = false
