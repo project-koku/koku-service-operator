@@ -31,7 +31,7 @@ Generated Prow job YAML (do not edit by hand): [`ci-operator/jobs/.../project-ko
 |--------------|-----------------|------------------|--------------------|--------------|--------|
 | `ci/prow/build` | `/test build` | Yes | Yes | `go build ./cmd/main.go` in the CI build root | The manager compiles |
 | `ci/prow/images` | `/test images` | Yes | Yes | Build operator, e2e runner, and OLM catalog images | Pipeline images build |
-| `ci/prow/ci-bundle-koku-service-operator-bundle` | `/test ci-bundle-koku-service-operator-bundle` | Yes, except docs-only PRs | Yes (when it runs) | Build the OLM bundle image | The bundle image builds |
+| `ci/prow/ci-bundle-koku-service-operator-bundle` | `/test ci-bundle-koku-service-operator-bundle` | **No** | Yes (when it runs) | Build the OLM bundle image | The bundle image builds |
 | `ci/prow/e2e-olm` | `/test e2e-olm` | **No** | **No** (optional) | Claim OCP 4.20, `operator-sdk run bundle`, wait for CSV | This PR’s bundle installs via OLM (no CMSC) |
 | `ci/prow/e2e-pytest` | `/test e2e-pytest` | **No** | **No** (optional) | Claim OCP 4.20, OwnNamespace OLM, BYOI + CMSC, pytest | The operator deployed a correct, authenticated, healthy stack, and this repo’s pytest suite passed (no UI) |
 | `ci/prow/e2e-iqe` | `/test e2e-iqe` | **No** | **No** (optional) | Same stack as pytest, then IQE `--profile smoke` | Cost Management works for QE smoke (sources, cost models, nise ingest, API reports). No CMMO |

@@ -46,7 +46,7 @@ Defined in `write_shell_wrappers()` in the Python file above.
 | `_capture_sanitized VAR cmd…` | Values needed later (CSV name, phase) | Assigns **raw** stdout to `VAR`; redacts stderr onto the log. **Do not echo `$VAR`** if it might be sensitive. CSV names are safe; tokens are not. |
 | `_publish_sanitized SRC DEST` | JUnit / HTML into `${ARTIFACT_DIR}` | Copy only if sanitizable; unsanitizable source is withheld (success for the job, no leak) |
 | `_sanitize_tree [DIR…]` | Workspace report dirs, then `${ARTIFACT_DIR}` | In-place redact or delete. No args → `${ARTIFACT_DIR}` |
-| `_sanitize_shared_reports` | `${SHARED_DIR}` | Only **report** files (`junit*.xml`, `report.html`, `reports/`). Cluster metadata, YAML, logs, kubeconfig in `SHARED_DIR` are left alone so later steps still work |
+| `_sanitize_shared_reports` | `${SHARED_DIR}` | Only **report** files: names starting with `junit` (any extension), plus `iqe_junit.xml`, `report.html`, `pytest_report.html`, `iqe_report.html`, and any file under a `reports/` subdirectory. Cluster metadata, YAML, logs, kubeconfig in `SHARED_DIR` are left alone so later steps still work |
 
 Pattern used around pytest / IQE / `e2e.sh`:
 
@@ -98,7 +98,7 @@ ci-operator puts **cluster credentials and step inputs** in `SHARED_DIR` (includ
 
 `sanitize_shared_reports()` therefore only touches:
 
-- Names: `junit.xml`, `iqe_junit.xml`, `report.html`, `pytest_report.html`, `iqe_report.html`, or names starting with `junit`
+- Names: `junit.xml`, `iqe_junit.xml`, `report.html`, `pytest_report.html`, `iqe_report.html`, or names starting with `junit` (any extension)
 - Any file under a `reports/` subdirectory
 
 ## Self-test
