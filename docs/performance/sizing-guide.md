@@ -38,7 +38,7 @@ for the full VTC-001a characterization.
 ### COST-7618: Profile Values Overlays (2026-07-27)
 
 Published declarative Helm overlays for each sizing profile under
-[`cost-onprem/`](../../cost-onprem/). These are the deploy-time
+`cost-onprem/` in the chart repository. These are the deploy-time
 equivalent of `apply_perf_profile_config()`, plus database sizing. Soft
 recommendation for mapping overlays to a future operator CRD:
 [operator-profile-crd-mapping.md](./operator-profile-crd-mapping.md).
@@ -421,10 +421,10 @@ does not change at runtime).
 
 | Profile | Overlay | Notes |
 |---------|---------|-------|
-| Small | [values-small.yaml](../../cost-onprem/values-small.yaml) | ≡ chart defaults (COST-7599); optional `-f` |
-| Medium | [values-medium.yaml](../../cost-onprem/values-medium.yaml) | Required for medium workloads |
-| Large | [values-large.yaml](../../cost-onprem/values-large.yaml) | Restart gateway after upgrade (FINDING-020) |
-| XLarge | [values-xlarge.yaml](../../cost-onprem/values-xlarge.yaml) | Same replicas as large; higher worker CPU/memory |
+| Small | `values-small.yaml` | ≡ chart defaults (COST-7599); optional `-f` |
+| Medium | `values-medium.yaml` | Required for medium workloads |
+| Large | `values-large.yaml` | Restart gateway after upgrade (FINDING-020) |
+| XLarge | `values-xlarge.yaml` | Same replicas as large; higher worker CPU/memory |
 
 ```bash
 # Medium example (manual)
@@ -476,7 +476,7 @@ Management OpenShift Operator CRD, see
 - [FINDINGS.md](./FINDINGS.md) — detailed product findings and evidence
 - [TEST-MATRIX.md](./TEST-MATRIX.md) — test coverage matrix
 - [OBSERVABILITY.md](./OBSERVABILITY.md) — metrics collection infrastructure
-- [Profile overlays](../../cost-onprem/) — `values-{small,medium,large,xlarge}.yaml`
+- Profile overlays — `values-{small,medium,large,xlarge}.yaml` in the chart repository
 - [Operator CRD mapping](./operator-profile-crd-mapping.md) — soft recommendation for a future operator
 
 ---

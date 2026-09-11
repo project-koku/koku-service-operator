@@ -438,4 +438,4 @@ rate(container_cpu_usage_seconds_total{namespace="cost-onprem", pod=~".*listener
 - [Performance Testing Plan](./performance-testing-plan.md) - Full testing strategy
 - [TEST-MATRIX.md](./TEST-MATRIX.md) - Test permutations and parameters
 - [FINDINGS.md](./FINDINGS.md) - Issues discovered during testing
-- [Resource Requirements](../operations/resource-requirements.md) - Sizing guidance
+- [Sizing Guide](./sizing-guide.md) - Resource sizing guidance

@@ -423,6 +423,5 @@ PERF_PROFILE=small LISTENER_CPU_LIMIT=1000m \
 ## Related Documentation
 
 - [Performance Testing Plan](./performance-testing-plan.md) - Full FLPATH-4036 plan
-- [Test Data Setup Guide](../development/test-data-setup.md) - Data generation
 - [Sizing Guide](./sizing-guide.md) - Resource recommendations
 - [FINDINGS.md](./FINDINGS.md) - Issues discovered during testing
