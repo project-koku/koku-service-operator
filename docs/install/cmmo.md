@@ -121,15 +121,34 @@ certificates instead.
 - Do not enable ROS collection against a Cost-only (`ros.enabled: false`)
   instance.
 
+## Upload timing
+
+`spec.upload.upload_cycle` is in **minutes**. The example above uses `360`
+(six hours) between upload attempts. After a fresh CMMO install, the first
+successful upload may not happen until the next cycle. For lab testing only,
+you may lower `upload_cycle` (for example `15`) — do not use aggressive
+values in production.
+
 ## Check
 
-On the reporting cluster:
+On the **reporting** cluster:
 
 ```bash
-oc -n costmanagement-metrics-operator get costmanagementmetricsconfig
-oc -n costmanagement-metrics-operator logs deploy/costmanagement-metrics-operator
+oc -n costmanagement-metrics-operator get costmanagementmetricsconfig -o yaml
+oc -n costmanagement-metrics-operator logs deploy/costmanagement-metrics-operator --tail=100
 ```
 
-On the Cost Management cluster, Listener and Ingress should see uploads on
-topic `platform.upload.announce` after a successful CMMO cycle. The UI Sources
-page lists the cluster when `source.create_source` is true.
+Look at `status` on `CostManagementMetricsConfig`. A successful cycle often
+shows `last_upload_status` such as `202 Accepted` and a recent
+`last_successful_upload_time`.
+
+On the **Cost Management** cluster:
+
+1. **UI** → **Integrations** (or **Sources**) — a new OpenShift source when
+   `spec.source.create_source` is true.
+2. Listener / Ingress activity on topic `platform.upload.announce` after a
+   successful cycle (operator logs or your Kafka tooling).
+
+Do not rely on a single `grep` in Listener logs before the first CMMO cycle
+completes — other uploads (for example lab seed data) may use different
+cluster IDs or timestamps.

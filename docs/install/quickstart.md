@@ -22,8 +22,20 @@ OperatorHub catalog yet. Two current vehicles:
    `IMG=<your-image> ./hack/deploy-incluster.sh "$NAMESPACE"` after CRDs/RBAC
    (`./hack/deploy-dev.sh "$NAMESPACE"`).
 
-The generated CSV currently advertises AllNamespaces; the **runtime** still
-watches only the install namespace. Put the CR in that namespace.
+The generated CSV currently advertises **AllNamespaces** install mode; the
+**runtime** still watches only the install namespace. Put the CR in that
+namespace.
+
+**Console pitfall:** subscribing through OLM into the application namespace
+with an `OperatorGroup` that sets `targetNamespaces` can fail the CSV with
+`OwnNamespace InstallModeType not supported` when the published catalog only
+supports AllNamespaces. Working paths today:
+
+- **In-cluster** (this repo): `IMG=<image> ./hack/deploy-incluster.sh
+  "$NAMESPACE"` after `./hack/deploy-dev.sh "$NAMESPACE"`.
+- **OLM + lab layout:** install the catalog Subscription in
+  `openshift-operators` (or another namespace OLM accepts), then run
+  `deploy-incluster.sh` so the manager Deployment and CR share `$NAMESPACE`.
 
 Do not run `make run` on a laptop against `*.svc.cluster.local` hosts. Database
 and cache probes will stay False.
@@ -66,6 +78,8 @@ Replace at least:
   bucket — the operator does not create buckets)
 - `spec.auth.keycloak.url` (required; see [keycloak.md](keycloak.md))
 - `spec.auth.keycloak.issuerURL` if token `iss` is the public Route
+- `spec.auth.keycloak.tls.caCertSecretName` when `issuerURL` is HTTPS on a
+  Route (UI oauth2-proxy needs the ingress CA — see [keycloak.md](keycloak.md))
 - Image `repository` / `tag` values for your environment
 
 Leave `spec.database.deploy` and `spec.cache.deploy` **false**. Leave
@@ -141,8 +155,8 @@ oc -n "$NAMESPACE" describe cmsc cost-management-minimal
 | `RBACReady`, `IngressReady`, `GatewayReady` | True |
 | `Available` | True (`KokuAvailable`) — **success for this quickstart** |
 | `ROSEnabled` | False |
-| `AuthenticationReady` | True once JWKS is reachable |
-| `UIReady` | True only after the UI OAuth Secret exists |
+| `AuthenticationReady` | True once JWKS is reachable at `spec.auth.keycloak.url` |
+| `UIReady` | True after the UI OAuth Secret exists — **not** proof UI pods are healthy (see [keycloak.md](keycloak.md#ui-login-troubleshooting)) |
 
 If `DatabaseReady` or `CacheReady` is False, fix the Secret keys or network
 path before waiting on Deployments.
@@ -151,7 +165,12 @@ path before waiting on Deployments.
 
 ```bash
 oc -n "$NAMESPACE" get deploy,job,route
+oc -n "$NAMESPACE" get deploy cost-management-minimal-ui
 ```
+
+Confirm the UI Deployment shows available replicas (`READY` column) before
+opening the UI Route. If `UIReady=True` but the Route fails, check oauth-proxy
+logs — see [keycloak.md](keycloak.md#ui-login-troubleshooting).
 
 With CR name `cost-management-minimal` in namespace `cost-onprem`:
 
@@ -171,11 +190,13 @@ ConsoleLink when the UI Route exists.
 | `DatabaseUnreachable` | Host/port not reachable from the operator pod (NetworkPolicy, wrong Service DNS) |
 | `SchemaUpToDate` never True | Migration Job failed. List Jobs, then logs for the failed one: `oc -n "$NAMESPACE" get jobs` then `oc -n "$NAMESPACE" logs job/<cr>-koku-migrate` (beta Cost-only; RBAC is `{cr}-rbac-migrate`) |
 | `Available` True but `UIReady` False | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
+| `UIReady` True but UI Route unavailable | oauth-proxy TLS/OIDC failure — often missing `auth.keycloak.tls.caCertSecretName` when `issuerURL` is a public Route ([keycloak.md](keycloak.md#ui-login-troubleshooting)) |
 | `StorageReady` False | Missing `access-key` / `secret-key`, or bucket does not exist |
 | Uploads return 500 | Bucket in `spec.objectStorage.buckets.koku` was never created |
 
 ## Next
 
+- First login, data, and cost models: [first-use.md](first-use.md)
 - Size and TLS: [production.md](production.md)
 - Point Cost Management Metrics Operator at this instance: [cmmo.md](cmmo.md)
 - Tear down: [uninstall.md](uninstall.md) — delete the CR **before** the namespace or the operator

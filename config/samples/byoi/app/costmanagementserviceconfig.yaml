@@ -107,7 +107,9 @@ spec:
       url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       # tls:
-      #   insecureSkipVerify: true   # dev only when issuer uses a private CA
+      #   # Required for UI oauth2-proxy when issuerURL is a public Route (ingress CA).
+      #   caCertSecretName: "keycloak-ingress-ca"
+      #   insecureSkipVerify: true   # lab only — see docs/install/keycloak.md#ui-login-troubleshooting
       realm: "kubernetes"
       audiences:
         - "cost-management-operator"
