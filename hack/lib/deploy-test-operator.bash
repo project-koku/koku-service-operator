@@ -394,13 +394,232 @@ dto_parse_duration_seconds() {
   fi
 }
 
+# scripts/lib/perf-testing.sh expects logging helpers and globals from its parent
+# orchestrator (LOCAL_SCRIPTS_DIR, log_step, listener-cpu, perf-observability).
+dto_setup_perf_lib() {
+  LOCAL_SCRIPTS_DIR="${ROOT}/scripts"
+  PROJECT_ROOT="${ROOT}"
+  CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  HELM_RELEASE_NAME="${CMSC_NAME}"
+  export TEST_RUNNER="${TEST_RUNNER:-operator}"
+  PERF_OUTPUT_DIR="${PERF_OUTPUT_DIR:-${PROJECT_ROOT}/tests/perf-runs}"
+  TEST_RUN_ID="${TEST_RUN_ID:-}"
+  CPU_BOOST_APPLIED="${CPU_BOOST_APPLIED:-false}"
+  SKIP_GRAFANA_LINKS="${SKIP_GRAFANA_LINKS:-true}"
+  METRICS_INTERVAL="${METRICS_INTERVAL:-30}"
+
+  log_info() { dto_log_info "$@"; }
+  log_success() { dto_log_success "$@"; }
+  log_warning() { dto_log_warning "$@"; }
+  log_error() { dto_log_error "$@"; }
+  log_step() { dto_log_step "$@"; }
+  log_verbose() { dto_log_verbose "$@"; }
+
+  local scripts_lib="${ROOT}/scripts/lib"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-common.sh" ]] && source "${scripts_lib}/perf-common.sh"
+  perf_sync_release_env
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/listener-cpu.sh" ]] && source "${scripts_lib}/listener-cpu.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-observability.sh" ]] && source "${scripts_lib}/perf-observability.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-testing.sh" ]] && source "${scripts_lib}/perf-testing.sh"
+}
+
+dto_perf_cleanup_on_exit() {
+  local exit_code=$?
+  if [[ -n "${METRICS_COLLECTOR_PID:-}" ]]; then
+    dto_log_warning "Stopping metrics collection..."
+    kill -TERM "${METRICS_COLLECTOR_PID}" 2>/dev/null || true
+  fi
+  if [[ "${CPU_BOOST_APPLIED:-false}" == "true" ]] && [[ -n "${ORIGINAL_LISTENER_CPU_LIMIT:-}" ]]; then
+    dto_log_warning "Resetting listener CPU to original values..."
+    reset_listener_cpu 2>/dev/null || true
+  fi
+  exit "$exit_code"
+}
+
+dto_wait_deploy_ready() {
+  local deploy="$1"
+  local timeout="${2:-600}"
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local deadline=$(( $(date +%s) + timeout ))
+
+  while (( $(date +%s) < deadline )); do
+    if dto_kubectl_mutate get deployment "${deploy}" -n "${namespace}" >/dev/null 2>&1; then
+      if dto_kubectl_mutate rollout status deployment "${deploy}" -n "${namespace}" --timeout=120s 2>/dev/null; then
+        return 0
+      fi
+    fi
+    sleep 10
+  done
+  dto_log_warning "Deployment ${namespace}/${deploy} did not become ready within ${timeout}s"
+  return 1
+}
+
+dto_ensure_perf_listener_resources() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would patch CMSC listener resources (chart small-profile defaults)"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_warning "CMSC ${namespace}/${cr_name} not found — skipping listener resource patch"
+    return 0
+  fi
+
+  local limit
+  limit="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+    -o jsonpath='{.spec.costManagement.listener.resources.limits.cpu}' 2>/dev/null || true)"
+  if [[ -n "${limit}" ]]; then
+    dto_log_info "CMSC listener CPU limit already set (${limit})"
+    return 0
+  fi
+
+  dto_log_step "Patching CMSC listener resources (chart small-profile defaults)"
+  dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p \
+    '{"spec":{"costManagement":{"listener":{"resources":{"requests":{"cpu":"150m","memory":"300Mi"},"limits":{"cpu":"300m","memory":"600Mi"}}}}}}'
+
+  local listener_deploy="${cr_name}-koku-listener"
+  if ! dto_wait_deploy_ready "${listener_deploy}" 300; then
+    dto_log_error "Listener ${namespace}/${listener_deploy} not ready after CMSC resource patch"
+    dto_kubectl_mutate get deployment "${listener_deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl_mutate get pods -n "${namespace}" -l "app.kubernetes.io/component=listener" 2>/dev/null || true
+    exit 1
+  fi
+  dto_log_success "Listener resources applied via CMSC (${listener_deploy})"
+}
+
+dto_ensure_ros_for_perf() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would enable spec.ros.enabled=true on CMSC ${namespace}/${cr_name} and wait for ${cr_name}-kruize"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_error "CMSC ${namespace}/${cr_name} not found — cannot enable ROS for performance tests"
+    exit 1
+  fi
+
+  local enabled
+  enabled="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.spec.ros.enabled}' 2>/dev/null || true)"
+  if [[ "$enabled" == "true" ]]; then
+    dto_log_info "ROS already enabled on CMSC ${namespace}/${cr_name}"
+  else
+    dto_log_step "Enabling ROS on CMSC for performance tests (${namespace}/${cr_name})"
+    dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p '{"spec":{"ros":{"enabled":true}}}'
+  fi
+
+  local deploy="${cr_name}-kruize"
+  local deadline=$(( $(date +%s) + 600 ))
+  local cond=""
+  while (( $(date +%s) < deadline )); do
+    cond="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="ROSEnabled")].status}' 2>/dev/null || true)"
+    if [[ "$cond" == "True" ]]; then
+      dto_log_success "ROSEnabled condition is True"
+      break
+    fi
+    sleep 10
+  done
+
+  if [[ "$cond" != "True" ]]; then
+    dto_log_error "ROSEnabled condition did not become True within 10 minutes — check RBAC escalation or operator logs"
+    dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+    exit 1
+  fi
+
+  if ! dto_kubectl rollout status deployment "${deploy}" -n "${namespace}" --timeout=600s 2>/dev/null; then
+    dto_log_error "Kruize deployment ${namespace}/${deploy} not ready — ROS performance tests require Kruize"
+    dto_kubectl get deployment "${deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    dto_kubectl describe cmsc "${cr_name}" -n "${namespace}" 2>/dev/null | tail -40 || true
+    exit 1
+  fi
+
+  if ! dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+      --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+    dto_log_error "No Running Kruize pod found after ${deploy} rollout"
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    exit 1
+  fi
+
+  # Kruize is reconciled in core-services; ROS API/processor in workers stage.
+  local ros_deploy
+  for ros_deploy in "${cr_name}-ros-api" "${cr_name}-ros-processor"; do
+    dto_log_step "Waiting for ROS deployment ${namespace}/${ros_deploy}"
+    if ! dto_wait_deploy_ready "${ros_deploy}" 600; then
+      dto_log_error "ROS deployment ${namespace}/${ros_deploy} not ready — operator reconcile may be stuck"
+      dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+      dto_kubectl get deployment -n "${namespace}" 2>/dev/null | grep -E 'ros|kruize' || true
+      dto_kubectl get pods -n "${namespace}" -l 'app.kubernetes.io/component in (ros-api,ros-processor)' 2>/dev/null || true
+      exit 1
+    fi
+    dto_log_success "ROS deployment ready (${ros_deploy})"
+  done
+
+  export ROS_ENABLED=true
+  dto_log_success "ROS stack ready for performance tests (Kruize + ros-api + ros-processor)"
+}
+
 dto_run_pytest() {
-  dto_log_step "Running pytest suite"
-  export NAMESPACE HELM_RELEASE_NAME KEYCLOAK_NAMESPACE
+  export NAMESPACE KEYCLOAK_NAMESPACE
+  export CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  export HELM_RELEASE_NAME="${CMSC_NAME}"
   if [[ "${VERBOSE:-false}" == "true" ]]; then
     export VERBOSE=true
   fi
 
+  # ── Performance-only path ──────────────────────────────────────────────────
+  # Sources scripts/lib/perf-testing.sh which handles profile config, listener
+  # CPU tuning, suite→flag mapping, and result upload.  Mirrors the entrypoint
+  # used by the legacy chart orchestrator --perf-only path.
+  if [[ "${PERF_ONLY:-false}" == "true" ]]; then
+    dto_log_step "Running performance tests (profile: ${PERF_PROFILE:-baseline}, suite: ${PERF_SUITE:-all})"
+    dto_setup_perf_lib
+    if ! declare -F run_performance_tests >/dev/null; then
+      dto_log_error "perf-testing lib not loaded (expected ${ROOT}/scripts/lib/perf-testing.sh)"
+      exit 1
+    fi
+    trap dto_perf_cleanup_on_exit EXIT
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+      dto_log_info "DRY RUN: would call apply_perf_profile_config + run_performance_tests"
+      dto_log_info "  PERF_PROFILE=${PERF_PROFILE:-baseline}"
+      dto_log_info "  PERF_SUITE=${PERF_SUITE:-all}"
+      dto_log_info "  LISTENER_CPU_LIMIT=${LISTENER_CPU_LIMIT:-<auto>}"
+      dto_log_info "  SKIP_PROFILE_CONFIG=${SKIP_PROFILE_CONFIG:-false}"
+      if perf_suite_needs_ros; then
+        dto_ensure_ros_for_perf
+      fi
+      return 0
+    fi
+
+    dto_ensure_perf_listener_resources
+
+    if perf_suite_needs_ros; then
+      dto_ensure_ros_for_perf
+    fi
+
+    # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+    # so it doesn't bleed into subsequent shell operations.
+    if ! ( unset REQUESTS_CA_BUNDLE SSL_CERT_FILE; run_performance_tests ); then
+      dto_log_error "Performance tests failed — see tests/perf-runs/"
+      exit 1
+    fi
+    dto_log_success "Performance tests completed"
+    return 0
+  fi
+
+  # ── Standard pytest path ──────────────────────────────────────────────────
+  dto_log_step "Running pytest suite"
   local pytest_script="${ROOT}/scripts/run-pytest.sh"
   if [[ ! -f "$pytest_script" ]]; then
     dto_log_error "pytest runner not found: ${pytest_script}"
@@ -421,10 +640,10 @@ dto_run_pytest() {
     return 0
   fi
 
-  # Homebrew Python often sets REQUESTS_CA_BUNDLE; breaks in-cluster TLS in pytest.
-  unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
-
-  if ! "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
+  # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+  # only so it doesn't affect subsequent shell operations.
+  if ! env -u REQUESTS_CA_BUNDLE -u SSL_CERT_FILE \
+      "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
     dto_log_error "pytest failed — see test/pytest/reports/"
     exit 1
   fi

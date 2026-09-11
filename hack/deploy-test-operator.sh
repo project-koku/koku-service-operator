@@ -54,9 +54,21 @@ SKIP_OPERATOR=false
 SKIP_CMSC=false
 SKIP_TEST=false
 TESTS_ONLY=false
+PERF_ONLY=false
 DRY_RUN=false
 VERBOSE=false
 NO_UI=false
+
+# Performance test options (consumed by scripts/lib/perf-testing.sh)
+PERF_PROFILE="${PERF_PROFILE:-baseline}"
+PERF_SUITE="${PERF_SUITE:-all}"
+LISTENER_CPU_LIMIT="${LISTENER_CPU_LIMIT:-}"
+SKIP_PROFILE_CONFIG="${SKIP_PROFILE_CONFIG:-false}"
+COLLECT_METRICS="${COLLECT_METRICS:-false}"
+UPLOAD_METRICS="${UPLOAD_METRICS:-false}"
+SOAK_TESTS="${SOAK_TESTS:-false}"
+SOAK_CONDENSED="${SOAK_CONDENSED:-false}"
+SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-1}"
 
 usage() {
   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
@@ -74,6 +86,14 @@ Options:
   --skip-cmsc            Skip CMSC apply and wait
   --skip-test            Deploy only; do not run pytest
   --tests-only           Skip all deploy steps; run pytest only
+  --perf-only            Skip all deploy steps; run only performance tests
+  --perf-profile PROFILE Performance profile: baseline, small, medium, large, xlarge (default: baseline)
+  --perf-suite SUITES    Suite(s): all, api, ros, ingestion, scale, soak, valkey, db, kafka, celery,
+                         stress, stress_ramp, stress_recovery, rbac. Comma-separated for multiple.
+  --listener-cpu LIMIT   Set listener CPU before tests: 500m, 1000m, max, none (default: from cluster)
+  --skip-profile-config  Skip apply_perf_profile_config — test with cluster defaults
+  --collect-metrics      Collect Prometheus metrics during performance tests
+  --upload-metrics       Upload results to S3 after tests (requires S3_BUCKET, S3_ENDPOINT)
   --no-ui                Pass --no-ui to run-pytest.sh
   --dry-run              Print planned steps without changing the cluster
   --verbose              Trace sub-script execution (bash -x)
@@ -119,6 +139,13 @@ while [[ $# -gt 0 ]]; do
     --skip-cmsc) SKIP_CMSC=true; shift ;;
     --skip-test) SKIP_TEST=true; shift ;;
     --tests-only) TESTS_ONLY=true; shift ;;
+    --perf-only) PERF_ONLY=true; TESTS_ONLY=true; shift ;;
+    --perf-profile) PERF_PROFILE="$2"; shift 2 ;;
+    --perf-suite) PERF_SUITE="$2"; shift 2 ;;
+    --listener-cpu) LISTENER_CPU_LIMIT="$2"; shift 2 ;;
+    --skip-profile-config) SKIP_PROFILE_CONFIG=true; shift ;;
+    --collect-metrics) COLLECT_METRICS=true; shift ;;
+    --upload-metrics) UPLOAD_METRICS=true; shift ;;
     --no-ui) NO_UI=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --verbose) VERBOSE=true; shift ;;
@@ -134,6 +161,9 @@ done
 export NAMESPACE CR_NAME HELM_RELEASE_NAME KAFKA_NAMESPACE KEYCLOAK_NAMESPACE
 export S4_NAMESPACE CMSC_SAMPLE CMSC_READY_TIMEOUT STORAGE_CLASS LOG_LEVEL
 export DEPLOY_S4 DRY_RUN VERBOSE
+export PERF_ONLY PERF_PROFILE PERF_SUITE LISTENER_CPU_LIMIT SKIP_PROFILE_CONFIG
+export COLLECT_METRICS UPLOAD_METRICS
+export SOAK_TESTS SOAK_CONDENSED SOAK_DURATION_HOURS
 
 if [[ "$TESTS_ONLY" == "true" ]]; then
   SKIP_RHBK=true

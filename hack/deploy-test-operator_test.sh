@@ -47,6 +47,13 @@ out="$("$SCRIPT" --tests-only --dry-run --no-ui 2>&1)"
 assert_contains "$out" "tests only:" "tests-only in plan"
 assert_contains "$out" "DRY RUN" "dry-run banner"
 
+# --- perf-only dry-run loads perf-testing lib (log_step / LOCAL_SCRIPTS_DIR) ---
+out="$("$SCRIPT" --perf-only --dry-run --perf-profile small --perf-suite api,ros 2>&1)"
+assert_contains "$out" "Running performance tests" "perf-only dry-run banner"
+assert_contains "$out" "PERF_PROFILE=small" "perf-only shows profile"
+assert_contains "$out" "PERF_SUITE=api,ros" "perf-only shows suite"
+assert_contains "$out" "would enable spec.ros.enabled=true" "perf-only ros suite enables ROS on CMSC"
+
 # --- dry-run full plan with IMG ---
 out="$(IMG=quay.io/example/op:test "$SCRIPT" --dry-run --deploy-s4 --verbose 2>&1)"
 assert_contains "$out" "Deploying Red Hat Build of Keycloak" "plans RHBK"
@@ -60,6 +67,20 @@ assert_contains "$out" "pytest" "plans pytest"
 out="$(IMG=quay.io/example/op:test "$SCRIPT" --dry-run --verbose 2>&1)"
 assert_contains "$out" "ODF S3 CA" "plan shows ODF service CA"
 assert_contains "$out" "OpenShift service CA" "dry-run would ensure service CA secret"
+
+# --- perf-common release prefix ---
+# shellcheck disable=SC1091
+source "${ROOT}/scripts/lib/perf-common.sh"
+export CMSC_NAME=cmsc-a HELM_RELEASE_NAME=helm-b
+assert_eq "$(perf_release_prefix)" "cmsc-a" "CMSC_NAME wins over HELM_RELEASE_NAME"
+unset CMSC_NAME
+assert_eq "$(perf_release_prefix)" "helm-b" "falls back to HELM_RELEASE_NAME"
+export PERF_SUITE=api,ros
+perf_suite_needs_ros && ros_needed=0 || ros_needed=1
+assert_eq "$ros_needed" "0" "api,ros suite needs ROS"
+export PERF_SUITE=api
+perf_suite_needs_ros && ros_needed=0 || ros_needed=1
+assert_eq "$ros_needed" "1" "api-only suite does not need ROS"
 
 # --- parse duration helper ---
 # shellcheck disable=SC1091
