@@ -188,7 +188,7 @@ ConsoleLink when the UI Route exists.
 
 | Symptom | Typical cause |
 |---------|----------------|
-| `DatabaseSecretInvalid` / `CacheSecretInvalid` | Wrong Secret keys — see [prerequisites](prerequisites.md) (`redis-password`, all ten DB keys) |
+| `DatabaseSecretInvalid` / `CacheSecretInvalid` | Wrong Secret keys — see [prerequisites](prerequisites.md) (`redis-password`; `koku-*` and `rbac-*`, plus `ros-*` / `kruize-*` only if ROS is on) |
 | `DatabaseUnreachable` | Host/port not reachable from the operator pod (NetworkPolicy, wrong Service DNS) |
 | `SchemaUpToDate` never True | Migration Job failed. List Jobs, then logs for the failed one: `oc -n "$NAMESPACE" get jobs` then `oc -n "$NAMESPACE" logs job/<cr>-koku-migrate` (beta Cost-only; RBAC is `{cr}-rbac-migrate`) |
 | `Available` True but `UIReady` False | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
