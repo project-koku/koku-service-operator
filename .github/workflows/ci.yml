@@ -297,7 +297,7 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           CATALOG_IMG="quay.io/project-koku/koku-service-operator-catalog:${SHORT_SHA}"
           make catalog-build \
-            BUNDLE_IMGS=quay.io/project-koku/koku-service-operator-bundle@${{ steps.bundle-push.outputs.digest }} \
+            BUNDLE_IMG=quay.io/project-koku/koku-service-operator-bundle@${{ steps.bundle-push.outputs.digest }} \
             CATALOG_IMG="${CATALOG_IMG}"
           docker tag "${CATALOG_IMG}" \
             quay.io/project-koku/koku-service-operator-catalog:latest
