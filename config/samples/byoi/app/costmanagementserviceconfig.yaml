@@ -106,10 +106,10 @@ spec:
       # hostname, tokens use that URL as iss — set issuerURL to match.
       url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
+      # For production with a public Route issuer, prefer tls.caCertSecretName
+      # (ingress CA) over insecureSkipVerify — see docs/install/keycloak.md.
       # tls:
-      #   # Required for UI oauth2-proxy when issuerURL is a public Route (ingress CA).
-      #   caCertSecretName: "keycloak-ingress-ca"
-      #   insecureSkipVerify: true   # lab only — see docs/install/keycloak.md#ui-login-troubleshooting
+      #   insecureSkipVerify: true   # dev only when issuer uses a private CA
       realm: "kubernetes"
       audiences:
         - "cost-management-operator"
