@@ -10,7 +10,7 @@
 # See docs/development/skipped-iqe-tests.md for full documentation.
 #
 # Profiles (use --profile flag):
-#   smoke     - Source + cost model tests (~43 tests, ~17 min) - FOR PR CHECKS
+#   smoke     - cost_required marker, no -k filter - FOR PR CHECKS
 #   extended  - All except infra tests (~2100 tests, ~33 min) - DAILY CI
 #   stable    - All validated tests (~2350 tests, ~40 min) - WEEKLY CI
 #   full      - All cost_ocp_on_prem tests (~3324 tests, 2-3 hours) - RELEASE VALIDATION
@@ -34,9 +34,9 @@ TEST_PROFILE="${TEST_PROFILE:-}"
 apply_profile() {
     case "${TEST_PROFILE}" in
         smoke)
-            # Quick validation (~44 tests, ~17 min)
-            # Uses positive -k filter to select source + cost model tests
-            SMOKE_FILTER="test_api_ocp_source or test_api_cost_model_ocp"
+            # Quick validation for PR checks using -m cost_required marker.
+            # No -k filter: marker selects the right tests without a keyword expression.
+            PROFILE_MARKER="cost_required"
             # Skip all optional groups for fastest run
             SKIP_INFRA_TESTS=true
             SKIP_SLOW_TESTS=true

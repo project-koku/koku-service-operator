@@ -108,7 +108,7 @@ Options:
     --help               Show this help message
 
 Test Profiles (use --profile):
-    smoke      Source + cost model tests (~43 tests, ~17 min) - PR checks
+    smoke      cost_required marker, no -k filter - PR checks
     extended   All except infra tests (~2100 tests, ~33 min) - Daily CI
     stable     All validated tests (~2350 tests, ~40 min) - Weekly CI
     full       All cost_ocp_on_prem tests (~3324 tests, ~60 min) - Release
@@ -179,6 +179,10 @@ fi
 # Apply profile settings if specified (overrides individual SKIP_* defaults)
 if [[ -n "${TEST_PROFILE}" ]]; then
     apply_profile
+    # Profile may request a specific marker (e.g. smoke uses cost_required instead of cost_ocp_on_prem)
+    if [[ -n "${PROFILE_MARKER:-}" ]]; then
+        IQE_MARKER="${PROFILE_MARKER}"
+    fi
 fi
 
 # Rebuild filter after argument parsing
