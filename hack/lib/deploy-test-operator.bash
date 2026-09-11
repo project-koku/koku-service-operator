@@ -454,6 +454,7 @@ dto_wait_deploy_ready() {
     fi
     sleep 10
   done
+  dto_log_warning "Deployment ${namespace}/${deploy} did not become ready within ${timeout}s"
   return 1
 }
 
@@ -518,8 +519,8 @@ dto_ensure_ros_for_perf() {
 
   local deploy="${cr_name}-kruize"
   local deadline=$(( $(date +%s) + 600 ))
+  local cond=""
   while (( $(date +%s) < deadline )); do
-    local cond
     cond="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="ROSEnabled")].status}' 2>/dev/null || true)"
     if [[ "$cond" == "True" ]]; then
       dto_log_success "ROSEnabled condition is True"
@@ -527,6 +528,13 @@ dto_ensure_ros_for_perf() {
     fi
     sleep 10
   done
+
+  if [[ "$cond" != "True" ]]; then
+    dto_log_error "ROSEnabled condition did not become True within 10 minutes — check RBAC escalation or operator logs"
+    dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+    exit 1
+  fi
 
   if ! dto_kubectl rollout status deployment "${deploy}" -n "${namespace}" --timeout=600s 2>/dev/null; then
     dto_log_error "Kruize deployment ${namespace}/${deploy} not ready — ROS performance tests require Kruize"
@@ -569,9 +577,6 @@ dto_run_pytest() {
     export VERBOSE=true
   fi
 
-  # Homebrew Python often sets REQUESTS_CA_BUNDLE; breaks in-cluster TLS in pytest.
-  unset REQUESTS_CA_BUNDLE SSL_CERT_FILE
-
   # ── Performance-only path ──────────────────────────────────────────────────
   # Sources scripts/lib/perf-testing.sh which handles profile config, listener
   # CPU tuning, suite→flag mapping, and result upload.  Mirrors the entrypoint
@@ -603,7 +608,9 @@ dto_run_pytest() {
       dto_ensure_ros_for_perf
     fi
 
-    if ! run_performance_tests; then
+    # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+    # so it doesn't bleed into subsequent shell operations.
+    if ! ( unset REQUESTS_CA_BUNDLE SSL_CERT_FILE; run_performance_tests ); then
       dto_log_error "Performance tests failed — see tests/perf-runs/"
       exit 1
     fi
@@ -633,7 +640,10 @@ dto_run_pytest() {
     return 0
   fi
 
-  if ! "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
+  # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+  # only so it doesn't affect subsequent shell operations.
+  if ! env -u REQUESTS_CA_BUNDLE -u SSL_CERT_FILE \
+      "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
     dto_log_error "pytest failed — see test/pytest/reports/"
     exit 1
   fi

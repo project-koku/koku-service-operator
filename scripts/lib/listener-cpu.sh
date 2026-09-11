@@ -143,7 +143,9 @@ _apply_listener_cpu_deploy() {
         return 0
     fi
 
-    # Deployment may lack resources — use merge patch on the listener container.
+    # Deployment may lack a pre-existing resources block — JSON replace fails on a
+    # missing path, so fall back to merge patch which upserts the whole block.
+    log_verbose "JSON patch failed (no existing resources block?); retrying with merge patch"
     perf_kubectl patch deploy "${listener_deploy}" -n "${NAMESPACE}" --type merge -p "$(cat <<EOF
 {
   "spec": {

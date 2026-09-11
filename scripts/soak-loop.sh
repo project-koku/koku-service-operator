@@ -235,11 +235,11 @@ preflight() {
     fi
 
     # Verify cluster access
-    if ! kubectl cluster-info &>/dev/null; then
+    if ! perf_kubectl cluster-info &>/dev/null; then
         log_err "Cannot reach cluster — check KUBECONFIG"
         exit 1
     fi
-    log_info "Cluster:         $(kubectl cluster-info 2>&1 | head -1)"
+    log_info "Cluster:         $(perf_kubectl cluster-info 2>&1 | head -1)"
 
     # Verify pods are healthy.
     # NOTE: `grep -v "Running"` exits 1 when *every* pod is Running (i.e. the
@@ -248,12 +248,12 @@ preflight() {
     # exactly that "zero matches" outcome (not against a kubectl failure,
     # which still surfaces as an empty/erroneous count here).
     local not_running
-    not_running=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
+    not_running=$(perf_kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
         --field-selector=status.phase!=Succeeded \
         --no-headers 2>/dev/null | grep -v "Running" | wc -l) || not_running=0
     if [[ "${not_running}" -gt 0 ]]; then
         log_warn "${not_running} pod(s) not in Running state"
-        kubectl get pods -n "${NAMESPACE}" --no-headers | grep -v "Running\|Completed" || true
+        perf_kubectl get pods -n "${NAMESPACE}" --no-headers | grep -v "Running\|Completed" || true
     else
         log_info "All pods healthy"
     fi
@@ -315,10 +315,10 @@ publish_checkpoint() {
 
     # Collect quick cluster health snapshot
     local pod_restarts=0 pods_not_ready=0
-    pod_restarts=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
+    pod_restarts=$(perf_kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
         -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}' 2>/dev/null \
         | awk '{s+=$1} END {print s+0}') || pod_restarts=0
-    pods_not_ready=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
+    pods_not_ready=$(perf_kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/managed-by=koku-service-operator" \
         --field-selector=status.phase!=Succeeded \
         --no-headers 2>/dev/null | grep -cv "Running" 2>/dev/null) || pods_not_ready=0
 

@@ -527,27 +527,17 @@ generate_metadata_json() {
     local node_count=0
     local storage_type="unknown"
 
-    if command -v oc &>/dev/null; then
-        ocp_version=$(oc get clusterversion version -o jsonpath='{.status.desired.version}' 2>/dev/null || echo "unknown")
-        node_count=$(oc get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+    ocp_version=$(perf_kubectl get clusterversion version -o jsonpath='{.status.desired.version}' 2>/dev/null || echo "unknown")
+    node_count=$(perf_kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 
-        if oc get storagecluster -n openshift-storage &>/dev/null; then
-            storage_type="ODF"
-        elif oc get storageclass s4-storage &>/dev/null; then
-            storage_type="S4"
-        fi
+    if perf_kubectl get storagecluster -n openshift-storage &>/dev/null; then
+        storage_type="ODF"
+    elif perf_kubectl get storageclass s4-storage &>/dev/null; then
+        storage_type="S4"
     fi
 
-    local operator_version="unknown"
-    if command -v oc &>/dev/null; then
-        local _img
-        _img=$(oc get deploy -n "${NAMESPACE}" \
-            -l control-plane=controller-manager \
-            -o jsonpath='{.items[0].spec.template.spec.containers[0].image}' 2>/dev/null || true)
-        if [[ -n "${_img}" ]]; then
-            operator_version="${_img##*:}"
-        fi
-    fi
+    local operator_version
+    operator_version="$(perf_detect_version_slug)"
 
     local metrics_count=$(find "${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/metrics" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
     local results_count=$(find "${PERF_OUTPUT_DIR}/${TEST_RUN_ID}/results" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
