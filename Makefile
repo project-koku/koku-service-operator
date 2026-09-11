@@ -405,37 +405,43 @@ OPM = $(shell which opm)
 endif
 endif
 
-# A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
-# These images MUST exist in a registry and be pull-able.
-BUNDLE_IMGS ?= $(BUNDLE_IMG)
-
 # The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=example.com/operator-catalog:v0.2.0).
 CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)
 
-# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
-ifneq ($(origin CATALOG_BASE_IMG), undefined)
-FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
-endif
+# Build a File-Based Catalog (FBC) image from the bundle image, BUNDLE_IMG.
+CATALOG_DIR ?= catalog
 
-# Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
-# This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
-# https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
-#
-# On Mac ARM building for an amd64 OpenShift lab/cluster-bot node, use catalog-build-amd64 instead —
-# opm's internal container build does not pass --platform and produces an arm64 catalog (Exec format error on amd64).
-CATALOG_INDEX_DOCKERFILE ?= index.Dockerfile
-OPM_BINARY_IMAGE ?= quay.io/operator-framework/opm:v1.55.0
+.PHONY: catalog-render
+catalog-render: opm ## Render bundle images into an FBC catalog directory.
+	rm -rf $(CATALOG_DIR) $(CATALOG_DIR).Dockerfile
+	mkdir -p $(CATALOG_DIR)
+	$(OPM) init koku-service-operator --default-channel=$(DEFAULT_CHANNEL) -o yaml > $(CATALOG_DIR)/index.yaml
+	$(OPM) render $(BUNDLE_IMG) -o yaml >> $(CATALOG_DIR)/index.yaml
+	@BUNDLE_NAME=$$(grep -B 1 "^package:" $(CATALOG_DIR)/index.yaml | grep "^name:" | head -n 1 | awk '{print $$2}') ; \
+	echo "Detected Bundle Entry: $$BUNDLE_NAME" ; \
+	echo "---"                                                        >> $(CATALOG_DIR)/index.yaml ; \
+	echo "schema: olm.channel"                                        >> $(CATALOG_DIR)/index.yaml ; \
+	echo "package: koku-service-operator"                            >> $(CATALOG_DIR)/index.yaml ; \
+	echo "name: $(DEFAULT_CHANNEL)"                                   >> $(CATALOG_DIR)/index.yaml ; \
+	echo "entries:"                                                   >> $(CATALOG_DIR)/index.yaml ; \
+	echo "  - name: $$BUNDLE_NAME"                                     >> $(CATALOG_DIR)/index.yaml
+	$(OPM) validate $(CATALOG_DIR)
+	$(OPM) generate dockerfile $(CATALOG_DIR)
 
 .PHONY: catalog-build
-catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+catalog-build: catalog-render ## Build an FBC catalog image.
+	$(CONTAINER_TOOL) build -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
 
 .PHONY: catalog-build-amd64
-catalog-build-amd64: opm ## Build a linux/amd64 catalog image (Mac ARM → remote amd64 cluster).
-	$(OPM) index add --pull-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT) --generate --out-dockerfile $(CATALOG_INDEX_DOCKERFILE) --binary-image $(OPM_BINARY_IMAGE)
-	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_INDEX_DOCKERFILE) -t $(CATALOG_IMG) .
+catalog-build-amd64: catalog-render ## Build a linux/amd64 FBC catalog image (Mac ARM → remote amd64 cluster).
+	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
 
 # Push the catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+.PHONY: catalog-build-multiplatform
+catalog-build-multiplatform: catalog-render ## Build and push a multiplatform FBC catalog image.
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 --push -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
+

@@ -8,6 +8,8 @@
 Dockerfile.cross
 index.Dockerfile
 database/
+catalog.Dockerfile
+catalog/
 
 # Test binary, built with `go test -c`
 *.test
