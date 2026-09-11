@@ -440,6 +440,59 @@ dto_perf_cleanup_on_exit() {
   exit "$exit_code"
 }
 
+dto_wait_deploy_ready() {
+  local deploy="$1"
+  local timeout="${2:-600}"
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local deadline=$(( $(date +%s) + timeout ))
+
+  while (( $(date +%s) < deadline )); do
+    if dto_kubectl_mutate get deployment "${deploy}" -n "${namespace}" >/dev/null 2>&1; then
+      if dto_kubectl_mutate rollout status deployment "${deploy}" -n "${namespace}" --timeout=120s 2>/dev/null; then
+        return 0
+      fi
+    fi
+    sleep 10
+  done
+  return 1
+}
+
+dto_ensure_perf_listener_resources() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would patch CMSC listener resources (chart small-profile defaults)"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_warning "CMSC ${namespace}/${cr_name} not found — skipping listener resource patch"
+    return 0
+  fi
+
+  local limit
+  limit="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+    -o jsonpath='{.spec.costManagement.listener.resources.limits.cpu}' 2>/dev/null || true)"
+  if [[ -n "${limit}" ]]; then
+    dto_log_info "CMSC listener CPU limit already set (${limit})"
+    return 0
+  fi
+
+  dto_log_step "Patching CMSC listener resources (chart small-profile defaults)"
+  dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p \
+    '{"spec":{"costManagement":{"listener":{"resources":{"requests":{"cpu":"150m","memory":"300Mi"},"limits":{"cpu":"300m","memory":"600Mi"}}}}}}'
+
+  local listener_deploy="${cr_name}-koku-listener"
+  if ! dto_wait_deploy_ready "${listener_deploy}" 300; then
+    dto_log_error "Listener ${namespace}/${listener_deploy} not ready after CMSC resource patch"
+    dto_kubectl_mutate get deployment "${listener_deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl_mutate get pods -n "${namespace}" -l "app.kubernetes.io/component=listener" 2>/dev/null || true
+    exit 1
+  fi
+  dto_log_success "Listener resources applied via CMSC (${listener_deploy})"
+}
+
 dto_ensure_ros_for_perf() {
   local namespace="${NAMESPACE:-cost-onprem}"
   local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
@@ -490,8 +543,22 @@ dto_ensure_ros_for_perf() {
     exit 1
   fi
 
+  # Kruize is reconciled in core-services; ROS API/processor in workers stage.
+  local ros_deploy
+  for ros_deploy in "${cr_name}-ros-api" "${cr_name}-ros-processor"; do
+    dto_log_step "Waiting for ROS deployment ${namespace}/${ros_deploy}"
+    if ! dto_wait_deploy_ready "${ros_deploy}" 600; then
+      dto_log_error "ROS deployment ${namespace}/${ros_deploy} not ready — operator reconcile may be stuck"
+      dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+      dto_kubectl get deployment -n "${namespace}" 2>/dev/null | grep -E 'ros|kruize' || true
+      dto_kubectl get pods -n "${namespace}" -l 'app.kubernetes.io/component in (ros-api,ros-processor)' 2>/dev/null || true
+      exit 1
+    fi
+    dto_log_success "ROS deployment ready (${ros_deploy})"
+  done
+
   export ROS_ENABLED=true
-  dto_log_success "Kruize is ready for ROS performance tests (${deploy})"
+  dto_log_success "ROS stack ready for performance tests (Kruize + ros-api + ros-processor)"
 }
 
 dto_run_pytest() {
@@ -529,6 +596,8 @@ dto_run_pytest() {
       fi
       return 0
     fi
+
+    dto_ensure_perf_listener_resources
 
     if perf_suite_needs_ros; then
       dto_ensure_ros_for_perf

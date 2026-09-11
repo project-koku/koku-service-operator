@@ -351,7 +351,13 @@ run_performance_tests() {
         fi
     else
         # Apply profile-specific replica scaling before tests run.
-        apply_perf_profile_config
+        if ! apply_perf_profile_config; then
+            if perf_operator_path; then
+                log_error "apply_perf_profile_config failed — aborting performance tests (operator path)"
+                return 1
+            fi
+            log_warning "apply_perf_profile_config failed — continuing (chart path)"
+        fi
 
         # Listener CPU boost — always applied for perf tests unless explicitly
         # disabled.  The listener is the principal processing bottleneck: at the
@@ -371,6 +377,10 @@ run_performance_tests() {
                     CPU_BOOST_APPLIED=true
                     log_success "Listener CPU boosted to ${effective_cpu_limit} (was ${ORIGINAL_LISTENER_CPU_LIMIT})"
                 else
+                    if perf_operator_path; then
+                        log_error "Could not boost listener CPU via CMSC — aborting performance tests (operator path)"
+                        return 1
+                    fi
                     log_warning "Could not boost listener CPU — results may reflect the 300m throttle"
                 fi
             fi

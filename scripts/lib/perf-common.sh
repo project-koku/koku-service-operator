@@ -8,11 +8,59 @@
 _PERF_COMMON_SOURCED=1
 
 perf_kubectl() {
-    if command -v oc >/dev/null 2>&1; then
-        oc "$@"
-    else
-        kubectl "$@"
+    local ctx_args=()
+    if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+        ctx_args=(--context="${KUBE_CONTEXT}")
     fi
+    if command -v oc >/dev/null 2>&1; then
+        oc "${ctx_args[@]}" "$@"
+    else
+        kubectl "${ctx_args[@]}" "$@"
+    fi
+}
+
+perf_operator_path() {
+    [[ "${TEST_RUNNER:-}" == "operator" ]]
+}
+
+perf_cmsc_listener_cpu_limit() {
+    perf_kubectl get cmsc "$(perf_release_prefix)" -n "${NAMESPACE:-cost-onprem}" \
+        -o jsonpath='{.spec.costManagement.listener.resources.limits.cpu}' 2>/dev/null || true
+}
+
+perf_cmsc_listener_cpu_request() {
+    perf_kubectl get cmsc "$(perf_release_prefix)" -n "${NAMESPACE:-cost-onprem}" \
+        -o jsonpath='{.spec.costManagement.listener.resources.requests.cpu}' 2>/dev/null || true
+}
+
+perf_patch_cmsc_listener_cpu() {
+    local limit="$1"
+    local request="$2"
+    local namespace="${NAMESPACE:-cost-onprem}"
+    local cr_name
+    cr_name="$(perf_release_prefix)"
+
+    perf_kubectl patch cmsc "${cr_name}" -n "${namespace}" --type merge -p "$(cat <<EOF
+{
+  "spec": {
+    "costManagement": {
+      "listener": {
+        "resources": {
+          "requests": {"cpu": "${request}", "memory": "300Mi"},
+          "limits": {"cpu": "${limit}", "memory": "600Mi"}
+        }
+      }
+    }
+  }
+}
+EOF
+)"
+}
+
+perf_wait_listener_rollout() {
+    local timeout="${1:-180}"
+    perf_kubectl rollout status deployment "$(perf_deploy_name koku-listener)" \
+        -n "${NAMESPACE:-cost-onprem}" --timeout="${timeout}s" 2>/dev/null
 }
 
 # CMSC / Helm release prefix used for deployment names ({prefix}-kruize, …).
