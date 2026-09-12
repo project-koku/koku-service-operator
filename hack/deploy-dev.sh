@@ -77,7 +77,7 @@ echo "  IMG=<registry>/koku-service-operator:<tag> ./hack/deploy-incluster.sh $N
 echo ""
 echo "Then apply a sample CR:"
 echo "  # Minimal koku-only dev (no UI/Kafka/Keycloak):"
-echo "  oc apply -n $NS -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml"
+echo "  oc apply -n $NS -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml"
 echo "  # Full bundled sample:"
 echo "  oc apply -n $NS -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
 echo "  # BYOI smoke:"

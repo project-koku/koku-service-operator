@@ -13,10 +13,12 @@
 resources:
 - service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
 - service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
-# Additional samples use distinct metadata.name values — apply individually:
-#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
-#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
-#   kubectl apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
+# User-facing documented samples (apply individually):
+#   kubectl apply -f config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
+#   kubectl apply -f config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml
+# Development / test fixtures (apply individually):
+#   kubectl apply -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
+#   kubectl apply -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
 # BYOI test fixture (infra + app) lives under byoi/ and is applied separately:
 #   kubectl apply -k config/samples/byoi/infra
 #   kubectl apply -k config/samples/byoi/app
