@@ -3,6 +3,7 @@ package resources
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -80,6 +81,24 @@ func TestIngressDeployment(t *testing.T) {
 	}
 	if len(c.Ports) != 2 {
 		t.Fatalf("ports = %+v", c.Ports)
+	}
+	for name, probe := range map[string]*corev1.Probe{
+		"liveness":  c.LivenessProbe,
+		"readiness": c.ReadinessProbe,
+	} {
+		if probe == nil || probe.HTTPGet == nil {
+			t.Fatalf("%s probe = %+v, want HTTP probe", name, probe)
+		}
+		wantPath := "/healthz"
+		if name == "readiness" {
+			wantPath = "/status/"
+		}
+		if probe.HTTPGet.Path != wantPath || probe.HTTPGet.Port.IntVal != ingressHTTPPort || probe.HTTPGet.Scheme != corev1.URISchemeHTTP {
+			t.Errorf("%s probe HTTPGet = %+v, want path %q on HTTP port %d", name, probe.HTTPGet, wantPath, ingressHTTPPort)
+		}
+		if probe.InitialDelaySeconds != 35 || probe.PeriodSeconds != 5 || probe.TimeoutSeconds != 120 || probe.FailureThreshold != 3 || probe.SuccessThreshold != 1 {
+			t.Errorf("%s probe timings = %+v", name, probe)
+		}
 	}
 	env := envValues(c)
 	checks := map[string]string{
