@@ -168,7 +168,7 @@ See [crc-testing.md](crc-testing.md).
 
 ```bash
 oc apply -n cost-onprem \
-  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
+  -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml
 ```
 
 Without PostgreSQL, cache, Kafka, S3 credentials, and Keycloak reachable at the

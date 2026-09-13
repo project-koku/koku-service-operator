@@ -7,7 +7,7 @@
 # API/celery pods can still run.
 #
 # Apply after ./hack/deploy-crc.sh and NAMESPACE=cost-onprem make run:
-#   oc apply -n cost-onprem -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
+#   oc apply -n cost-onprem -f config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml
 #
 # For a custom koku build (e.g. feature branch):
 #   ./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag

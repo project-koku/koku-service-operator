@@ -13,7 +13,7 @@ Prerequisites and a first CR: [prerequisites.md](prerequisites.md),
 ## Production-shaped sample
 
 Use
-[`config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml`](../../config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml)
+[`config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml`](../../config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml)
 as the template. It demonstrates:
 
 - External DB, cache, Kafka, S3, OIDC (`deploy: false`)

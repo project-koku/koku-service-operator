@@ -65,7 +65,7 @@ those protocols.
 ## 2. Copy and edit the minimal CR
 
 The checked-in sample is
-[`config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml`](../../config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml).
+[`config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml`](../../config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml).
 
 Replace at least:
 
@@ -134,7 +134,7 @@ Do not apply that abbreviated snippet (it omits required image blocks). Copy the
 sample file, edit hosts and tags, then:
 
 ```bash
-oc apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
+oc apply -f config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
 ```
 
 ## 3. Watch conditions (not Phase)

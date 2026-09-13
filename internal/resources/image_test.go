@@ -126,10 +126,10 @@ func TestSampleCRs_RequiredWorkloadImages(t *testing.T) {
 	t.Parallel()
 	samples := []string{
 		"config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml",
-		"config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml",
+		"config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml",
 		"config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml",
-		"config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml",
-		"config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml",
+		"config/samples/install/service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml",
+		"config/samples/dev/service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml",
 		"config/samples/byoi/app/costmanagementserviceconfig.yaml",
 		"config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml",
 	}
