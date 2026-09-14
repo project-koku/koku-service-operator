@@ -22,10 +22,10 @@ func TestKokuCommonEnvRequestedBucketPrefersDiscovered(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
-			CostManagement: costv1alpha1.CostManagementConfig{
-				Storage: costv1alpha1.CostManagementStorageSpec{
-					BucketName:    "koku-bucket",
-					ROSBucketName: "ros-data",
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				Buckets: costv1alpha1.ObjectStorageBucketsSpec{
+					Koku: "koku-bucket",
+					ROS:  "ros-data",
 				},
 			},
 		},
@@ -50,6 +50,49 @@ func TestKokuCommonEnvRequestedBucketPrefersDiscovered(t *testing.T) {
 	}
 	if ros != "ros-data" {
 		t.Errorf("REQUESTED_ROS_BUCKET = %q, want spec ros-data (unchanged)", ros)
+	}
+}
+
+func TestKokuCommonEnvRequestedBucketFromUserProvidedObjectStorage(t *testing.T) {
+	// When the customer configures object storage (secretName + buckets.koku),
+	// Discovery mirrors buckets.koku into discoveredConfig.s3.bucket
+	// (userProvidedS3), so REQUESTED_BUCKET — and the ingress upload bucket that
+	// inherits it — must resolve to exactly the bucket the customer named.
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				SecretName: "customer-s3-credentials",
+				Buckets:    costv1alpha1.ObjectStorageBucketsSpec{Koku: "customer-koku-bucket"},
+			},
+		},
+		Status: costv1alpha1.CostManagementServiceConfigStatus{
+			DiscoveredConfig: &costv1alpha1.DiscoveredConfig{
+				S3: &costv1alpha1.DiscoveredS3{Bucket: "customer-koku-bucket"},
+			},
+		},
+	}
+
+	env := KokuCommonEnv(cfg)
+	if got, _ := envValue(env, "REQUESTED_BUCKET"); got != "customer-koku-bucket" {
+		t.Errorf("REQUESTED_BUCKET = %q, want customer-koku-bucket", got)
+	}
+	if got := S3IngressBucket(cfg); got != "customer-koku-bucket" {
+		t.Errorf("S3IngressBucket = %q, want customer-koku-bucket (inherits koku)", got)
+	}
+}
+
+func TestKokuCommonEnvS3RegionHonorsOverride(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			ObjectStorage: costv1alpha1.ObjectStorageConfig{
+				S3: costv1alpha1.S3Options{Region: "eu-west-1"},
+			},
+		},
+	}
+	if got, _ := envValue(KokuCommonEnv(cfg), "S3_REGION"); got != "eu-west-1" {
+		t.Errorf("S3_REGION = %q, want eu-west-1 (explicit override passes through)", got)
 	}
 }
 
@@ -249,11 +292,6 @@ func TestKokuCommonEnvSharedDefaults(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
-			ObjectStorage: costv1alpha1.ObjectStorageConfig{
-				S3: costv1alpha1.S3Options{
-					Region: "onprem",
-				},
-			},
 			CostManagement: costv1alpha1.CostManagementConfig{
 				ReportDownloadSchedule: "*/5 * * * *",
 			},
@@ -279,7 +317,7 @@ func TestKokuCommonEnvSharedDefaults(t *testing.T) {
 		"DATABASE_NAME":             "costonprem_koku",
 		"DATABASE_SERVICE_PORT":     "5432",
 		"REDIS_PORT":                "6379",
-		"S3_REGION":                 "onprem",
+		"S3_REGION":                 "us-east-1",
 		"AWS_CONFIG_FILE":           "/etc/aws/config",
 		"SCHEDULE_REPORT_CHECKS":    "True",
 		"REPORT_DOWNLOAD_SCHEDULE":  "*/5 * * * *",

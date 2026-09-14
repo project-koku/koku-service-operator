@@ -407,7 +407,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 	alreadyReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady) &&
 		apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
 
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		if err := r.apply(ctx, cfg, resources.DatabaseService(cfg)); err != nil {
 			return Result{}, fmt.Errorf("database service: %w", err)
 		}
@@ -432,7 +432,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionTrue, "ExternalDatabase", "")
 	}
 
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		if err := r.apply(ctx, cfg, resources.CachePVC(cfg)); err != nil {
 			return Result{}, fmt.Errorf("valkey pvc: %w", err)
 		}
@@ -938,10 +938,10 @@ func (r *CostManagementServiceConfigReconciler) applyNetworkPolicies(ctx context
 			resources.ROSAPINetworkPolicy(cfg),
 		)
 	}
-	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
 		netpols = append(netpols, resources.CacheNetworkPolicy(cfg))
 	}
-	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		netpols = append(netpols, resources.DatabaseNetworkPolicy(cfg))
 	}
 	for _, np := range netpols {
@@ -1438,7 +1438,18 @@ func (r *CostManagementServiceConfigReconciler) isDeploymentReady(ctx context.Co
 	if d.Spec.Replicas == nil || *d.Spec.Replicas == 0 {
 		return true, nil // 0 replicas = intentionally off
 	}
-	return d.Status.AvailableReplicas >= *d.Spec.Replicas, nil
+	want := *d.Spec.Replicas
+	// AvailableReplicas can still describe the old ReplicaSet while a new
+	// generation is rolling out. Require the Deployment controller to have
+	// observed the current spec and all desired replicas to be updated before
+	// treating the Deployment as ready.
+	if d.Status.ObservedGeneration < d.Generation {
+		return false, nil
+	}
+	if d.Status.UpdatedReplicas < want {
+		return false, nil
+	}
+	return d.Status.AvailableReplicas >= want, nil
 }
 
 type deploymentWait struct {

@@ -3,8 +3,17 @@
 CRC provides a single-node OpenShift cluster for local development. The
 operator runs locally (out-of-cluster) and talks to CRC via kubeconfig.
 
-**Scope:** use CRC for **operator + koku API/celery** iteration. For full UI,
-Kafka, Keycloak, and nginx timeout E2E, prefer [clusterbot.md](clusterbot.md).
+Two paths:
+
+| Path | What it exercises | Section |
+|------|-------------------|---------|
+| **`./hack/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
+| **`make run` + a bundled sample CR** | Operator out-of-cluster, operator-provisioned Postgres/Valkey, no Kafka/Keycloak | rest of this document |
+
+**Scope:** use the minimal koku-only path for **operator + koku API/celery**
+iteration. For full UI, Kafka, Keycloak, and nginx timeout E2E, use the
+[Full BYOI demo on CRC](#full-byoi-demo-on-crc) below or
+[clusterbot.md](clusterbot.md).
 
 ## Quick start (minimal koku-only)
 
@@ -39,6 +48,54 @@ docker build --platform linux/arm64 -t default-route-openshift-image-registry.ap
 # patch spec.costManagement.api/masu.image in the CR, then:
 oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 ```
+
+## Full BYOI demo on CRC
+
+`./hack/demo-preprod.sh --crc` runs the [pre-prod demo](pre-prod-install.md)
+against local CRC. It layers `hack/demo-preprod.crc.env` under the normal
+settings:
+
+- `KUBE_CONTEXT=crc` (create it once — see below)
+- `BUILD_MODE=openshift` — the operator image is built **on** the CRC node, so
+  it is natively arm64 (no cross build, no external registry)
+- **arm64 workload image overrides** — the BYOI sample pins amd64-only builds of
+  koku, `insights-rbac`, ingress and `koku-ui-onprem` that segfault / fail to
+  pull on the arm64 node; the profile points them at arm64 rebuilds under
+  `quay.io/martin_povolny/*`. Envoy (`proxyv2-rhel9`) and `oauth2-proxy-rhel9`
+  are Red Hat multi-arch and are left as-is.
+- **1+1 Kafka** (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
+  10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC
+  disk.
+
+The amd64 / `clusterbot` path is unaffected: without `--crc` the profile file is
+never read and the rendered CR is byte-identical to before.
+
+### One-time: create the `crc` kube context
+
+```bash
+crc start -p ~/.crc-secret.json
+oc login -u kubeadmin -p "$(crc console --credentials | sed -n 's/.*-p \([^ ]*\).*/\1/p' | tail -1)" \
+    https://api.crc.testing:6443 --insecure-skip-tls-verify=true
+oc config set-context crc --cluster=api-crc-testing:6443 \
+    --user=kubeadmin/api-crc-testing:6443 --namespace=default
+```
+
+`oc login` refreshes the token; re-run it (not `set-context`) if the context
+later reports `Unauthorized`.
+
+### Run it
+
+```bash
+# needs the sibling cost-onprem-chart checkout for scripts/deploy-rhbk.sh
+./hack/demo-preprod.sh --crc --dry-run     # show the plan
+./hack/demo-preprod.sh --crc               # tmux: steps + two klock panes
+./hack/demo-preprod.sh --crc --reset       # tear the four namespaces down first
+```
+
+Override any image from the profile with a matching env var, e.g.
+`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64 ./hack/demo-preprod.sh --crc`.
+Rebuilding the arm64 workload images: see
+[the profile file](../../hack/demo-preprod.crc.env) for the source repos.
 
 ## Prerequisites
 
@@ -120,12 +177,25 @@ NAMESPACE=cost-onprem IMG=default-route-openshift-image-registry.apps-crc.testin
 | Goal | Sample |
 |------|--------|
 | Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |
-| Full bundled stack (needs Kafka, Keycloak, S3, UI secrets) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| BYOI template — fill in external infra (Kafka, Keycloak, S3, UI secrets) before applying; rejected by admission unedited | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` |
+| Turnkey bundled stack (Postgres/Valkey + public images) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml` |
 | BYOI smoke | `config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml` |
 
 ```bash
+eval "$(crc oc-env)"
+
+# Bundled mode (DB + Cache provisioned by operator — dev only). The community
+# sample (name: cost-onprem-community) is turnkey: bundled Postgres/Valkey +
+# public images + discovery-resolved storage.
+oc apply -n cost-onprem \
+  -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml
+
+# The default sample is a BYOI template with empty external-infra fields and is
+# rejected by admission until you fill them in — do not apply it unedited.
+
+# Watch reconciliation
 oc get cmsc -n cost-onprem -w
-oc describe cmsc cost-management -n cost-onprem
+oc describe cmsc cost-onprem-community -n cost-onprem
 ```
 
 ### Do you need Kafka on CRC?

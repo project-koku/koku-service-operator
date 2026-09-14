@@ -156,6 +156,7 @@ spec:
               done
               # Fixture-only: the operator does not create buckets.
               mc mb --ignore-existing local/koku-bucket
+              mc mb --ignore-existing local/koku-upload-bucket
               mc mb --ignore-existing local/ros-data
               mc ls local
               echo "buckets ready"

@@ -105,7 +105,7 @@ If you already have AMQ Streams Kafka, point
 | **Auth / UI** | `AuthenticationReady`, `UIReady` | **Yes** False without Keycloak + OAuth mirror — needed for `Phase=Ready` / UI login |
 | **ROS** | `ROSEnabled=False` (CRD default / sample `ros.enabled: false`) | Expected for beta — no ROS/Kruize objects |
 
-The BYOI MinIO init Job creates the default Cost bucket (`koku-bucket`); a customer S3 must already have `spec.costManagement.storage.bucketName` (default `koku-bucket`) or uploads return 500.
+The BYOI MinIO init Job creates the default Cost bucket (`koku-bucket`); a customer S3 must already have the bucket named in `spec.objectStorage.buckets.koku` or uploads return 500.
 
 Reading conditions:
 

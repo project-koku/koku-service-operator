@@ -17,10 +17,14 @@ func TestMigrationJobBuildsValidJob(t *testing.T) {
 	old := OperatorImage
 	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
 	defer func() { OperatorImage = old }()
+	deploy := true
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-onprem", Namespace: "cost-tests"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy: &deploy,
+			},
 			CostManagement: costv1alpha1.CostManagementConfig{
 				API: costv1alpha1.KokuAPISpec{
 					Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
@@ -251,10 +255,14 @@ func TestMigrationJobDefaultPort(t *testing.T) {
 	old := OperatorImage
 	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
 	defer func() { OperatorImage = old }()
+	deploy := true
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy: &deploy,
+			},
 			CostManagement: costv1alpha1.CostManagementConfig{
 				API: costv1alpha1.KokuAPISpec{
 					Image: costv1alpha1.ImageSpec{Repository: "koku", Tag: "v1"},
@@ -286,10 +294,14 @@ func TestROSMigrationJobBuildsValidJob(t *testing.T) {
 	old := OperatorImage
 	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
 	defer func() { OperatorImage = old }()
+	deploy := true
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-onprem", Namespace: "cost-tests"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy: &deploy,
+			},
 			ROS: costv1alpha1.ROSConfig{
 				Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/ros", Tag: "v2"},
 			},

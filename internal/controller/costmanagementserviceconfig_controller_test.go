@@ -53,9 +53,20 @@ var _ = Describe("CostManagementServiceConfig Controller", func() {
 						Namespace: "default",
 					},
 					Spec: costv1alpha1.CostManagementServiceConfigSpec{
+						Database: costv1alpha1.DatabaseConfig{
+							Host:       "postgresql.databases.svc.cluster.local",
+							SecretName: "my-db-credentials",
+						},
+						Cache: costv1alpha1.CacheConfig{
+							Host: "redis.cache.svc.cluster.local",
+							Auth: costv1alpha1.CacheAuthSpec{
+								Enabled:    true,
+								SecretName: "my-cache-credentials",
+							},
+						},
 						Auth: costv1alpha1.AuthConfig{
 							Keycloak: costv1alpha1.KeycloakSpec{
-								URL: "http://keycloak.example.svc:8080",
+								URL: "https://keycloak.keycloak.svc.cluster.local",
 							},
 						},
 					},
@@ -91,7 +102,7 @@ var _ = Describe("CostManagementServiceConfig Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.database.image"))
+			Expect(err.Error()).To(ContainSubstring("spec.auth.envoy.image"))
 		})
 	})
 })

@@ -37,14 +37,15 @@ spec:
     port: 9000
     useSSL: false
     secretName: "byoi-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"
 
   costManagement:
-    storage:
-      bucketName: "koku-bucket"
-      rosBucketName: "ros-data"
     api:
       image:
         # amd64 — suitable for clusterbot / typical OpenShift nodes
@@ -105,6 +106,8 @@ spec:
       # hostname, tokens use that URL as iss — set issuerURL to match.
       url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
+      # For production with a public Route issuer, prefer tls.caCertSecretName
+      # (ingress CA) over insecureSkipVerify — see docs/install/keycloak.md.
       # tls:
       #   insecureSkipVerify: true   # dev only when issuer uses a private CA
       realm: "kubernetes"

@@ -65,6 +65,8 @@ spec:
     port: 443
     useSSL: true
     secretName: "my-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
 
   auth:
     keycloak:

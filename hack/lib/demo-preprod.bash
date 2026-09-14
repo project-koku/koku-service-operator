@@ -17,12 +17,22 @@ patch_operator_dockerfile() {
 }
 
 # Fill the BYOI sample CR: apps domain, public Keycloak issuer, lab TLS skip-verify.
+#
+# Optional workload image overrides (used by `demo-preprod.sh --crc` for arm64;
+# unset on the amd64/clusterbot path, so the rendered CR is byte-identical there):
+#   DEMO_KOKU_IMAGE / DEMO_KOKU_TAG              koku api + masu
+#   DEMO_RBAC_IMAGE / DEMO_RBAC_TAG              insights-rbac
+#   DEMO_INGRESS_IMAGE / DEMO_INGRESS_TAG        ingress
+#   DEMO_UI_IMAGE / DEMO_UI_TAG                  koku-ui-onprem
+#   DEMO_ENVOY_IMAGE / DEMO_ENVOY_TAG            envoy / proxyv2
+#   DEMO_OAUTHPROXY_IMAGE / DEMO_OAUTHPROXY_TAG  oauth2-proxy sidecar
 render_preprod_cr() {
   local src="${1:?sample CR path}"
   local dest="${2:?output path}"
   local domain="${3:?cluster apps domain}"
   local issuer="${4:?Keycloak issuer base URL}"
   python3 - "$src" "$dest" "$domain" "$issuer" <<'PY'
+import os
 import sys
 from pathlib import Path
 
@@ -42,6 +52,36 @@ text = text.replace(old_url, new_block, 1)
 text = text.replace('      # issuerURL: "https://keycloak-keycloak.apps.example.com"\n', "")
 text = text.replace("      # tls:\n", "")
 text = text.replace("      #   insecureSkipVerify: true   # dev only when issuer uses a private CA\n", "")
+
+# Optional per-workload image overrides. Each needle is the verbatim line from
+# config/samples/byoi/app/costmanagementserviceconfig.yaml; when the matching
+# env var is empty the line is left untouched (amd64 path renders unchanged).
+_overrides = [
+    ("DEMO_KOKU_IMAGE",       "repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku"),
+    ("DEMO_KOKU_TAG",         'tag: "768be82"'),
+    ("DEMO_RBAC_IMAGE",       "repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac"),
+    ("DEMO_RBAC_TAG",         'tag: "73870d8"'),
+    ("DEMO_INGRESS_IMAGE",    "repository: quay.io/iop/ingress"),
+    ("DEMO_INGRESS_TAG",      'tag: "master"'),
+    ("DEMO_UI_IMAGE",         "repository: quay.io/insights-onprem/koku-ui-onprem"),
+    ("DEMO_UI_TAG",           'tag: "2f23c646581028bd385856b6713e6bf367baf953"'),
+    ("DEMO_ENVOY_IMAGE",      "repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"),
+    ("DEMO_ENVOY_TAG",        'tag: "2.6"'),
+    ("DEMO_OAUTHPROXY_IMAGE", "repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9"),
+    ("DEMO_OAUTHPROXY_TAG",   'tag: "v7.6.0"'),
+]
+for env_key, needle in _overrides:
+    val = os.environ.get(env_key, "").strip()
+    if not val:
+        continue
+    if needle.startswith("repository: "):
+        repl = "repository: " + val
+    else:
+        repl = 'tag: "' + val + '"'
+    if needle not in text:
+        raise SystemExit(f"render_preprod_cr: {env_key} set but sample line not found: {needle}")
+    text = text.replace(needle, repl)
+
 Path(dest).write_text(text)
 PY
 }

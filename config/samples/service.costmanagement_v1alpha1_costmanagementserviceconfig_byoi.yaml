@@ -79,6 +79,13 @@ spec:
     port: 443
     useSSL: true
     secretName: "my-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      # Optional: ingress uploads inherit buckets.koku when unset (uploads land in
+      # the same bucket Koku reads). Set a distinct bucket only to route ingress
+      # uploads separately — shown here to document the override.
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"

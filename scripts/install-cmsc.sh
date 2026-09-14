@@ -1125,7 +1125,12 @@ deploy_helm_chart() {
     local project_root
     project_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
     local crd_name="costmanagementserviceconfigs.service.costmanagement.openshift.io"
-    local sample="${project_root}/config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
+    # This flow is turnkey: it grants anyuid for bundled DB/cache pods and only
+    # patches issuerURL. Use the community (turnkey) sample, not the BYOI default
+    # template — the default is admission-rejected unedited (empty
+    # auth.keycloak.url) and expects external DB/cache/S3, which this flow never
+    # configures. Community is admission-valid and bundles DB/cache + ODF discovery.
+    local sample="${project_root}/config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml"
 
     local operator_ns="koku-service-operator-system"
     local pull_img="${IMG:-image-registry.openshift-image-registry.svc:5000/${operator_ns}/koku-service-operator:latest}"
@@ -1171,8 +1176,11 @@ deploy_helm_chart() {
     echo_info "Granting anyuid SCC for bundled DB/cache pods"
     oc adm policy add-scc-to-user anyuid -z default -n "${NAMESPACE:-cost-onprem}" 2>/dev/null || true
 
-    echo_info "Applying CMSC sample: $sample"
-    if ! kubectl apply -f "$sample"; then
+    # Normalize name/namespace to this install's target so the issuerURL patch
+    # below matches the applied object (the sample carries its own metadata).
+    local cr_name="${CR_NAME:-cost-onprem}"
+    echo_info "Applying CMSC sample: $sample (as ${NAMESPACE}/${cr_name})"
+    if ! yq e ".metadata.namespace = \"${NAMESPACE}\" | .metadata.name = \"${cr_name}\"" "$sample" | kubectl apply -f -; then
         echo_error "Failed to apply CMSC"
         return 1
     fi
@@ -1180,7 +1188,6 @@ deploy_helm_chart() {
     # RHBK advertises the public Route as OIDC issuer even when JWKS uses the
     # in-cluster Service URL. Patch issuerURL from the detected Keycloak hostname
     # so oauth2-proxy / Envoy match tokens without hardcoding a cluster URL in the sample.
-    local cr_name="${CR_NAME:-cost-onprem}"
     if [ -z "${KEYCLOAK_URL:-}" ]; then
         detect_keycloak || true
     fi

@@ -9,9 +9,13 @@ import (
 )
 
 func keycloakSyncCfg() *costv1alpha1.CostManagementServiceConfig {
+	deploy := true
 	return &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{
+				Deploy: &deploy,
+			},
 			RBAC: costv1alpha1.RBACConfig{
 				Image: costv1alpha1.ImageSpec{
 					Repository: "quay.io/test/rbac",

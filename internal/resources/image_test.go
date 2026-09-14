@@ -58,8 +58,6 @@ func TestMissingWorkloadImages_EmptyCR(t *testing.T) {
 	t.Parallel()
 	missing := MissingWorkloadImages(&costv1alpha1.CostManagementServiceConfig{})
 	want := []string{
-		"spec.database.image",
-		"spec.cache.image",
 		"spec.auth.envoy.image",
 		"spec.ui.oauthProxy.image",
 		"spec.ui.app.image",
@@ -69,6 +67,17 @@ func TestMissingWorkloadImages_EmptyCR(t *testing.T) {
 	}
 	if !slices.Equal(missing, want) {
 		t.Errorf("missing = %v, want %v", missing, want)
+	}
+}
+
+func TestMissingWorkloadImages_EmptyCR_DefaultBYOIDoesNotRequireBundledDBCache(t *testing.T) {
+	t.Parallel()
+	missing := MissingWorkloadImages(&costv1alpha1.CostManagementServiceConfig{})
+	if slices.Contains(missing, "spec.database.image") {
+		t.Fatalf("default BYOI should not require spec.database.image, got %v", missing)
+	}
+	if slices.Contains(missing, "spec.cache.image") {
+		t.Fatalf("default BYOI should not require spec.cache.image, got %v", missing)
 	}
 }
 

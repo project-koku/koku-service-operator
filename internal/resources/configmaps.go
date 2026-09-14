@@ -68,10 +68,7 @@ func AWSConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.ConfigM
 	if style == "" {
 		style = "path"
 	}
-	region := cfg.Spec.ObjectStorage.S3.Region
-	if region == "" {
-		region = "onprem"
-	}
+	region := S3Region(cfg)
 	return &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{
