@@ -117,15 +117,8 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 
 	vols, mounts := ingressVolumes(cfg)
 
-	probe := &corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/",
-				Port: intstr.FromInt32(ingressHTTPPort),
-			},
-		},
-		InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
-	}
+	livenessProbe := ingressProbe("/healthz")
+	readinessProbe := ingressProbe("/status/")
 
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -150,8 +143,8 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 							{Name: "metrics", ContainerPort: ingressMetricsPort, Protocol: corev1.ProtocolTCP},
 						},
 						Env:             env,
-						LivenessProbe:   probe,
-						ReadinessProbe:  probe,
+						LivenessProbe:   livenessProbe,
+						ReadinessProbe:  readinessProbe,
 						Resources:       spec.Resources,
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
@@ -160,6 +153,26 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 				},
 			},
 		},
+	}
+}
+
+// ingressProbe configures the timings used by the upstream ingress deployment.
+// Readiness has its own bounded dependency checks, while liveness only verifies
+// that the HTTP process is serving requests.
+func ingressProbe(path string) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path:   path,
+				Port:   intstr.FromInt32(ingressHTTPPort),
+				Scheme: corev1.URISchemeHTTP,
+			},
+		},
+		InitialDelaySeconds: 35,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      120,
+		FailureThreshold:    3,
+		SuccessThreshold:    1,
 	}
 }
 
