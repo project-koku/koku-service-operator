@@ -86,7 +86,7 @@ class PerfCleanupTracker:
         last_progress_time = start
         while time.time() - start < max_timeout:
             if hard_deadline and time.time() >= hard_deadline:
-                print(f"  [ros-drain] stopping early — cleanup deadline approaching")
+                print("  [ros-drain] stopping early — cleanup deadline approaching")
                 return
             lag = get_ros_queue_depth(self.namespace)
             if lag is not None and lag == 0:
