@@ -57,7 +57,7 @@ spec:
       serviceAccountName: byoi-infra
       containers:
         - name: minio
-          image: docker.io/minio/minio:RELEASE.2025-01-20T14-49-07Z
+          image: quay.io/minio/minio:RELEASE.2025-01-20T14-49-07Z
           imagePullPolicy: IfNotPresent
           args: ["server", "/data", "--console-address", ":9001"]
           ports:
@@ -125,7 +125,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: docker.io/minio/mc:latest
+          image: quay.io/minio/mc:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: HOME

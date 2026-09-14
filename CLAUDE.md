@@ -187,6 +187,7 @@ Quick Redpanda smoke (alternate path): [clusterbot.md](docs/development/clusterb
 ## Reference material
 
 - [docs/development/clusterbot-operator-pytest.md](docs/development/clusterbot-operator-pytest.md) — Cluster Bot operator + pytest runbook (COST-7697)
+- [docs/openshift-ci/openshift-ci.md](docs/openshift-ci/openshift-ci.md) — OpenShift CI (Prow) jobs, repo contracts, redaction
 - [docs/development/crc-testing.md](docs/development/crc-testing.md) — local development and CRC testing guide
 - [docs/tasks.md](docs/tasks.md) — implementation status per JIRA ticket
 - [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) — design decisions and best-practice analysis

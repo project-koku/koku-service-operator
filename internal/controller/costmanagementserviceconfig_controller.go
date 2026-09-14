@@ -1438,7 +1438,18 @@ func (r *CostManagementServiceConfigReconciler) isDeploymentReady(ctx context.Co
 	if d.Spec.Replicas == nil || *d.Spec.Replicas == 0 {
 		return true, nil // 0 replicas = intentionally off
 	}
-	return d.Status.AvailableReplicas >= *d.Spec.Replicas, nil
+	want := *d.Spec.Replicas
+	// AvailableReplicas can still describe the old ReplicaSet while a new
+	// generation is rolling out. Require the Deployment controller to have
+	// observed the current spec and all desired replicas to be updated before
+	// treating the Deployment as ready.
+	if d.Status.ObservedGeneration < d.Generation {
+		return false, nil
+	}
+	if d.Status.UpdatedReplicas < want {
+		return false, nil
+	}
+	return d.Status.AvailableReplicas >= want, nil
 }
 
 type deploymentWait struct {
