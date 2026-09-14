@@ -29,6 +29,53 @@ func TestGatewayNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestGatewayNetworkPolicy_ExternalNamespace(t *testing.T) {
+	cfg := testCfg()
+	externalNS := "costmanagement-metrics-operator"
+	cfg.Spec.Gateway.NetworkPolicy.ExternalNamespaces = []string{externalNS}
+	np := GatewayNetworkPolicy(cfg)
+
+	// Should have router + UI + external namespace + monitoring = 4 rules.
+	if len(np.Spec.Ingress) != 4 {
+		t.Fatalf("expected 4 ingress rules, got %d", len(np.Spec.Ingress))
+	}
+
+	// Find the external namespace rule.
+	var extRule *networkingv1.NetworkPolicyIngressRule
+	for i := range np.Spec.Ingress {
+		rule := &np.Spec.Ingress[i]
+		if ruleHasNamespaceLabel(*rule, "kubernetes.io/metadata.name", externalNS) {
+			extRule = rule
+			break
+		}
+	}
+	if extRule == nil {
+		t.Fatalf("missing ingress rule for external namespace %q", externalNS)
+	}
+
+	// Verify the external namespace rule allows HTTP port and nothing else.
+	if len(extRule.Ports) != 1 {
+		t.Errorf("external namespace rule has %d ports, want 1", len(extRule.Ports))
+	}
+	if !ingressRuleAllowsPort(*extRule, envoyHTTPPort) {
+		t.Errorf("external namespace rule missing HTTP port %d", envoyHTTPPort)
+	}
+	if ingressRuleAllowsPort(*extRule, envoyAdminPort) {
+		t.Errorf("external namespace rule must not allow admin port %d", envoyAdminPort)
+	}
+
+	// Verify there's exactly one peer with the external namespace selector.
+	if len(extRule.From) != 1 {
+		t.Errorf("external namespace rule has %d peers, want 1", len(extRule.From))
+	}
+	if extRule.From[0].NamespaceSelector == nil {
+		t.Fatal("external namespace peer must use NamespaceSelector")
+	}
+	if got := extRule.From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != externalNS {
+		t.Errorf("external namespace selector = %q, want %q", got, externalNS)
+	}
+}
+
 func TestIngressNetworkPolicy_GatewayAndMonitoring(t *testing.T) {
 	cfg := testCfg()
 	np := IngressNetworkPolicy(cfg)
