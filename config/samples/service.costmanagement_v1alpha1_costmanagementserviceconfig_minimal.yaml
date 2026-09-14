@@ -12,17 +12,11 @@
 # Pre-create Secrets in the CR namespace before applying:
 #
 #   kubectl create secret generic my-db-credentials \
-#     --from-literal=postgres-user=postgres \
-#     --from-literal=postgres-password=<password> \
 #     --from-literal=koku-user=koku \
 #     --from-literal=koku-password=<password> \
-#     --from-literal=ros-user=ros_user \
-#     --from-literal=ros-password=<password> \
 #     --from-literal=rbac-user=rbac_user \
-#     --from-literal=rbac-password=<password> \
-#     --from-literal=kruize-user=kruize_user \
-#     --from-literal=kruize-password=<password>
-#   (ros-* and kruize-* keys match the CRD credential list; unused while ros.enabled is false.)
+#     --from-literal=rbac-password=<password>
+#   Add ros-* and kruize-* keys only when ros.enabled is true.
 #
 #   kubectl create secret generic my-cache-credentials \
 #     --from-literal=redis-password=<password>
