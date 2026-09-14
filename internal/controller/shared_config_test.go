@@ -214,8 +214,9 @@ func markRouteAdmitted(t *testing.T, c client.Client, ns, name string) {
 	}
 }
 
-// markDeploymentReady sets AvailableReplicas to Spec.Replicas so isDeploymentReady
-// returns true. Requires a client built with WithStatusSubresource(&appsv1.Deployment{}).
+// markDeploymentReady sets Deployment status so isDeploymentReady returns true:
+// the observed generation and updated/available replicas match the spec.
+// Requires a client built with WithStatusSubresource(&appsv1.Deployment{}).
 func markDeploymentReady(t *testing.T, c client.Client, ns, name string) {
 	t.Helper()
 	d := &appsv1.Deployment{}
@@ -226,6 +227,8 @@ func markDeploymentReady(t *testing.T, c client.Client, ns, name string) {
 	if d.Spec.Replicas != nil {
 		replicas = *d.Spec.Replicas
 	}
+	d.Status.ObservedGeneration = d.Generation
+	d.Status.UpdatedReplicas = replicas
 	d.Status.AvailableReplicas = replicas
 	d.Status.ReadyReplicas = replicas
 	d.Status.Replicas = replicas

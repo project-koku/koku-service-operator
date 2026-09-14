@@ -227,12 +227,23 @@ plus the `org-admin` realm role is the supported first-admin path.
 
 ### How to assign it
 
-1. **Realm roles** → create realm role `org-admin` if it does not exist.
-2. **Users** → select the user → **Role mapping** → **Assign role** →
-   `org-admin`.
-3. Confirm the user has `org_id` and `account_number` attributes (protocol
-   mappers above).
-4. User logs in through the UI (oauth2-proxy → Keycloak).
+> **Use the correct realm.** The Admin Console opens in the **`master`**
+> realm by default. Cost Management UI login uses the realm named by
+> `spec.auth.keycloak.realm` (default **`kubernetes`**). Create human users
+> in that realm — not in `master` when your CR uses the default. Confirm the
+> realm dropdown (top-left) matches `spec.auth.keycloak.realm` and
+> **Clients** lists `cost-management-ui` before you create a user. With the
+> default `kubernetes` realm, a user created only in `master` cannot log
+> into the UI.
+
+1. **Realm roles** → create realm role `org-admin` if it does not exist
+   (in the realm named by `spec.auth.keycloak.realm`).
+2. **Users** → **Create user** (in that realm). Leave **Required user
+   actions** empty. Set **First name** and **Last name** when your realm
+   user profile requires them (otherwise `VERIFY_PROFILE` can block login).
+   Then set **Credentials** → add `org_id` and `account_number` on
+   **Attributes** → **Role mapping** → **Assign role** → `org-admin`.
+3. User logs in through the UI (oauth2-proxy → Keycloak).
 
 Service-account users (CMMO) follow the same steps if they need org-admin
 claims; most reporting clusters only need the attribute mappers, not
