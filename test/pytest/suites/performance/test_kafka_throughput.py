@@ -560,6 +560,8 @@ class TestKafkaPartitionScaling:
         original_replicas = self._get_listener_replicas()
 
         results: List[Dict[str, Any]] = []
+        target_partitions = original_partitions
+        partition_changed = False
 
         try:
             # --- Run 1: baseline ---
@@ -575,7 +577,17 @@ class TestKafkaPartitionScaling:
             # --- Run 2: scaled partitions + listeners ---
             target_partitions = max(original_partitions, 3)
             if target_partitions > original_partitions:
+                # WARNING: Kafka does not allow reducing partition counts.
+                # This change is PERMANENT for the topic's lifetime — it cannot
+                # be reversed in the finally block below.  Only proceed when the
+                # cluster is a dedicated test environment.
+                print(
+                    f"[KAF-002] Increasing {topic} partitions "
+                    f"{original_partitions} → {target_partitions} "
+                    f"(PERMANENT — Kafka cannot reduce partition counts)"
+                )
                 self._set_topic_partitions(topic, target_partitions)
+                partition_changed = True
                 time.sleep(10)
             self._scale_listener(3)
             time.sleep(15)
@@ -590,7 +602,13 @@ class TestKafkaPartitionScaling:
                 results.append(scaled)
 
         finally:
+            # Listener replicas are restored; partition count cannot be reversed.
             self._scale_listener(original_replicas)
+            if partition_changed:
+                print(
+                    f"[KAF-002] NOTE: {topic} partition count was permanently "
+                    f"increased to {target_partitions} and was NOT restored."
+                )
 
         perf_result.test_id = "PERF-KAF-002"
         perf_result.metrics = {

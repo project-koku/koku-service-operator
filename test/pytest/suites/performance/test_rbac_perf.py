@@ -71,8 +71,11 @@ def _rbac_access_url(gateway_url: str) -> str:
     service DNS is not resolvable. The gateway routes ``/api/rbac/``
     to the RBAC backend, giving us an externally reachable path that
     still isolates RBAC latency from the Koku API path.
+
+    NOTE: gateway_url already includes the /api prefix from the Envoy route —
+    do NOT add /api/ here or the path becomes /api/api/rbac/...
     """
-    return f"{gateway_url.rstrip('/')}/api/rbac/v1/access/?application=cost-management"
+    return f"{gateway_url.rstrip('/')}/rbac/v1/access/?application=cost-management"
 
 
 RBAC_VALKEY_DB = 2
@@ -383,7 +386,7 @@ class TestRBACPerf:
 
         session = self._create_session()
         rbac_access = _rbac_access_url(gateway_url)
-        koku_reports = f"{gateway_url.rstrip('/')}/api/cost-management/v1/reports/openshift/costs/"
+        koku_reports = f"{gateway_url.rstrip('/')}/cost-management/v1/reports/openshift/costs/"
 
         # Warm up: a few requests to prime caches
         for _ in range(5):

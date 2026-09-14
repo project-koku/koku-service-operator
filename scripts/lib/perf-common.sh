@@ -40,14 +40,16 @@ perf_patch_cmsc_listener_cpu() {
     local cr_name
     cr_name="$(perf_release_prefix)"
 
+    # Patch only CPU fields — do NOT touch memory so that operator-managed
+    # or user-configured memory limits are preserved.
     perf_kubectl patch cmsc "${cr_name}" -n "${namespace}" --type merge -p "$(cat <<EOF
 {
   "spec": {
     "costManagement": {
       "listener": {
         "resources": {
-          "requests": {"cpu": "${request}", "memory": "300Mi"},
-          "limits": {"cpu": "${limit}", "memory": "600Mi"}
+          "requests": {"cpu": "${request}"},
+          "limits": {"cpu": "${limit}"}
         }
       }
     }

@@ -534,11 +534,10 @@ def execute_db_query(
         "-c", query,
     ]
 
-    query_preview = " ".join(query.split())[:120]
-    ctx = (
-        f"ns={namespace} pod={pod_name} db={database} user={user} "
-        f"query={query_preview!r}"
-    )
+    # ctx is used in error-path log messages.  Do NOT include the full query
+    # text here — it may contain data values (tenant IDs, cluster IDs, etc.)
+    # that should not appear in CI logs.
+    ctx = f"ns={namespace} pod={pod_name} db={database} user={user}"
 
     last_detail = "no attempt"
     for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):

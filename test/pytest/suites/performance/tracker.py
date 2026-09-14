@@ -52,7 +52,7 @@ class PerfCleanupTracker:
             source_name=source_name,
         ))
 
-    def _wait_for_ros_drain(self):
+    def _wait_for_ros_drain(self, hard_deadline: float = 0.0):
         """Wait for the ROS processor Kafka consumer lag to reach zero.
 
         The ros-processor is a Go-based Kafka consumer on ``hccm.ros.events``.
@@ -65,6 +65,12 @@ class PerfCleanupTracker:
         We also track whether lag is making progress; if lag stalls completely
         for ``stall_timeout`` seconds we give up (processor may be stuck on
         an unrelated error).
+
+        Args:
+            hard_deadline: Unix timestamp after which we must stop regardless
+                of lag status.  If 0 (default) the internal max_timeout alone
+                governs.  Pass the overall cleanup deadline minus a guard so
+                the drain cannot consume the entire cleanup budget.
         """
         try:
             from suites.performance.test_ros import get_ros_queue_depth
@@ -79,6 +85,9 @@ class PerfCleanupTracker:
         prev_lag = None
         last_progress_time = start
         while time.time() - start < max_timeout:
+            if hard_deadline and time.time() >= hard_deadline:
+                print(f"  [ros-drain] stopping early — cleanup deadline approaching")
+                return
             lag = get_ros_queue_depth(self.namespace)
             if lag is not None and lag == 0:
                 return
@@ -227,7 +236,11 @@ class PerfCleanupTracker:
 
         # Wait for the ROS processor to consume any pending Kafka events
         # before deleting sources (PERF-FINDING-013).
-        self._wait_for_ros_drain()
+        # Reserve at least half the budget for actual deletion; cap the drain
+        # at the remaining time minus a 30-second guard so we always have
+        # room to attempt at least a few deletes even if drain is slow.
+        drain_deadline = min(deadline - 30, time.time() + self.CLEANUP_TIMEOUT_S // 2)
+        self._wait_for_ros_drain(hard_deadline=drain_deadline)
 
         if time.time() >= deadline:
             msg = (f"Cleanup timeout ({self.CLEANUP_TIMEOUT_S}s) exhausted during "

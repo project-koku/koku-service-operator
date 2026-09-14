@@ -29,6 +29,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# shellcheck source=scripts/lib/perf-common.sh
+source "${SCRIPT_DIR}/lib/perf-common.sh"
+
 # ── Defaults ──────────────────────────────────────────────────────────────
 
 SOAK_DAYS=7

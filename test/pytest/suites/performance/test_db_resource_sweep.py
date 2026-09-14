@@ -83,20 +83,22 @@ def measure_api_latencies(
     results = {}
 
     # API-001 equivalent: report baseline
-    report_url = f"{base}/api/cost-management/v1/reports/openshift/costs/"
+    # NOTE: gateway_url already includes the /api prefix from the Envoy route —
+    # do NOT add /api/ here or the path becomes /api/api/cost-management/...
+    report_url = f"{base}/cost-management/v1/reports/openshift/costs/"
     report_latencies = _measure_endpoint(session, report_url, iterations)
     results["report_baseline"] = report_latencies
 
     # API-003 equivalent: group_by query (most CPU-sensitive)
     group_by_url = (
-        f"{base}/api/cost-management/v1/reports/openshift/costs/"
+        f"{base}/cost-management/v1/reports/openshift/costs/"
         f"?group_by[project]=*&filter[time_scope_value]=-30"
     )
     group_by_latencies = _measure_endpoint(session, group_by_url, iterations)
     results["group_by_project"] = group_by_latencies
 
     # Cost models list
-    cost_models_url = f"{base}/api/cost-management/v1/cost-models/"
+    cost_models_url = f"{base}/cost-management/v1/cost-models/"
     cost_model_latencies = _measure_endpoint(session, cost_models_url, iterations)
     results["cost_models_list"] = cost_model_latencies
 

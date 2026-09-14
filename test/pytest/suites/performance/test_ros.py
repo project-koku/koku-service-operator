@@ -1017,8 +1017,9 @@ class TestROSPerformance:
                     kruize_credentials.password,
                     cluster_id,
                 )
-                # Recommendations should have been updated
-                if current_rec_count >= initial_rec_count:
+                # Recommendations must have increased, not just stayed the same
+                # (>= would be satisfied immediately before any processing occurs)
+                if current_rec_count > initial_rec_count:
                     refresh_complete = True
                     break
                 time.sleep(10)

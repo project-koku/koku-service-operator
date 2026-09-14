@@ -754,13 +754,15 @@ class APIProbeThread:
         self._token_refreshes = 0
 
         base = gateway_url.rstrip("/")
+        # NOTE: gateway_url already includes the /api prefix from the Envoy route —
+        # do NOT add /api/ here or paths become /api/api/cost-management/...
         self._urls = {
-            "report_baseline": f"{base}/api/cost-management/v1/reports/openshift/costs/",
+            "report_baseline": f"{base}/cost-management/v1/reports/openshift/costs/",
             "group_by": (
-                f"{base}/api/cost-management/v1/reports/openshift/costs/"
+                f"{base}/cost-management/v1/reports/openshift/costs/"
                 f"?group_by[project]=*&filter[time_scope_value]=-30"
             ),
-            "cost_models": f"{base}/api/cost-management/v1/cost-models/",
+            "cost_models": f"{base}/cost-management/v1/cost-models/",
         }
 
     def _refresh_token(self) -> bool:
