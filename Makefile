@@ -367,7 +367,7 @@ endif
 
 YQ_VERSION ?= v4.53.6
 IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
-IMAGE_SHA = $(shell DIGEST=$$(docker inspect --format='{{range .RepoDigests}}{{.}}{{"\n"}}{{end}}' $(IMG) 2>/dev/null | grep "^$(IMG_BASE)@" | head -n 1) ; echo $${DIGEST:-$(IMG)})
+IMAGE_SHA ?= $(IMG)
 OCP_VERSION ?= v4.22
 
 .PHONY: yq
@@ -399,6 +399,8 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 # 	$(YQ) -i '.spec.replaces = "koku-service-operator.v$(PREVIOUS_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+
+	$(OPERATOR_SDK) bundle validate ./bundle --select-optional name=operatorhub/v2 --select-optional name=multiarch
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
