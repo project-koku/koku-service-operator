@@ -80,16 +80,23 @@ dto_check_oc_connection() {
 }
 
 dto_pin_kube_context() {
-  if [[ -z "${KUBE_CONTEXT:-}" ]]; then
-    dto_log_error "KUBE_CONTEXT is required (pin kubectl/oc to the target cluster)"
-    exit 1
-  fi
   if [[ "${DRY_RUN:-false}" == "true" ]]; then
-    dto_log_verbose "DRY RUN: context pinned to ${KUBE_CONTEXT}"
+    dto_log_verbose "DRY RUN: context pinned to ${KUBE_CONTEXT:-<current>}"
     return 0
   fi
   local current
   current="$(dto_kubectl config current-context 2>/dev/null || true)"
+  if [[ -z "${KUBE_CONTEXT:-}" ]]; then
+    # No explicit pin — adopt the active current-context (set by oc login / oc_login_auto).
+    if [[ -z "${current}" ]]; then
+      dto_log_error "KUBE_CONTEXT is unset and no current-context found in kubeconfig — run oc login first"
+      exit 1
+    fi
+    KUBE_CONTEXT="${current}"
+    export KUBE_CONTEXT
+    dto_log_info "KUBE_CONTEXT not set — using active context: ${KUBE_CONTEXT}"
+    return 0
+  fi
   if [[ "$current" != "$KUBE_CONTEXT" ]]; then
     dto_log_error "current-context is '${current:-<unset>}', expected '${KUBE_CONTEXT}'"
     exit 1
