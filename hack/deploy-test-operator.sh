@@ -41,7 +41,7 @@ HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-$CR_NAME}"
 KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 S4_NAMESPACE="${S4_NAMESPACE:-s4-test}"
-CMSC_SAMPLE="${CMSC_SAMPLE:-config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml}"
+CMSC_SAMPLE="${CMSC_SAMPLE:-config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml}"
 CMSC_READY_TIMEOUT="${CMSC_READY_TIMEOUT:-45m}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
@@ -102,6 +102,7 @@ Options:
 Environment:
   IMG                    Operator image (required unless --tests-only or --skip-operator)
   KUBE_CONTEXT           Pin kubectl/oc context (optional; defaults to current-context from oc login)
+  CMSC_SAMPLE            Path to CMSC sample YAML (default: community sample with bundled DB/cache)
   CMSC_READY_TIMEOUT     Wait for day-one CMSC conditions (default: 45m)
   ODF_S3_CA_SECRET_NAME  Secret for openshift service CA on ODF path (default: odf-s3-ca)
 
