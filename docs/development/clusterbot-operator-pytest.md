@@ -269,6 +269,51 @@ kubectl create secret generic cost-onprem-storage-credentials \
 Required buckets: `koku-bucket`, `ros-data`, `insights-upload-perma`
 (`deploy-s4-test.sh` does not create them).
 
+### S3 buckets before CMSC (recommended)
+
+Step 1 deploys S4 and syncs credentials but **does not create** application
+bucket names. Without buckets, `StorageReady` stays False and ingress readiness
+fails (`HeadBucket` 404) until buckets exist. Create them **after Step 2**
+(operator running) and **before Step 3** (or rely on pytest
+`s3_bucket_preflight` at the start of Step 4 — that is too late for ingress
+during CMSC reconcile):
+
+```bash
+oc -n cost-onprem exec deploy/cost-onprem-koku-api -- python3 -c "
+import boto3, os
+s3 = boto3.client('s3',
+  endpoint_url=os.environ.get('S3_ENDPOINT'),
+  aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+  aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+  verify=False)
+for b in ['koku-bucket', 'ros-data', 'insights-upload-perma']:
+    try:
+        s3.head_bucket(Bucket=b)
+        print('exists', b)
+    except Exception:
+        s3.create_bucket(Bucket=b)
+        print('created', b)
+"
+```
+
+If the `exec` fails because `cost-onprem-koku-api` does not exist yet, create
+buckets after CMSC reconcile using the same command, or use the pytest preflight
+in Step 4.
+
+### Keycloak Admin Console (lab)
+
+RHBK stores bootstrap credentials in `keycloak-initial-admin`. Decode **both**
+fields (username is base64-encoded in the Secret):
+
+```bash
+echo -n 'user='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d; echo
+echo -n 'pass='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+Open `https://<keycloak-route>/admin`, select realm **`kubernetes`** (not
+`master`). Customer-facing Keycloak user and **CMMO service account**
+procedures: [keycloak.md](../install/keycloak.md) and [cmmo.md](../install/cmmo.md).
+
 ## Step 2 — Operator in-cluster
 
 ```bash
@@ -283,7 +328,11 @@ oc -n cost-onprem logs deploy/koku-service-operator --tail=30
 
 ## Step 3 — CMSC + cluster-bot patches
 
-Apply the default sample into **`cost-onprem`** (same NS as Step 2):
+Apply the **community lab sample** (bundled Postgres/Valkey in `cost-onprem`) into
+**`cost-onprem`** (same NS as Step 2). Do **not** use
+`service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` unedited —
+that file is a BYOI template (`database.deploy: false` / `cache.deploy: false`)
+and admission rejects it until hosts and secrets are filled in.
 
 ```bash
 DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
@@ -291,10 +340,6 @@ KEYCLOAK_HOST="$(oc get route keycloak -n keycloak -o jsonpath='{.spec.host}')"
 test -n "$KEYCLOAK_HOST"
 KEYCLOAK_URL="https://${KEYCLOAK_HOST}"
 
-# The default sample is a BYOI template that admission rejects unedited (empty
-# auth.keycloak.url; objectStorage.buckets.koku is required once secretName is
-# set). Merge the cluster-bot values into the sample and apply once — applying
-# the raw template and patching afterwards fails at the first apply.
 DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .metadata.namespace = "cost-onprem" |
   .metadata.name = "cost-onprem" |
@@ -307,7 +352,7 @@ DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .spec.objectStorage.s3.region = "us-east-1" |
   .spec.auth.keycloak.url = "http://keycloak-service.keycloak.svc.cluster.local:8080" |
   .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL)
-' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml \
+' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml \
   | oc apply -f -
 ```
 
