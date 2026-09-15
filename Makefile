@@ -367,7 +367,7 @@ endif
 
 YQ_VERSION ?= v4.53.6
 IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
-IMAGE_SHA = $(shell docker inspect --format='{{range .RepoDigests}}{{.}}{{"\n"}}{{end}}' ${IMG} | grep "^$(IMG_BASE)@" | head -n 1)
+IMAGE_SHA = $(shell DIGEST=$$(docker inspect --format='{{range .RepoDigests}}{{.}}{{"\n"}}{{end}}' $(IMG) 2>/dev/null | grep "^$(IMG_BASE)@" | head -n 1) ; echo $${DIGEST:-$(IMG)})
 OCP_VERSION ?= v4.22
 
 .PHONY: yq
