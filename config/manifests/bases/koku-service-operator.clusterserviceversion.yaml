@@ -4,6 +4,10 @@ metadata:
   annotations:
     alm-examples: '[]'
     capabilities: Basic Install
+    description: |
+      Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift
+      that deploys and manages the Cost Management stack against external infrastructure
+      (PostgreSQL, Cache, Kafka, S3, OIDC).
     operatorframework.io/initialization-resource: |-
       {
         "apiVersion": "service.costmanagement.openshift.io/v1alpha1",
@@ -37,7 +41,7 @@ metadata:
           "costManagement": {
             "api": {
               "image": {
-                "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
+                "repository": "quay.io/project-koku/koku",
                 "tag": "422f758"
               },
               "replicas": 1
@@ -66,7 +70,7 @@ metadata:
             },
             "masu": {
               "image": {
-                "repository": "quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku",
+                "repository": "quay.io/project-koku/koku",
                 "tag": "422f758"
               },
               "replicas": 1
@@ -116,7 +120,7 @@ metadata:
               "replicas": 1
             },
             "image": {
-              "repository": "quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac",
+              "repository": "quay.io/project-koku/insights-rbac",
               "tag": "34e25ed"
             },
             "worker": {
@@ -151,6 +155,8 @@ metadata:
         }
       }
     operatorframework.io/suggested-namespace: cost-onprem
+    repository: https://github.com/project-koku/koku-service-operator
+    support: Cost Management
   labels:
     operatorframework.io/arch.amd64: supported
   name: koku-service-operator.v0.0.0

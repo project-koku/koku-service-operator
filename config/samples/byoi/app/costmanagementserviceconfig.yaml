@@ -49,7 +49,7 @@ spec:
     api:
       image:
         # amd64 — suitable for clusterbot / typical OpenShift nodes
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        repository: quay.io/project-koku/koku
         tag: "422f758"
       replicas: 1
       # Live exchange rates for IQE smoke (applied to all koku containers).
@@ -58,7 +58,7 @@ spec:
         CURRENCY_URL: "https://open.er-api.com/v6/latest/USD"
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        repository: quay.io/project-koku/koku
         tag: "422f758"
       replicas: 1
       # Registers masu test-only routes (/enabled_tags/) for IQE. Lab/CI only.
@@ -86,7 +86,7 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      repository: quay.io/project-koku/insights-rbac
       tag: "34e25ed"
     api:
       replicas: 1

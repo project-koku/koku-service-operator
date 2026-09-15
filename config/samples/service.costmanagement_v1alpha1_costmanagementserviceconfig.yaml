@@ -68,12 +68,12 @@ spec:
   costManagement:
     api:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        repository: quay.io/project-koku/koku
         tag: "422f758"
       replicas: 1
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        repository: quay.io/project-koku/koku
         tag: "422f758"
       replicas: 1
     listener:
@@ -103,7 +103,7 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      repository: quay.io/project-koku/insights-rbac
       tag: "73870d8"
     api:
       replicas: 1
