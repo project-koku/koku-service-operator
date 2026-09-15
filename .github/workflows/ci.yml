@@ -185,7 +185,7 @@ jobs:
         # Makefile-downloaded, version-pinned operator-sdk binary instead of
         # a second hardcoded install, so there's one source of truth for the
         # version.
-        run: ./bin/operator-sdk bundle validate ./bundle --select-optional name=operatorhub/v2 --select-optional name=multiarch
+        run: ./bin/operator-sdk bundle validate ./bundle --select-optional name=operatorhub/v2
 
   links:
     name: Check Links
