@@ -8,16 +8,11 @@
 # Pre-create these Secrets before applying this CR:
 #
 #   kubectl create secret generic my-db-credentials \
-#     --from-literal=postgres-user=postgres \
-#     --from-literal=postgres-password=<password> \
 #     --from-literal=koku-user=koku \
 #     --from-literal=koku-password=<password> \
-#     --from-literal=ros-user=ros_user \
-#     --from-literal=ros-password=<password> \
-#     --from-literal=kruize-user=kruize_user \
-#     --from-literal=kruize-password=<password> \
 #     --from-literal=rbac-user=rbac_user \
 #     --from-literal=rbac-password=<password>
+#   Add ros-* and kruize-* keys only when ros.enabled is true.
 #
 #   kubectl create secret generic my-s3-credentials \
 #     --from-literal=access-key=<key> \
@@ -71,7 +66,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
 
   # External S3-compatible storage (ODF, AWS S3, etc.)
   objectStorage:
@@ -111,12 +106,12 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 1
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 1
     listener:
       replicas: 2
@@ -146,7 +141,7 @@ spec:
   rbac:
     image:
       repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      tag: "34e25ed"
     api:
       replicas: 1
     worker:
@@ -161,7 +156,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
     oauthProxy:
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9

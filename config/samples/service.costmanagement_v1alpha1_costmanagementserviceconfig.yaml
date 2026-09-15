@@ -49,7 +49,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
 
   # Object storage is BYOI: the operator never creates buckets. Provide your own
   # S3-compatible endpoint + credentials, or leave endpoint/secretName empty to
@@ -69,12 +69,12 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 1
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 1
     listener:
       replicas: 2
@@ -154,7 +154,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
 
   monitoring:
     enabled: true

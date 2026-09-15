@@ -58,13 +58,13 @@ text = text.replace("      #   insecureSkipVerify: true   # dev only when issuer
 # env var is empty the line is left untouched (amd64 path renders unchanged).
 _overrides = [
     ("DEMO_KOKU_IMAGE",       "repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku"),
-    ("DEMO_KOKU_TAG",         'tag: "768be82"'),
+    ("DEMO_KOKU_TAG",         'tag: "422f758"'),
     ("DEMO_RBAC_IMAGE",       "repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac"),
-    ("DEMO_RBAC_TAG",         'tag: "73870d8"'),
+    ("DEMO_RBAC_TAG",         'tag: "34e25ed"'),
     ("DEMO_INGRESS_IMAGE",    "repository: quay.io/iop/ingress"),
-    ("DEMO_INGRESS_TAG",      'tag: "master"'),
+    ("DEMO_INGRESS_TAG",      'tag: "sha-6dde23d"'),
     ("DEMO_UI_IMAGE",         "repository: quay.io/insights-onprem/koku-ui-onprem"),
-    ("DEMO_UI_TAG",           'tag: "2f23c646581028bd385856b6713e6bf367baf953"'),
+    ("DEMO_UI_TAG",           'tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"'),
     ("DEMO_ENVOY_IMAGE",      "repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"),
     ("DEMO_ENVOY_TAG",        'tag: "2.6"'),
     ("DEMO_OAUTHPROXY_IMAGE", "repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9"),

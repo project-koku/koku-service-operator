@@ -111,7 +111,7 @@ spec:
     api:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 2
       resources:
         requests:
@@ -123,7 +123,7 @@ spec:
     masu:
       image:
         repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        tag: "422f758"
       replicas: 2
       resources:
         requests:
@@ -159,7 +159,7 @@ spec:
   rbac:
     image:
       repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      tag: "34e25ed"
     api:
       replicas: 2
       resources:
@@ -183,7 +183,7 @@ spec:
     # Pin a release tag for production — master is mutable (dev-only).
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
     resources:
       requests:
         cpu: 100m
@@ -197,7 +197,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
       resources:
         requests:
           cpu: 100m
