@@ -369,6 +369,7 @@ YQ_VERSION ?= v4.53.6
 IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
 IMAGE_SHA ?= $(IMG)
 OCP_VERSION ?= v4.22
+MIN_KUBE_VERSION = 1.25.0
 
 .PHONY: yq
 YQ ?= $(LOCALBIN)/yq
@@ -396,11 +397,14 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	$(YQ) -i '.annotations."com.redhat.openshift.versions" = "$(OCP_VERSION)"' bundle/metadata/annotations.yaml
 	$(YQ) -i '(.annotations."com.redhat.openshift.versions" | key) head_comment="OpenShift specific annotations."' bundle/metadata/annotations.yaml
 	$(YQ) -i '.metadata.annotations.containerImage = "$(IMAGE_SHA)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/arch.amd64"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/os.linux"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 # 	$(YQ) -i '.spec.replaces = "koku-service-operator.v$(PREVIOUS_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 
-	$(OPERATOR_SDK) bundle validate ./bundle --select-optional name=operatorhub/v2 --select-optional name=multiarch
+	$(OPERATOR_SDK) bundle validate bundle/ --select-optional suite=operatorframework
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.

@@ -301,7 +301,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-15T17:04:40Z"
+    createdAt: "2026-09-15T19:08:06Z"
     description: |
       Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift
       that deploys and manages the Cost Management stack against external infrastructure
@@ -457,9 +457,10 @@ metadata:
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/project-koku/koku-service-operator
     support: Cost Management
-    containerImage: quay.io/project-koku/koku-service-operator@sha256:921f62a035aedf2f9e9930a57b6975963aabfde6b4ddf0cd146e4bcc7df34af5
+    containerImage: quay.io/project-koku/koku-service-operator@sha256:7a9b1505cbc94ae0005a05b8eeb6feea0124fb9ea2c852eaaff5efc6a9d29fe2
   labels:
     operatorframework.io/arch.amd64: supported
+    operatorframework.io/os.linux: supported
   name: koku-service-operator.v0.0.1
   namespace: placeholder
 spec:
@@ -889,6 +890,7 @@ spec:
       targetPort: 9443
       type: ValidatingAdmissionWebhook
       webhookPath: /validate-service-costmanagement-openshift-io-v1alpha1-costmanagementserviceconfig
+  minKubeVersion: 1.25.0
   relatedImages:
     - name: koku-service-operator
-      image: quay.io/project-koku/koku-service-operator@sha256:921f62a035aedf2f9e9930a57b6975963aabfde6b4ddf0cd146e4bcc7df34af5
+      image: quay.io/project-koku/koku-service-operator@sha256:7a9b1505cbc94ae0005a05b8eeb6feea0124fb9ea2c852eaaff5efc6a9d29fe2
