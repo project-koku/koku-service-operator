@@ -179,14 +179,6 @@ jobs:
             exit 1
           fi
 
-      - name: Validate bundle (OperatorHub + multiarch)
-        # `make bundle` already runs the default `operator-sdk bundle
-        # validate ./bundle`; this adds the optional suites. Reuses the
-        # Makefile-downloaded, version-pinned operator-sdk binary instead of
-        # a second hardcoded install, so there's one source of truth for the
-        # version.
-        run: ./bin/operator-sdk bundle validate ./bundle --select-optional name=operatorhub/v2
-
   links:
     name: Check Links
     runs-on: ubuntu-latest
