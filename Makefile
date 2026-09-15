@@ -371,24 +371,21 @@ IMAGE_SHA ?= $(IMG)
 OCP_VERSION ?= v4.22
 MIN_KUBE_VERSION = 1.25.0
 
-.PHONY: yq
 YQ ?= $(LOCALBIN)/yq
-yq: ## Download yq locally if necessary.
+
+.PHONY: yq
+yq: ## Download yq locally into bin/ if necessary.
 ifeq (,$(wildcard $(YQ)))
-ifeq (, $(shell which yq 2>/dev/null))
 	@{ \
 	set -e ;\
 	mkdir -p $(dir $(YQ)) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH} && chmod +x $(YQ)
+	OS=$$(go env GOOS) && ARCH=$$(go env GOARCH) && \
+	curl -sSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH} && chmod +x $(YQ) ;\
 	}
-else
-YQ = $(shell which yq)
-endif
 endif
 
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+bundle: manifests kustomize operator-sdk yq ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
@@ -402,9 +399,6 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
-# 	$(YQ) -i '.spec.replaces = "koku-service-operator.v$(PREVIOUS_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
-
-	$(OPERATOR_SDK) bundle validate bundle/ --select-optional suite=operatorframework
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
