@@ -86,7 +86,7 @@ metadata:
           "ingress": {
             "image": {
               "repository": "quay.io/iop/ingress",
-              "tag": "sha-adf2886"
+              "tag": "sha-6dde23d"
             }
           },
           "kafka": {

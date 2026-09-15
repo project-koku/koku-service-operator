@@ -66,7 +66,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "sha-adf2886"
+      tag: "sha-6dde23d"
 
   # External S3-compatible storage (ODF, AWS S3, etc.)
   objectStorage:

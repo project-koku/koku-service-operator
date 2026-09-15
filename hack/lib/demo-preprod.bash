@@ -62,7 +62,7 @@ _overrides = [
     ("DEMO_RBAC_IMAGE",       "repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac"),
     ("DEMO_RBAC_TAG",         'tag: "34e25ed"'),
     ("DEMO_INGRESS_IMAGE",    "repository: quay.io/iop/ingress"),
-    ("DEMO_INGRESS_TAG",      'tag: "sha-adf2886"'),
+    ("DEMO_INGRESS_TAG",      'tag: "sha-6dde23d"'),
     ("DEMO_UI_IMAGE",         "repository: quay.io/insights-onprem/koku-ui-onprem"),
     ("DEMO_UI_TAG",           'tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"'),
     ("DEMO_ENVOY_IMAGE",      "repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"),

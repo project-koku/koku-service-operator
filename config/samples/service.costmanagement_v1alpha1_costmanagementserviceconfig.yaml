@@ -49,7 +49,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "sha-adf2886"
+      tag: "sha-6dde23d"
 
   # Object storage is BYOI: the operator never creates buckets. Provide your own
   # S3-compatible endpoint + credentials, or leave endpoint/secretName empty to

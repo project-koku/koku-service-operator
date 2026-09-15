@@ -38,7 +38,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "sha-adf2886"
+      tag: "sha-6dde23d"
 
   objectStorage:
     endpoint: "s3.openshift-storage.svc.cluster.local"
