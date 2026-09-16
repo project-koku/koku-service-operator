@@ -63,8 +63,8 @@ image tags on the CMSC. A new operator tag does not satisfy `E2E_KOKU_UPGRADE_TA
 | Image | Example registry path | How it is set | Go e2e specs |
 |-------|----------------------|---------------|--------------|
 | Operator | `quay.io/project-koku/koku-service-operator:<tag>` | `IMG=` at deploy | All specs after deploy (pause, drift, dependency, …) |
-| Koku app | `quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
-| RBAC app | `quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
+| Koku app | `quay.io/project-koku/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
+| RBAC app | `quay.io/project-koku/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
 
 **What you need to run migration specs**
 

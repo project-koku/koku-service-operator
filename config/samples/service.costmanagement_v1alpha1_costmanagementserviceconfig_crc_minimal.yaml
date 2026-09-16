@@ -74,8 +74,8 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      repository: quay.io/project-koku/insights-rbac
+      tag: "34e25ed"
     api:
       replicas: 1
     worker:

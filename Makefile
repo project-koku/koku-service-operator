@@ -364,12 +364,41 @@ OPERATOR_SDK = $(shell which operator-sdk)
 endif
 endif
 
+
+YQ_VERSION ?= v4.53.6
+IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
+IMAGE_SHA ?= $(IMG)
+OCP_VERSION ?= v4.22
+MIN_KUBE_VERSION = 1.25.0
+
+YQ ?= $(LOCALBIN)/yq
+
+.PHONY: yq
+yq: ## Download yq locally into bin/ if necessary.
+ifeq (,$(wildcard $(YQ)))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(YQ)) ;\
+	OS=$$(go env GOOS) && ARCH=$$(go env GOARCH) && \
+	curl -sSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH} && chmod +x $(YQ) ;\
+	}
+endif
+
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+bundle: manifests kustomize operator-sdk yq ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
 	$(OPERATOR_SDK) bundle validate ./bundle
+
+	$(YQ) -i '.annotations."com.redhat.openshift.versions" = "$(OCP_VERSION)"' bundle/metadata/annotations.yaml
+	$(YQ) -i '(.annotations."com.redhat.openshift.versions" | key) head_comment="OpenShift specific annotations."' bundle/metadata/annotations.yaml
+	$(YQ) -i '.metadata.annotations.containerImage = "$(IMAGE_SHA)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/arch.amd64"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/os.linux"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
