@@ -57,9 +57,9 @@ text = text.replace("      #   insecureSkipVerify: true   # dev only when issuer
 # config/samples/byoi/app/costmanagementserviceconfig.yaml; when the matching
 # env var is empty the line is left untouched (amd64 path renders unchanged).
 _overrides = [
-    ("DEMO_KOKU_IMAGE",       "repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku"),
+    ("DEMO_KOKU_IMAGE",       "repository: quay.io/project-koku/koku"),
     ("DEMO_KOKU_TAG",         'tag: "422f758"'),
-    ("DEMO_RBAC_IMAGE",       "repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac"),
+    ("DEMO_RBAC_IMAGE",       "repository: quay.io/project-koku/insights-rbac"),
     ("DEMO_RBAC_TAG",         'tag: "34e25ed"'),
     ("DEMO_INGRESS_IMAGE",    "repository: quay.io/iop/ingress"),
     ("DEMO_INGRESS_TAG",      'tag: "sha-6dde23d"'),
