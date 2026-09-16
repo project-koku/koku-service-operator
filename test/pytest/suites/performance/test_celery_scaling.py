@@ -27,6 +27,7 @@ from e2e_helpers import (
 )
 from utils import execute_db_query, run_oc_command
 
+from .conftest import _KOKU_API_CONTAINER
 from .data_classes import PerformanceResult
 from .helpers import (
     PerfResultCollector,
@@ -125,6 +126,7 @@ def run_ingestion_batch(
     concurrent_sources: int,
     ingress_url: str,
     ingress_pod: str,
+    koku_api_pod: str,
     koku_api_url: str,
     rh_identity_header: str,
     database_config: DatabaseConfig,
@@ -138,6 +140,9 @@ def run_ingestion_batch(
 
     Reusable building block for any test that needs a controlled ingestion
     workload without Kafka-specific monitoring.
+
+    ``koku_api_pod`` is used for source registration because the operator
+    NetworkPolicy does not allow ingress_pod to reach koku-api:8000.
     """
     result = IngestionBatchResult(
         label=label,
@@ -149,9 +154,10 @@ def run_ingestion_batch(
         cluster_id = generate_cluster_id()
         source_name = f"perf-{label}-{i:02d}-{cluster_id[-8:]}"
         source = register_source(
-            namespace, ingress_pod,
+            namespace, koku_api_pod,
             koku_api_url, rh_identity_header,
             cluster_id, "org1234567", source_name,
+            container=_KOKU_API_CONTAINER,
         )
         perf_cleanup.track(
             source_id=source.source_id,
@@ -315,6 +321,7 @@ class TestCeleryReplicaSweep:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """Scale one worker component through replica levels, measuring processing time."""
         info = WORKER_COMPONENTS[component]
@@ -344,6 +351,7 @@ class TestCeleryReplicaSweep:
                         concurrent_sources=concurrent,
                         ingress_url=ingress_url,
                         ingress_pod=ingress_pod,
+                        koku_api_pod=koku_api_pod,
                         koku_api_url=koku_api_url,
                         rh_identity_header=rh_identity_header,
                         database_config=database_config,
@@ -476,6 +484,7 @@ class TestWorkerOOMThreshold:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """Constrain OCP worker memory and run ingestion to detect OOMKill."""
         deploy_name = f"{self.helm_release}-celery-worker-ocp"
@@ -508,6 +517,7 @@ class TestWorkerOOMThreshold:
                     concurrent_sources=3,
                     ingress_url=ingress_url,
                     ingress_pod=ingress_pod,
+                    koku_api_pod=koku_api_pod,
                     koku_api_url=koku_api_url,
                     rh_identity_header=rh_identity_header,
                     database_config=database_config,
@@ -749,6 +759,7 @@ class TestColdWarmCharacterization:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """Run two sequential batches, capturing warm-state indicators around each."""
         concurrent = _CEL_CONCURRENCY.get(_ACTIVE_PROFILE, 5)
@@ -774,6 +785,7 @@ class TestColdWarmCharacterization:
                     concurrent_sources=concurrent,
                     ingress_url=ingress_url,
                     ingress_pod=ingress_pod,
+                    koku_api_pod=koku_api_pod,
                     koku_api_url=koku_api_url,
                     rh_identity_header=rh_identity_header,
                     database_config=database_config,

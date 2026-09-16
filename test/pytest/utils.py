@@ -212,8 +212,11 @@ def _is_oc_transport_failure(
     result: Optional[subprocess.CompletedProcess] = None,
     exc: Optional[BaseException] = None,
 ) -> bool:
+    # TimeoutExpired is NOT an infinitely retryable transport failure: the command ran long
+    # enough to time out, and retrying will just time out again.  Return False
+    # so the caller propagates or raises rather than looping.
     if isinstance(exc, subprocess.TimeoutExpired):
-        return True
+        return False
     if result is None:
         return False
     blob = f"{result.stderr or ''}{result.stdout or ''}"
@@ -264,8 +267,9 @@ def exec_in_pod_raw(
         try:
             result = run_oc_command(args, check=False, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            last_exc = exc
-            last_result = None
+            # Timeouts are not retryable: each retry will also time out.
+            # Surface immediately rather than burning retry budget.
+            raise
         else:
             last_result = result
             last_exc = None

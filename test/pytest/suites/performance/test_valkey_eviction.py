@@ -37,6 +37,7 @@ from .helpers import (
     generate_and_upload_data,
     save_perf_result,
 )
+from .conftest import _KOKU_API_CONTAINER
 from .queue_helpers import get_celery_queue_depths
 from .tracker import PerfCleanupTracker
 from .profiles import ACTIVE_PROFILE as _ACTIVE_PROFILE, PROFILES
@@ -477,6 +478,7 @@ class TestValkeyEvictionCorrelation:
         rh_identity_header: str,
         perf_cleanup: PerfCleanupTracker,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """PERF-VK-001: Eviction correlation under constrained Valkey memory.
 
@@ -539,9 +541,12 @@ class TestValkeyEvictionCorrelation:
             cleanup_database_records(self.namespace, db_pod, cluster_id)
 
             with perf_timer.measure("source_registration"):
+                # Use koku_api_pod: operator NetworkPolicy blocks ingress_pod
+                # from reaching koku-api:8000.
                 source = register_source(
-                    self.namespace, ingress_pod, koku_api_url,
+                    self.namespace, koku_api_pod, koku_api_url,
                     rh_identity_header, cluster_id, "org1234567", source_name,
+                    container=_KOKU_API_CONTAINER,
                 )
 
             perf_cleanup.track(
