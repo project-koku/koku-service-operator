@@ -615,13 +615,18 @@ def generate_and_upload_data(
 
 def register_tracked_source(
     namespace: str,
-    ingress_pod: str,
+    koku_api_pod: str,
     koku_api_url: str,
     rh_identity_header: str,
     perf_cleanup,
     prefix: str = "perf",
+    container: str = "koku-api",
 ):
     """Register a new source and track it for cleanup.
+
+    ``koku_api_pod`` must be a pod that can reach koku-api:8000.  The operator
+    NetworkPolicy blocks ingress pods from that endpoint, so always pass the
+    koku_api_pod fixture (or equivalent) rather than ingress_pod.
 
     Returns (source, cluster_id, source_name).
     """
@@ -631,12 +636,13 @@ def register_tracked_source(
     source_name = f"{prefix}-{cluster_id[-8:]}"
     source = register_source(
         namespace,
-        ingress_pod,
+        koku_api_pod,
         koku_api_url,
         rh_identity_header,
         cluster_id,
         "org1234567",
         source_name,
+        container=container,
     )
     perf_cleanup.track(
         source_id=source.source_id,

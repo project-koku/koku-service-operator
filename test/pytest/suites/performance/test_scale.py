@@ -33,6 +33,7 @@ from e2e_helpers import (
 )
 from utils import exec_in_pod, execute_db_query, get_pod_by_label, run_oc_command
 
+from .conftest import _KOKU_API_CONTAINER, _KOKU_API_LABEL
 from .data_classes import PerformanceResult
 from .helpers import (
     PerfResultCollector,
@@ -186,7 +187,11 @@ class TestMultiClusterScale:
         ingress_pod = get_pod_by_label(self.namespace, "app.kubernetes.io/component=ingress")
         if not ingress_pod:
             pytest.skip("Ingress pod not found")
-        
+        # Operator NP blocks ingress → koku-api; use koku-api pod for registration
+        koku_api_pod = get_pod_by_label(self.namespace, _KOKU_API_LABEL)
+        if not koku_api_pod:
+            pytest.skip("koku-api pod not found")
+
         # Register sources
         sources_created = []
         
@@ -198,12 +203,13 @@ class TestMultiClusterScale:
                 try:
                     source = register_source(
                         self.namespace,
-                        ingress_pod,
+                        koku_api_pod,
                         koku_api_url,
                         rh_identity_header,
                         cluster_id,
                         "org1234567",
                         source_name,
+                        container=_KOKU_API_CONTAINER,
                     )
                     sources_created.append(source)
                     # Track for cleanup
@@ -277,7 +283,11 @@ class TestMultiClusterScale:
         ingress_pod = get_pod_by_label(self.namespace, "app.kubernetes.io/component=ingress")
         if not ingress_pod:
             pytest.skip("Ingress pod not found")
-        
+        # Operator NP blocks ingress → koku-api; use koku-api pod for registration
+        koku_api_pod = get_pod_by_label(self.namespace, _KOKU_API_LABEL)
+        if not koku_api_pod:
+            pytest.skip("koku-api pod not found")
+
         checkpoints = []
         sources_created = 0
         breaking_point = None
@@ -293,12 +303,13 @@ class TestMultiClusterScale:
                     try:
                         source = register_source(
                             self.namespace,
-                            ingress_pod,
+                            koku_api_pod,
                             koku_api_url,
                             rh_identity_header,
                             cluster_id,
                             "org1234567",
                             source_name,
+                            container=_KOKU_API_CONTAINER,
                         )
                         batch_created += 1
                         # Track for cleanup

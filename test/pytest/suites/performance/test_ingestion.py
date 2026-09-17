@@ -53,6 +53,7 @@ from .helpers import (
     get_pod_resource_usage,
     save_perf_result,
 )
+from .conftest import _KOKU_API_CONTAINER
 from .tracker import PerfCleanupTracker
 from .profiles import ACTIVE_PROFILE as _ACTIVE_PROFILE, PROFILES, get_profile_metrics, get_profile_nise_yaml
 
@@ -202,6 +203,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """PERF-ING-001: Single source baseline - 1 source, 1 month data, default config.
         
@@ -218,16 +220,17 @@ class TestIngestionThroughput:
         db_pod = database_config.pod_name if database_config else None
         cleanup_database_records(self.namespace, db_pod, cluster_id)
 
-        # Register source
+        # Register source via koku_api_pod: operator NP blocks ingress → koku-api
         with perf_timer.measure("source_registration"):
             source = register_source(
                 self.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
         
         # Track for cleanup
@@ -294,6 +297,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
         request,
     ):
         """PERF-ING-002: Single source burst - 1 source, N days data, max listener CPU.
@@ -314,16 +318,17 @@ class TestIngestionThroughput:
         source_name = f"perf-ing-002-{data_days}d-{cluster_id[-8:]}"
         profile_name = "single_source_burst"
         
-        # Register source
+        # Register source via koku_api_pod: operator NP blocks ingress → koku-api
         with perf_timer.measure("source_registration"):
             source = register_source(
                 self.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
         
         # Track for cleanup
@@ -419,6 +424,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
         perf_config,
     ):
         """PERF-ING-003: Concurrent uploads - N sources uploading simultaneously.
@@ -449,12 +455,13 @@ class TestIngestionThroughput:
                 
                 source = register_source(
                     self.namespace,
-                    ingress_pod,
+                    koku_api_pod,
                     koku_api_url,
                     rh_identity_header,
                     cluster_id,
                     "org1234567",
                     source_name,
+                    container=_KOKU_API_CONTAINER,
                 )
                 
                 # Track each source for cleanup
@@ -569,6 +576,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """PERF-ING-004: Large file upload (50MB+).
         
@@ -592,16 +600,17 @@ class TestIngestionThroughput:
         cluster_id = generate_cluster_id()
         source_name = f"perf-ing-004-{target_size_mb}mb-{cluster_id[-8:]}"
         
-        # Register source
+        # Register source via koku_api_pod: operator NP blocks ingress → koku-api
         with perf_timer.measure("source_registration"):
             source = register_source(
                 self.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
         
         # Track for cleanup
@@ -727,6 +736,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
     ):
         """PERF-ING-005: High frequency uploads - Upload every 5 min for 1 hour.
         
@@ -743,15 +753,16 @@ class TestIngestionThroughput:
         cluster_id = generate_cluster_id()
         source_name = f"perf-ing-005-{cluster_id[-8:]}"
         
-        # Register source
+        # Register source via koku_api_pod: operator NP blocks ingress → koku-api
         source = register_source(
             self.namespace,
-            ingress_pod,
+            koku_api_pod,
             koku_api_url,
             rh_identity_header,
             cluster_id,
             "org1234567",
             source_name,
+            container=_KOKU_API_CONTAINER,
         )
         
         # Track for cleanup
@@ -830,6 +841,7 @@ class TestIngestionThroughput:
         rh_identity_header: str,
         perf_cleanup,
         ingress_pod: str,
+        koku_api_pod: str,
         profile_name: str,
     ):
         """PERF-ING-006: 6-hour processing window validation (SC-4).
@@ -867,14 +879,16 @@ class TestIngestionThroughput:
             cluster_id = generate_cluster_id()
             source_name = f"perf-ing-006-{profile_name}-c{i:02d}-{cluster_id[-6:]}"
             
+            # Register source via koku_api_pod: operator NP blocks ingress → koku-api
             source = register_source(
                 self.namespace,
-                ingress_pod,
+                koku_api_pod,
                 koku_api_url,
                 rh_identity_header,
                 cluster_id,
                 "org1234567",
                 source_name,
+                container=_KOKU_API_CONTAINER,
             )
             
             sources.append(source)
