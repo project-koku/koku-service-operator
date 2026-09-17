@@ -238,7 +238,7 @@ to expand sparse CRs into the per-component field values above. Suggested rules:
 ## Related
 
 - [sizing-guide.md](./sizing-guide.md) — validated numbers per profile
-- [FINDINGS.md](./FINDINGS.md) — performance issues and root causes
+- [CHART-FINDINGS.md](./CHART-FINDINGS.md) — performance issues and root causes
 - [TEST-MATRIX.md](./TEST-MATRIX.md) — complete test matrix
 - `scripts/lib/perf-testing.sh` — `apply_perf_profile_config()` (Phase 2 oc scale)
 - `api/v1alpha1/costmanagementserviceconfig_types.go` — authoritative CRD source

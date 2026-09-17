@@ -12,7 +12,8 @@ chart. Stress profiles (P99/Max) and soak tests pending on the operator path.
 |----------|-------------|
 | [performance-testing-plan.md](performance-testing-plan.md) | Strategy, success criteria, and progress tracking |
 | [TEST-MATRIX.md](TEST-MATRIX.md) | Complete test matrix with all permutations and parameters |
-| [FINDINGS.md](FINDINGS.md) | Product issues discovered during testing (Jira-ready summaries) |
+| [CHART-FINDINGS.md](CHART-FINDINGS.md) | Product issues discovered during chart performance testing (Jira-ready summaries) |
+| [OPERATOR-FINDINGS.md](OPERATOR-FINDINGS.md) | Operator-specific findings from operator path performance testing |
 | [sizing-guide.md](sizing-guide.md) | Resource sizing recommendations validated through testing |
 | [operator-profile-crd-mapping.md](operator-profile-crd-mapping.md) | Helm profile → `CostManagementServiceConfig` CR field mapping |
 | [OBSERVABILITY.md](OBSERVABILITY.md) | Metrics collection, S3 archival, and report generation |
@@ -46,7 +47,7 @@ SOAK_TESTS=true ./scripts/soak-loop.sh --days 7 \
 
 When you discover a performance issue:
 
-1. **Document immediately** in `FINDINGS.md` with evidence (logs, metrics),
+1. **Document immediately** in `CHART-FINDINGS.md` (chart path) or `OPERATOR-FINDINGS.md` (operator path) with evidence (logs, metrics),
    root cause analysis, and a proposed fix.
 2. **Create a Jira ticket** for actionable items.
 3. **Update status** as fixes are implemented.

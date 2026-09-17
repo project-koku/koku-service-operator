@@ -727,7 +727,7 @@ SOAK_TESTS=true SOAK_DURATION_HOURS=1 \
 |----|----------|--------|----------|
 | SC-1 | Sizing table | **Done** | [sizing-guide.md](./sizing-guide.md) — small through xlarge validated |
 | SC-2 | Cluster count limits | **Done** | XLarge (23 clusters) validated; stress ramp tested at medium (75), large (100), xlarge (100+) concurrent sources |
-| SC-3 | Bottleneck analysis | **Done** | [FINDINGS.md](./FINDINGS.md) — 14 findings documented with severity and evidence |
+| SC-3 | Bottleneck analysis | **Done** | [CHART-FINDINGS.md](./CHART-FINDINGS.md) — 14 findings documented with severity and evidence |
 | SC-4 | Processing window | **Partial** | XLarge completes in ~2h; need to validate against 6-hour SLA formally |
 | SC-5 | Soak test | **Partial** | 1-hour soak validated (4/4 passed, COST-7634). Condensed mode available for rapid iteration. 7-day run pending dedicated cluster time. |
 

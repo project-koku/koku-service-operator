@@ -1,9 +1,13 @@
-# Performance Testing Findings
+# Chart Performance Testing Findings
 
-Issues and sizing requirements discovered during performance testing
-(FLPATH-4036, COST-7567). This document is a point-in-time record of what
-was found and how it was addressed. Finding statuses are intentionally fixed
-at the time of discovery — Jira tickets track ongoing resolution.
+Issues and sizing requirements discovered during **cost-onprem Helm chart**
+performance testing (FLPATH-4036, COST-7567). All findings here were
+validated against chart deployments; operator-specific findings live in
+[OPERATOR-FINDINGS.md](./OPERATOR-FINDINGS.md).
+
+This document is a point-in-time record of what was found and how it was
+addressed. Finding statuses are intentionally fixed at the time of discovery
+— Jira tickets track ongoing resolution.
 
 ---
 

@@ -32,7 +32,7 @@ resources.
 **Key insight (FINDING-035)**: Listener CPU at the chart default 300m is
 sufficient for all workloads through medium profile. The medium-scale bottleneck
 is the downstream pipeline (worker replicas, worker CPU/memory, ingress memory,
-upload limits), not the listener. See [FINDINGS.md](./FINDINGS.md#perf-finding-035)
+upload limits), not the listener. See [CHART-FINDINGS.md](./CHART-FINDINGS.md#perf-finding-035)
 for the full VTC-001a characterization.
 
 ### COST-7618: Profile Values Overlays (2026-07-27)
@@ -473,7 +473,7 @@ Management OpenShift Operator CRD, see
 ## Related
 
 - [Performance Testing Plan](./performance-testing-plan.md) — test methodology and profiles
-- [FINDINGS.md](./FINDINGS.md) — detailed product findings and evidence
+- [CHART-FINDINGS.md](./CHART-FINDINGS.md) — detailed product findings and evidence
 - [TEST-MATRIX.md](./TEST-MATRIX.md) — test coverage matrix
 - [OBSERVABILITY.md](./OBSERVABILITY.md) — metrics collection infrastructure
 - Profile overlays — `values-{small,medium,large,xlarge}.yaml` in the chart repository
