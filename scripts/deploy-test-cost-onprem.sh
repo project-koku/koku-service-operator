@@ -256,6 +256,7 @@ log_verbose() {
 # Sourced Libraries
 ################################################################################
 
+[[ -f "${SCRIPT_DIR}/lib/perf-common.sh" ]] && source "${SCRIPT_DIR}/lib/perf-common.sh"
 [[ -f "${SCRIPT_DIR}/lib/listener-cpu.sh" ]] && source "${SCRIPT_DIR}/lib/listener-cpu.sh"
 [[ -f "${SCRIPT_DIR}/lib/perf-observability.sh" ]] && source "${SCRIPT_DIR}/lib/perf-observability.sh"
 [[ -f "${SCRIPT_DIR}/lib/perf-testing.sh" ]] && source "${SCRIPT_DIR}/lib/perf-testing.sh"

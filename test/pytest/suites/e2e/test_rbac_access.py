@@ -352,6 +352,10 @@ def rbac_cluster_data(
 
     ingress_pod = get_pod_by_label(cluster_config.namespace, "app.kubernetes.io/component=ingress")
     db_pod = get_pod_by_label(cluster_config.namespace, "app.kubernetes.io/component=database")
+    # Operator NP blocks ingress → koku-api:8000; use test_runner_pod for registration
+    # (test_runner_pod has the allow-test-runner-to-cost-api NetworkPolicy applied).
+    api_exec_pod = test_runner_pod or ingress_pod
+    api_exec_container = "runner" if test_runner_pod else "ingress"
 
     if not ingress_pod or not db_pod:
         pytest.skip("Required pods (ingress/database) not found")
@@ -365,17 +369,18 @@ def rbac_cluster_data(
     for name, cid in cluster_ids.items():
         print(f"\n  [{name}] Cluster ID: {cid}")
 
-        # Register source
+        # Register source via test_runner_pod (has NP access to koku-api:8000).
+        # ingress_pod is NOT in koku-api's NetworkPolicy allow-list.
         print(f"    Registering source...")
         reg = register_source(
             namespace=cluster_config.namespace,
-            pod=ingress_pod,
+            pod=api_exec_pod,
             api_url=koku_url,
             rh_identity_header=admin_identity,
             cluster_id=cid,
             org_id=org_id,
             source_name=f"e2e-rbac-{name}-{cid[-8:]}",
-            container="ingress",
+            container=api_exec_container,
         )
         source_ids[name] = reg.source_id
         print(f"    Source ID: {reg.source_id}")
