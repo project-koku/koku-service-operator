@@ -54,6 +54,7 @@ spec:
       replicas: 1
       # Live exchange rates for IQE smoke (applied to all koku containers).
       # Leave unset for airgapped on-prem.
+      # totally fake change
       env:
         CURRENCY_URL: "https://open.er-api.com/v6/latest/USD"
     masu:
