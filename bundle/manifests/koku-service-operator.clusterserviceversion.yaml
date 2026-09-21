@@ -301,7 +301,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-15T19:25:05Z"
+    createdAt: "2026-09-21T15:57:09Z"
     description: |
       Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift
       that deploys and manages the Cost Management stack against external infrastructure
@@ -511,199 +511,199 @@ spec:
   install:
     spec:
       clusterPermissions:
-      - rules:
-        - apiGroups:
-          - config.openshift.io
-          resources:
-          - ingresses
-          verbs:
-          - get
-        - apiGroups:
-          - storage.k8s.io
-          resources:
-          - storageclasses
-          verbs:
-          - get
-          - list
-          - watch
-        - apiGroups:
-          - console.openshift.io
-          resources:
-          - consolelinks
-          verbs:
-          - create
-          - delete
-          - get
-          - patch
-          - update
-        - apiGroups:
-          - rbac.authorization.k8s.io
-          resources:
-          - clusterroles
-          - clusterrolebindings
-          verbs:
-          - create
-          - delete
-          - get
-          - patch
-          - update
-        - apiGroups:
-          - ""
-          resourceNames:
-          - noobaa-admin
-          resources:
-          - secrets
-          verbs:
-          - get
-        - apiGroups:
-          - ""
-          resources:
-          - configmaps
-          - persistentvolumeclaims
-          - serviceaccounts
-          - services
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - ""
-          resources:
-          - events
-          verbs:
-          - create
-          - patch
-        - apiGroups:
-          - ""
-          resources:
-          - pods
-          verbs:
-          - get
-          - list
-          - watch
-        - apiGroups:
-          - ""
-          resources:
-          - secrets
-          verbs:
-          - create
-          - delete
-          - get
-          - patch
-          - update
-        - apiGroups:
-          - apps
-          resources:
-          - deployments
-          - statefulsets
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - batch
-          resources:
-          - cronjobs
-          - jobs
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - monitoring.coreos.com
-          resources:
-          - prometheusrules
-          - servicemonitors
-          verbs:
-          - create
-          - delete
-          - get
-          - patch
-        - apiGroups:
-          - networking.k8s.io
-          resources:
-          - networkpolicies
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - objectbucket.io
-          resources:
-          - objectbucketclaims
-          verbs:
-          - get
-          - list
-        - apiGroups:
-          - route.openshift.io
-          resources:
-          - routes
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - route.openshift.io
-          resources:
-          - routes/custom-host
-          verbs:
-          - create
-        - apiGroups:
-          - service.costmanagement.openshift.io
-          resources:
-          - costmanagementserviceconfigs
-          verbs:
-          - get
-          - list
-          - update
-          - watch
-        - apiGroups:
-          - service.costmanagement.openshift.io
-          resources:
-          - costmanagementserviceconfigs/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - service.costmanagement.openshift.io
-          resources:
-          - costmanagementserviceconfigs/status
-          verbs:
-          - get
-          - patch
-          - update
-        - apiGroups:
-          - authentication.k8s.io
-          resources:
-          - tokenreviews
-          verbs:
-          - create
-        - apiGroups:
-          - authorization.k8s.io
-          resources:
-          - subjectaccessreviews
-          verbs:
-          - create
-        serviceAccountName: koku-service-operator-controller-manager
+        - rules:
+            - apiGroups:
+                - config.openshift.io
+              resources:
+                - ingresses
+              verbs:
+                - get
+            - apiGroups:
+                - storage.k8s.io
+              resources:
+                - storageclasses
+              verbs:
+                - get
+                - list
+                - watch
+            - apiGroups:
+                - console.openshift.io
+              resources:
+                - consolelinks
+              verbs:
+                - create
+                - delete
+                - get
+                - patch
+                - update
+            - apiGroups:
+                - rbac.authorization.k8s.io
+              resources:
+                - clusterroles
+                - clusterrolebindings
+              verbs:
+                - create
+                - delete
+                - get
+                - patch
+                - update
+            - apiGroups:
+                - ""
+              resourceNames:
+                - noobaa-admin
+              resources:
+                - secrets
+              verbs:
+                - get
+            - apiGroups:
+                - ""
+              resources:
+                - configmaps
+                - persistentvolumeclaims
+                - serviceaccounts
+                - services
+              verbs:
+                - create
+                - delete
+                - get
+                - list
+                - patch
+                - update
+                - watch
+            - apiGroups:
+                - ""
+              resources:
+                - events
+              verbs:
+                - create
+                - patch
+            - apiGroups:
+                - ""
+              resources:
+                - pods
+              verbs:
+                - get
+                - list
+                - watch
+            - apiGroups:
+                - ""
+              resources:
+                - secrets
+              verbs:
+                - create
+                - delete
+                - get
+                - patch
+                - update
+            - apiGroups:
+                - apps
+              resources:
+                - deployments
+                - statefulsets
+              verbs:
+                - create
+                - delete
+                - get
+                - list
+                - patch
+                - update
+                - watch
+            - apiGroups:
+                - batch
+              resources:
+                - cronjobs
+                - jobs
+              verbs:
+                - create
+                - delete
+                - get
+                - list
+                - patch
+                - update
+                - watch
+            - apiGroups:
+                - monitoring.coreos.com
+              resources:
+                - prometheusrules
+                - servicemonitors
+              verbs:
+                - create
+                - delete
+                - get
+                - patch
+            - apiGroups:
+                - networking.k8s.io
+              resources:
+                - networkpolicies
+              verbs:
+                - create
+                - delete
+                - get
+                - list
+                - patch
+                - update
+                - watch
+            - apiGroups:
+                - objectbucket.io
+              resources:
+                - objectbucketclaims
+              verbs:
+                - get
+                - list
+            - apiGroups:
+                - route.openshift.io
+              resources:
+                - routes
+              verbs:
+                - create
+                - delete
+                - get
+                - list
+                - patch
+                - update
+                - watch
+            - apiGroups:
+                - route.openshift.io
+              resources:
+                - routes/custom-host
+              verbs:
+                - create
+            - apiGroups:
+                - service.costmanagement.openshift.io
+              resources:
+                - costmanagementserviceconfigs
+              verbs:
+                - get
+                - list
+                - update
+                - watch
+            - apiGroups:
+                - service.costmanagement.openshift.io
+              resources:
+                - costmanagementserviceconfigs/finalizers
+              verbs:
+                - update
+            - apiGroups:
+                - service.costmanagement.openshift.io
+              resources:
+                - costmanagementserviceconfigs/status
+              verbs:
+                - get
+                - patch
+                - update
+            - apiGroups:
+                - authentication.k8s.io
+              resources:
+                - tokenreviews
+              verbs:
+                - create
+            - apiGroups:
+                - authorization.k8s.io
+              resources:
+                - subjectaccessreviews
+              verbs:
+                - create
+          serviceAccountName: koku-service-operator-controller-manager
       deployments:
         - label:
             app.kubernetes.io/managed-by: kustomize
@@ -779,39 +779,39 @@ spec:
                       defaultMode: 420
                       secretName: webhook-server-cert
       permissions:
-      - rules:
-        - apiGroups:
-          - ""
-          resources:
-          - configmaps
-          verbs:
-          - get
-          - list
-          - watch
-          - create
-          - update
-          - patch
-          - delete
-        - apiGroups:
-          - coordination.k8s.io
-          resources:
-          - leases
-          verbs:
-          - get
-          - list
-          - watch
-          - create
-          - update
-          - patch
-          - delete
-        - apiGroups:
-          - ""
-          resources:
-          - events
-          verbs:
-          - create
-          - patch
-        serviceAccountName: koku-service-operator-controller-manager
+        - rules:
+            - apiGroups:
+                - ""
+              resources:
+                - configmaps
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+                - delete
+            - apiGroups:
+                - coordination.k8s.io
+              resources:
+                - leases
+              verbs:
+                - get
+                - list
+                - watch
+                - create
+                - update
+                - patch
+                - delete
+            - apiGroups:
+                - ""
+              resources:
+                - events
+              verbs:
+                - create
+                - patch
+          serviceAccountName: koku-service-operator-controller-manager
     strategy: deployment
   installModes:
     - supported: false
