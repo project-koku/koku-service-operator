@@ -11,6 +11,7 @@ import (
 
 const (
 	sampleDefault    = "service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml"
+	sampleMinimal    = "service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml"
 	sampleProduction = "service.costmanagement_v1alpha1_costmanagementserviceconfig_production.yaml"
 	sampleCommunity  = "service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml"
 
@@ -66,6 +67,161 @@ func TestSampleCRs_ProductionDoesNotBundleDBCache(t *testing.T) {
 	}
 	if BoolVal(cfg.Spec.Cache.Deploy, true) {
 		t.Error("production cache.deploy: want false (BYOI)")
+	}
+}
+
+func TestSampleCRs_DefaultDoesNotBundleDBCache(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if BoolVal(cfg.Spec.Database.Deploy, true) {
+		t.Error("default sample database.deploy: want false (BYOI)")
+	}
+	if BoolVal(cfg.Spec.Cache.Deploy, true) {
+		t.Error("default sample cache.deploy: want false (BYOI)")
+	}
+}
+
+func TestSampleCRs_DefaultLeavesExternalDBCacheValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Database.Host != "" {
+		t.Errorf("default sample database.host = %q, want empty string", cfg.Spec.Database.Host)
+	}
+	if cfg.Spec.Database.SecretName != "" {
+		t.Errorf("default sample database.secretName = %q, want empty string", cfg.Spec.Database.SecretName)
+	}
+	if cfg.Spec.Cache.Host != "" {
+		t.Errorf("default sample cache.host = %q, want empty string", cfg.Spec.Cache.Host)
+	}
+	if cfg.Spec.Cache.Auth.SecretName != "" {
+		t.Errorf("default sample cache.auth.secretName = %q, want empty string", cfg.Spec.Cache.Auth.SecretName)
+	}
+}
+
+func TestSampleCRs_DefaultLeavesAuthKeycloakURLBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Auth.Keycloak.URL != "" {
+		t.Fatalf("default sample auth.keycloak.url = %q, want empty string", cfg.Spec.Auth.Keycloak.URL)
+	}
+}
+
+func TestSampleCRs_DefaultLeavesObjectStorageValuesBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.ObjectStorage.Endpoint != "" {
+		t.Fatalf("default sample objectStorage.endpoint = %q, want empty string", cfg.Spec.ObjectStorage.Endpoint)
+	}
+	if cfg.Spec.ObjectStorage.SecretName != "" {
+		t.Fatalf("default sample objectStorage.secretName = %q, want empty string", cfg.Spec.ObjectStorage.SecretName)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Koku != "" {
+		t.Fatalf("default sample objectStorage.buckets.koku = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Koku)
+	}
+	if cfg.Spec.ObjectStorage.Buckets.Ingress != "" {
+		t.Fatalf("default sample objectStorage.buckets.ingress = %q, want empty string", cfg.Spec.ObjectStorage.Buckets.Ingress)
+	}
+}
+
+func TestSampleCRs_DefaultShowsObjectStorageBucketsShape(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(samplePath(sampleDefault))
+	if err != nil {
+		t.Fatalf("read %s: %v", sampleDefault, err)
+	}
+	// Decode into a generic mapping so key *presence* is distinguishable from an
+	// empty value: the default template must show koku as an explicit blank
+	// field while omitting the optional ingress/ros buckets. A typed decode
+	// collapses "" and omitted into the same zero value, so this inspects the
+	// parsed mapping keys rather than the raw text.
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal %s: %v", sampleDefault, err)
+	}
+
+	buckets := nestedMap(t, doc, "spec", "objectStorage", "buckets")
+	koku, ok := buckets["koku"]
+	if !ok {
+		t.Fatalf("%s must show objectStorage.buckets.koku as an explicit field", sampleDefault)
+	}
+	if koku != "" {
+		t.Fatalf("%s objectStorage.buckets.koku = %v, want an explicit blank field", sampleDefault, koku)
+	}
+	// ingress and ros buckets are optional (ingress inherits koku; ros only when
+	// ros.enabled). The default template omits them to avoid suggesting fields
+	// users would blindly fill in.
+	if _, ok := buckets["ingress"]; ok {
+		t.Fatalf("%s must omit objectStorage.buckets.ingress (optional, inherits koku)", sampleDefault)
+	}
+	if _, ok := buckets["ros"]; ok {
+		t.Fatalf("%s must omit objectStorage.buckets.ros (optional, only when ros.enabled)", sampleDefault)
+	}
+
+	// Legacy bucket fields are removed in favor of objectStorage.buckets.
+	if ingress := optionalMap(doc, "spec", "ingress"); ingress != nil {
+		if _, ok := ingress["stagingBucket"]; ok {
+			t.Fatalf("%s must not use legacy ingress.stagingBucket", sampleDefault)
+		}
+	}
+	if storage := optionalMap(doc, "spec", "costManagement", "storage"); storage != nil {
+		if _, ok := storage["bucketName"]; ok {
+			t.Fatalf("%s must not use legacy costManagement.storage.bucketName", sampleDefault)
+		}
+	}
+}
+
+// optionalMap walks a decoded YAML document to the mapping at the given key
+// path, returning nil if any segment is absent or not a mapping (so callers can
+// assert that a subtree is omitted).
+func optionalMap(doc map[string]any, path ...string) map[string]any {
+	cur := doc
+	for _, key := range path {
+		next, ok := cur[key].(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = next
+	}
+	return cur
+}
+
+// nestedMap is optionalMap with a fatal assertion that the mapping exists.
+func nestedMap(t *testing.T, doc map[string]any, path ...string) map[string]any {
+	t.Helper()
+	m := optionalMap(doc, path...)
+	if m == nil {
+		t.Fatalf("path %q is missing or not a mapping", strings.Join(path, "."))
+	}
+	return m
+}
+
+func TestSampleCRs_MinimalAndProductionOmitDistinctIngressBucket(t *testing.T) {
+	t.Parallel()
+	// buckets.ingress inherits buckets.koku; the minimal and production samples
+	// must not reintroduce a distinct upload bucket (only the _byoi sample
+	// documents that override). They must still set buckets.koku so uploads and
+	// reads resolve to a real bucket.
+	for _, name := range []string{sampleMinimal, sampleProduction} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg := loadSampleCR(t, name)
+			if cfg.Spec.ObjectStorage.Buckets.Koku == "" {
+				t.Errorf("%s objectStorage.buckets.koku is empty, want a koku bucket", name)
+			}
+			if cfg.Spec.ObjectStorage.Buckets.Ingress != "" {
+				t.Errorf("%s objectStorage.buckets.ingress = %q, want empty (inherits koku)",
+					name, cfg.Spec.ObjectStorage.Buckets.Ingress)
+			}
+		})
+	}
+}
+
+func TestSampleCRs_DefaultLeavesKafkaBootstrapBlank(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleDefault)
+	if cfg.Spec.Kafka.BootstrapServers != "" {
+		t.Fatalf("default sample kafka.bootstrapServers = %q, want empty string", cfg.Spec.Kafka.BootstrapServers)
 	}
 }
 

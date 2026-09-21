@@ -74,14 +74,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	if validTypes == "" {
 		validTypes = "hccm"
 	}
-	stagingBucket := spec.StagingBucket
-	if stagingBucket == "" {
-		// Same resolution as Koku REQUESTED_BUCKET: discovered S3 bucket, then spec.
-		stagingBucket = S3Bucket(cfg)
-	}
-	if stagingBucket == "" {
-		stagingBucket = "koku-bucket"
-	}
+	ingressBucket := S3IngressBucket(cfg)
 
 	env := []corev1.EnvVar{
 		EnvVal("INGRESS_WEBPORT", int32String(ingressHTTPPort)),
@@ -92,7 +85,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		EnvVal("INGRESS_VALID_UPLOAD_TYPES", validTypes),
 		// S3-compatible storage (insights-ingress-go uses MINIO env names)
 		EnvVal("INGRESS_MINIOENDPOINT", ingressS3Endpoint(cfg)),
-		EnvVal("INGRESS_STAGEBUCKET", stagingBucket),
+		EnvVal("INGRESS_STAGEBUCKET", ingressBucket),
 		EnvVal("INGRESS_USESSL", ingressS3UseSSL(cfg)),
 		EnvVal("INGRESS_STAGERIMPLEMENTATION", "s3"),
 		EnvFromSecretOptional("INGRESS_MINIOACCESSKEY", storageSecret, "access-key"),
@@ -124,15 +117,8 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 
 	vols, mounts := ingressVolumes(cfg)
 
-	probe := &corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/",
-				Port: intstr.FromInt32(ingressHTTPPort),
-			},
-		},
-		InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
-	}
+	livenessProbe := ingressProbe("/healthz")
+	readinessProbe := ingressProbe("/status/")
 
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -157,8 +143,8 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 							{Name: "metrics", ContainerPort: ingressMetricsPort, Protocol: corev1.ProtocolTCP},
 						},
 						Env:             env,
-						LivenessProbe:   probe,
-						ReadinessProbe:  probe,
+						LivenessProbe:   livenessProbe,
+						ReadinessProbe:  readinessProbe,
 						Resources:       spec.Resources,
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
@@ -167,6 +153,26 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 				},
 			},
 		},
+	}
+}
+
+// ingressProbe configures the timings used by the upstream ingress deployment.
+// Readiness has its own bounded dependency checks, while liveness only verifies
+// that the HTTP process is serving requests.
+func ingressProbe(path string) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path:   path,
+				Port:   intstr.FromInt32(ingressHTTPPort),
+				Scheme: corev1.URISchemeHTTP,
+			},
+		},
+		InitialDelaySeconds: 35,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      120,
+		FailureThreshold:    3,
+		SuccessThreshold:    1,
 	}
 }
 

@@ -64,15 +64,23 @@ func objectStorageForServer(t *testing.T, srv *httptest.Server, secretName strin
 	}
 }
 
-func fakeS3ListBuckets(status int, body string) http.HandlerFunc {
+func fakeS3Buckets(listStatus int, bucketStatuses map[string]int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/" {
-			http.Error(w, "not ListBuckets", http.StatusNotFound)
-			return
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/":
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(listStatus)
+			_, _ = io.WriteString(w, listBucketsXML)
+		case r.Method == http.MethodHead:
+			status, ok := bucketStatuses[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(status)
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
-		w.Header().Set("Content-Type", "application/xml")
-		w.WriteHeader(status)
-		_, _ = io.WriteString(w, body)
 	}
 }
 
@@ -83,66 +91,12 @@ func bundledNoKafkaSpec() costv1alpha1.CostManagementServiceConfigSpec {
 	}
 }
 
-func TestS3ListBucketsProbe(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("reachable", func(t *testing.T) {
-		srv := httptest.NewServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
-		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err != nil {
-			t.Fatalf("expected success, got %v", err)
-		}
-	})
-
-	t.Run("403 AccessDenied", func(t *testing.T) {
-		srv := httptest.NewServer(fakeS3ListBuckets(http.StatusForbidden, `<Error><Code>AccessDenied</Code><Message>denied</Message></Error>`))
-		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
-			t.Fatal("expected error for HTTP 403")
-		}
-	})
-
-	t.Run("unreachable", func(t *testing.T) {
-		if err := s3ListBucketsProbe(ctx, "http://"+localHost+":1", "us-east-1", s3TestAccessKey, s3TestSecretKey, 200*time.Millisecond, false, nil); err == nil {
-			t.Fatal("expected error for unreachable endpoint")
-		}
-	})
-
-	t.Run("tls verify failure", func(t *testing.T) {
-		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
-		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
-			t.Fatal("expected TLS error")
-		}
-	})
-
-	t.Run("tls insecure skip verify", func(t *testing.T) {
-		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
-		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, true, nil); err != nil {
-			t.Fatalf("expected success with insecureSkipVerify, got %v", err)
-		}
-	})
-
-	t.Run("tls custom CA cert", func(t *testing.T) {
-		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
-		t.Cleanup(srv.Close)
-		pool := x509.NewCertPool()
-		pool.AddCert(srv.Certificate())
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, pool); err != nil {
-			t.Fatalf("expected success with custom CA, got %v", err)
-		}
-	})
-
-	t.Run("endpoint missing scheme", func(t *testing.T) {
-		if err := s3ListBucketsProbe(ctx, "s3.example.svc:443", "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
-			t.Fatal("expected error for endpoint without scheme")
-		}
-	})
-}
-
-func TestReconcileValidation_S3ListBucketsReachable(t *testing.T) {
-	srv := httptest.NewServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+// reconcileStorageForBuckets runs S3 validation against a fake S3 server with the
+// given ListBuckets status and per-bucket HEAD statuses, using koku-bucket for
+// both koku and ingress, and returns the resulting StorageReady condition.
+func reconcileStorageForBuckets(t *testing.T, listStatus int, bucketStatuses map[string]int) *metav1.Condition {
+	t.Helper()
+	srv := httptest.NewServer(fakeS3Buckets(listStatus, bucketStatuses))
 	t.Cleanup(srv.Close)
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
@@ -150,6 +104,87 @@ func TestReconcileValidation_S3ListBucketsReachable(t *testing.T) {
 		Spec:       bundledNoKafkaSpec(),
 	}
 	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+	return findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+}
+
+func TestS3BucketContractProbe(t *testing.T) {
+	ctx := context.Background()
+	probeBuckets := []string{"probe-bucket"}
+	okStatuses := map[string]int{"/probe-bucket": http.StatusOK}
+
+	t.Run("reachable", func(t *testing.T) {
+		srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, okStatuses))
+		t.Cleanup(srv.Close)
+		if err := s3BucketContractProbe(ctx, srv.URL, defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, false, nil, probeBuckets); err != nil {
+			t.Fatalf("expected success, got %v", err)
+		}
+	})
+
+	t.Run("bucket 403 AccessDenied", func(t *testing.T) {
+		srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, map[string]int{"/probe-bucket": http.StatusForbidden}))
+		t.Cleanup(srv.Close)
+		if err := s3BucketContractProbe(ctx, srv.URL, defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, false, nil, probeBuckets); err == nil {
+			t.Fatal("expected error for HTTP 403 on bucket")
+		}
+	})
+
+	t.Run("unreachable", func(t *testing.T) {
+		if err := s3BucketContractProbe(ctx, "http://"+localHost+":1", defaultS3Region, s3TestAccessKey, s3TestSecretKey, 200*time.Millisecond, false, nil, probeBuckets); err == nil {
+			t.Fatal("expected error for unreachable endpoint")
+		}
+	})
+
+	t.Run("tls verify failure", func(t *testing.T) {
+		srv := httptest.NewTLSServer(fakeS3Buckets(http.StatusOK, okStatuses))
+		t.Cleanup(srv.Close)
+		if err := s3BucketContractProbe(ctx, srv.URL, defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, false, nil, probeBuckets); err == nil {
+			t.Fatal("expected TLS error")
+		}
+	})
+
+	t.Run("tls insecure skip verify", func(t *testing.T) {
+		srv := httptest.NewTLSServer(fakeS3Buckets(http.StatusOK, okStatuses))
+		t.Cleanup(srv.Close)
+		if err := s3BucketContractProbe(ctx, srv.URL, defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, true, nil, probeBuckets); err != nil {
+			t.Fatalf("expected success with insecureSkipVerify, got %v", err)
+		}
+	})
+
+	t.Run("tls custom CA cert", func(t *testing.T) {
+		srv := httptest.NewTLSServer(fakeS3Buckets(http.StatusOK, okStatuses))
+		t.Cleanup(srv.Close)
+		pool := x509.NewCertPool()
+		pool.AddCert(srv.Certificate())
+		if err := s3BucketContractProbe(ctx, srv.URL, defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, false, pool, probeBuckets); err != nil {
+			t.Fatalf("expected success with custom CA, got %v", err)
+		}
+	})
+
+	t.Run("endpoint missing scheme", func(t *testing.T) {
+		if err := s3BucketContractProbe(ctx, "s3.example.svc:443", defaultS3Region, s3TestAccessKey, s3TestSecretKey, time.Second, false, nil, probeBuckets); err == nil {
+			t.Fatal("expected error for endpoint without scheme")
+		}
+	})
+}
+
+func TestReconcileValidation_S3ListBucketsReachable(t *testing.T) {
+	srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/koku-bucket": http.StatusOK,
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
 
 	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
 	result, err := r.reconcileValidation(context.Background(), cfg)
@@ -163,8 +198,88 @@ func TestReconcileValidation_S3ListBucketsReachable(t *testing.T) {
 	if found == nil || found.Status != metav1.ConditionTrue {
 		t.Fatalf("expected StorageReady=True, got %+v", found)
 	}
-	if found.Reason != "StorageReachable" {
-		t.Errorf("reason = %q, want StorageReachable", found.Reason)
+	if found.Reason != "StorageBucketsAccessible" {
+		t.Errorf("reason = %q, want StorageBucketsAccessible", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3DeclaredBucketInaccessible(t *testing.T) {
+	found := reconcileStorageForBuckets(t, http.StatusOK, map[string]int{
+		"/koku-bucket": http.StatusNotFound,
+	})
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("expected StorageReady=False, got %+v", found)
+	}
+	if found.Reason != "StorageBucketInaccessible" {
+		t.Errorf("reason = %q, want StorageBucketInaccessible", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3IngressBucketOnlyDoesNotPass(t *testing.T) {
+	srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/uploads-only": http.StatusOK,
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+		Status: costv1alpha1.CostManagementServiceConfigStatus{
+			DiscoveredConfig: &costv1alpha1.DiscoveredConfig{
+				S3: &costv1alpha1.DiscoveredS3{
+					Endpoint:   srv.URL,
+					SecretName: s3TestSecret,
+					Region:     "us-east-1",
+				},
+			},
+		},
+	}
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "uploads-only"
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("expected StorageReady=False, got %+v", found)
+	}
+	if found.Reason != "StorageBucketConfigInvalid" {
+		t.Errorf("reason = %q, want StorageBucketConfigInvalid", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3ROSBucketOnlyDoesNotPass(t *testing.T) {
+	srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/ros-only": http.StatusOK,
+	}))
+	t.Cleanup(srv.Close)
+
+	enabled := true
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+		Status: costv1alpha1.CostManagementServiceConfigStatus{
+			DiscoveredConfig: &costv1alpha1.DiscoveredConfig{
+				S3: &costv1alpha1.DiscoveredS3{
+					Endpoint:   srv.URL,
+					SecretName: s3TestSecret,
+					Region:     "us-east-1",
+				},
+			},
+		},
+	}
+	cfg.Spec.ROS.Enabled = &enabled
+	cfg.Spec.ObjectStorage.Buckets.ROS = "ros-only"
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("expected StorageReady=False, got %+v", found)
+	}
+	if found.Reason != "StorageBucketConfigInvalid" {
+		t.Errorf("reason = %q, want StorageBucketConfigInvalid", found.Reason)
 	}
 }
 
@@ -181,6 +296,8 @@ func TestReconcileValidation_S3ListBucketsUnreachableNonBlocking(t *testing.T) {
 		SecretName: s3TestSecret,
 		S3:         costv1alpha1.S3Options{Region: "us-east-1"},
 	}
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
 
 	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
 	result, err := r.reconcileValidation(context.Background(), cfg)
@@ -199,30 +316,25 @@ func TestReconcileValidation_S3ListBucketsUnreachableNonBlocking(t *testing.T) {
 	}
 }
 
-func TestReconcileValidation_S3ListBucketsForbidden(t *testing.T) {
-	srv := httptest.NewServer(fakeS3ListBuckets(http.StatusForbidden, `<Error><Code>AccessDenied</Code><Message>denied</Message></Error>`))
-	t.Cleanup(srv.Close)
-
-	cfg := &costv1alpha1.CostManagementServiceConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
-		Spec:       bundledNoKafkaSpec(),
+// BYOI least-privilege credentials often cannot ListAllMyBuckets but can access
+// their named buckets. The probe must not call ListBuckets: a forbidden bucket
+// listing combined with an accessible bucket must still yield StorageReady=True.
+func TestReconcileValidation_S3ListForbiddenButBucketAccessible(t *testing.T) {
+	found := reconcileStorageForBuckets(t, http.StatusForbidden, map[string]int{
+		"/koku-bucket": http.StatusOK,
+	})
+	if found == nil || found.Status != metav1.ConditionTrue {
+		t.Fatalf("expected StorageReady=True (ListBuckets not required), got %+v", found)
 	}
-	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
-
-	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
-	_, _ = r.reconcileValidation(context.Background(), cfg)
-
-	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
-	if found == nil || found.Status != metav1.ConditionFalse {
-		t.Fatalf("expected StorageReady=False, got %+v", found)
-	}
-	if found.Reason != "StorageUnreachable" {
-		t.Errorf("reason = %q, want StorageUnreachable", found.Reason)
+	if found.Reason != "StorageBucketsAccessible" {
+		t.Errorf("reason = %q, want StorageBucketsAccessible", found.Reason)
 	}
 }
 
 func TestReconcileValidation_S3ListBucketsDiscovered(t *testing.T) {
-	srv := httptest.NewServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+	srv := httptest.NewServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/koku-bucket": http.StatusOK,
+	}))
 	t.Cleanup(srv.Close)
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
@@ -234,17 +346,19 @@ func TestReconcileValidation_S3ListBucketsDiscovered(t *testing.T) {
 					Endpoint:   srv.URL,
 					SecretName: s3TestSecret,
 					Region:     "us-east-1",
+					Bucket:     "koku-bucket",
 				},
 			},
 		},
 	}
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
 
 	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
 	_, _ = r.reconcileValidation(context.Background(), cfg)
 
 	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
-	if found == nil || found.Status != metav1.ConditionTrue || found.Reason != "StorageReachable" {
-		t.Fatalf("expected StorageReady=True StorageReachable for discovered S3, got %+v", found)
+	if found == nil || found.Status != metav1.ConditionTrue || found.Reason != "StorageBucketsAccessible" {
+		t.Fatalf("expected StorageReady=True StorageBucketsAccessible for discovered S3, got %+v", found)
 	}
 }
 
@@ -308,7 +422,9 @@ func TestReconcileValidation_S3CACertInvalidPEM(t *testing.T) {
 }
 
 func TestReconcileValidation_S3InsecureSkipVerifyBypassesCACert(t *testing.T) {
-	srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+	srv := httptest.NewTLSServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/koku-bucket": http.StatusOK,
+	}))
 	t.Cleanup(srv.Close)
 
 	cfg := &costv1alpha1.CostManagementServiceConfig{
@@ -316,6 +432,8 @@ func TestReconcileValidation_S3InsecureSkipVerifyBypassesCACert(t *testing.T) {
 		Spec:       bundledNoKafkaSpec(),
 	}
 	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
 	cfg.Spec.ObjectStorage.InsecureSkipVerify = true
 	cfg.Spec.ObjectStorage.CACertSecretName = "stale-ca-that-does-not-exist"
 
@@ -326,13 +444,15 @@ func TestReconcileValidation_S3InsecureSkipVerifyBypassesCACert(t *testing.T) {
 	if found == nil || found.Status != metav1.ConditionTrue {
 		t.Fatalf("expected StorageReady=True (insecureSkipVerify bypasses CA), got %+v", found)
 	}
-	if found.Reason != "StorageReachable" {
-		t.Errorf("reason = %q, want StorageReachable", found.Reason)
+	if found.Reason != "StorageBucketsAccessible" {
+		t.Errorf("reason = %q, want StorageBucketsAccessible", found.Reason)
 	}
 }
 
 func TestReconcileValidation_S3CACertValid(t *testing.T) {
-	srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+	srv := httptest.NewTLSServer(fakeS3Buckets(http.StatusOK, map[string]int{
+		"/koku-bucket": http.StatusOK,
+	}))
 	t.Cleanup(srv.Close)
 
 	caPEM := pem.EncodeToMemory(&pem.Block{
@@ -345,6 +465,8 @@ func TestReconcileValidation_S3CACertValid(t *testing.T) {
 		Spec:       bundledNoKafkaSpec(),
 	}
 	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.Buckets.Koku = "koku-bucket"
+	cfg.Spec.ObjectStorage.Buckets.Ingress = "koku-bucket"
 	cfg.Spec.ObjectStorage.CACertSecretName = "s3-ca"
 
 	caSecret := &corev1.Secret{
@@ -359,7 +481,7 @@ func TestReconcileValidation_S3CACertValid(t *testing.T) {
 	if found == nil || found.Status != metav1.ConditionTrue {
 		t.Fatalf("expected StorageReady=True with valid CA cert, got %+v", found)
 	}
-	if found.Reason != "StorageReachable" {
-		t.Errorf("reason = %q, want StorageReachable", found.Reason)
+	if found.Reason != "StorageBucketsAccessible" {
+		t.Errorf("reason = %q, want StorageBucketsAccessible", found.Reason)
 	}
 }

@@ -5,8 +5,10 @@ operator does not provision production PostgreSQL, Kafka, object storage, or
 OIDC. It connects to services you already run.
 
 **Beta.** Leave `spec.ros.enabled: false`. ROS and Kruize workloads are not
-supported. You must still provision the ROS/Kruize database users listed below:
-the operator validates those Secret keys even when ROS is off.
+supported. Cost-only application databases are `costonprem_koku` and
+`costonprem_rbac`. Do not create a database named `postgres` for Cost
+Management. External DB Secrets need `koku-*` and `rbac-*` keys; `ros-*` and
+`kruize-*` are required only when `ros.enabled` is true.
 
 Companion guides: [quickstart](quickstart.md), [production](production.md),
 [Keycloak](keycloak.md), [CMMO](cmmo.md).
@@ -43,56 +45,57 @@ is not available yet. See [quickstart.md](quickstart.md#install-the-operator).
 ## PostgreSQL
 
 The operator connects to a single host (`spec.database.host`, default port
-`5432`) and uses **four databases** with **separate application users**.
+`5432`). `spec.database.deploy` defaults to `false`. Application workloads use
+**named databases** with **separate application users**. They do **not** use
+PostgreSQL's maintenance database `postgres`.
 
-| Database | User Secret keys | Used in beta |
-|----------|------------------|--------------|
-| `costonprem_koku` | `koku-user`, `koku-password` | Yes |
-| `costonprem_rbac` | `rbac-user`, `rbac-password` | Yes |
-| `costonprem_ros` | `ros-user`, `ros-password` | Keys required; database unused while ROS is off |
-| `costonprem_kruize` | `kruize-user`, `kruize-password` | Keys required; database unused while ROS is off |
+| Database | User Secret keys | Used when |
+|----------|------------------|-----------|
+| `costonprem_koku` | `koku-user`, `koku-password` | Always (API, Masu, Listener, Celery, koku migrate) |
+| `costonprem_rbac` | `rbac-user`, `rbac-password` | Always (RBAC API, worker, rbac migrate) |
+| `costonprem_ros` | `ros-user`, `ros-password` | Only if `ros.enabled: true` |
+| `costonprem_kruize` | `kruize-user`, `kruize-password` | Only if `ros.enabled: true` |
 
-Also provide a superuser (or equivalent) pair `postgres-user` /
-`postgres-password` in the same Secret. Schema migration Jobs use the
-application users.
+Beta (`ros.enabled: false`) needs only the koku and rbac databases. Do not
+create `postgres`, `costonprem_ros`, or `costonprem_kruize` as Cost Management
+application databases.
+
+`postgres-user` / `postgres-password` are an admin/bootstrap pair for bundled
+DB init and Kruize partition init — not a fifth database. They are not
+required on an external `spec.database.secretName` Secret. Schema migration
+Jobs use the application users (`koku-user`, `rbac-user`).
 
 `spec.database.sslMode` is one of `disable`, `require`, `verify-ca`,
-`verify-full` (default `disable`). Use `require` or stricter in production.
+`verify-full` (CRD default `disable`). Use `require` or stricter in production.
 
 ### Secret: `spec.database.secretName`
 
-Create this Secret in the **CR namespace**. All ten keys are required today,
-including `ros-*` and `kruize-*`.
+Create this Secret in the **CR namespace**. Missing required keys set
+`DatabaseReady=False` with reason `DatabaseSecretInvalid` and block
+migrations.
 
-| Key | Purpose |
-|-----|---------|
-| `postgres-user` | Admin / bootstrap user |
-| `postgres-password` | |
-| `koku-user` | Owner of `costonprem_koku` |
-| `koku-password` | |
-| `rbac-user` | Owner of `costonprem_rbac` |
-| `rbac-password` | |
-| `ros-user` | Owner of `costonprem_ros` (validated even when ROS is off) |
-| `ros-password` | |
-| `kruize-user` | Owner of `costonprem_kruize` (validated even when ROS is off) |
-| `kruize-password` | |
+| Key | Purpose | Required |
+|-----|---------|----------|
+| `koku-user` | Owner of `costonprem_koku` | Always |
+| `koku-password` | | Always |
+| `rbac-user` | Owner of `costonprem_rbac` | Always |
+| `rbac-password` | | Always |
+| `ros-user` | Owner of `costonprem_ros` | Only if `ros.enabled: true` |
+| `ros-password` | | Only if `ros.enabled: true` |
+| `kruize-user` | Owner of `costonprem_kruize` | Only if `ros.enabled: true` |
+| `kruize-password` | | Only if `ros.enabled: true` |
 
 ```bash
 kubectl -n "$NAMESPACE" create secret generic my-db-credentials \
-  --from-literal=postgres-user=postgres \
-  --from-literal=postgres-password='<password>' \
   --from-literal=koku-user=koku \
   --from-literal=koku-password='<password>' \
   --from-literal=rbac-user=rbac_user \
-  --from-literal=rbac-password='<password>' \
-  --from-literal=ros-user=ros_user \
-  --from-literal=ros-password='<password>' \
-  --from-literal=kruize-user=kruize_user \
-  --from-literal=kruize-password='<password>'
+  --from-literal=rbac-password='<password>'
 ```
 
-Missing keys set `DatabaseReady=False` with reason `DatabaseSecretInvalid` and
-block migrations.
+When `ros.enabled: true`, also add `ros-user` / `ros-password` and
+`kruize-user` / `kruize-password`. Extra keys (including unused
+`postgres-*`) are ignored.
 
 ## Cache (Valkey / Redis)
 
@@ -121,17 +124,18 @@ blocks the pipeline.
 
 ## Kafka
 
-Kafka is always external. Set `spec.kafka.bootstrapServers` to the AMQ Streams
-bootstrap (for example
+Kafka is always external. `spec.kafka.bootstrapServers` is **required** (no
+CRD default). Set it to the AMQ Streams bootstrap (for example
 `cost-onprem-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092`).
 
-**Required topic (Cost / beta):** `platform.upload.announce`  
+**Required topic (Cost / beta):** `platform.upload.announce`
 Ingress publishes upload announcements here; the Listener consumes it. Create
 the topic before applying the CR. The operator does not create KafkaTopic CRs.
 
-Other topics used by the lab fixture (`hccm.ros.events`,
-`rosocp.kruize.recommendations`, `platform.sources.event-stream`,
-`platform.payload-status`) are unused on the Cost-only path.
+Additional topics used only on the ROS-enabled operator path
+(`hccm.ros.events`, `rosocp.kruize.recommendations`), plus the
+Sources-listener topic `platform.sources.event-stream`, are unused on the
+Cost-only path. `platform.payload-status` is also unused there.
 
 `spec.kafka.securityProtocol` is one of `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT`,
 `SASL_SSL` (default `PLAINTEXT`).
@@ -163,13 +167,14 @@ Set `spec.objectStorage.endpoint` (hostname only, no scheme or port),
 do not rely on OBC/NooBaa auto-detection.
 
 **The operator never creates buckets.** Create them before uploads, or Ingress
-returns HTTP 500.
+returns HTTP 500. When `secretName` is set, `endpoint` and `buckets.koku` are
+required.
 
-| Bucket | Spec field | Default | Beta |
-|--------|------------|---------|------|
-| Cost / Ingress staging | `spec.costManagement.storage.bucketName` | `koku-bucket` | Required |
-| Ingress staging override | `spec.ingress.stagingBucket` | same as Cost bucket | Optional |
-| ROS | `spec.costManagement.storage.rosBucketName` | `ros-data` | Not used while ROS is off |
+| Bucket | Spec field | Beta |
+|--------|------------|------|
+| Cost / Koku | `spec.objectStorage.buckets.koku` | Required |
+| Ingress uploads | `spec.objectStorage.buckets.ingress` | Optional — inherits `buckets.koku` when unset; set only to route uploads to a distinct bucket |
+| ROS | `spec.objectStorage.buckets.ros` | Required only if `ros.enabled: true` |
 
 ### Secret: `spec.objectStorage.secretName`
 
@@ -211,8 +216,9 @@ Optional TLS: `spec.auth.keycloak.tls.caCertSecretName` with key `ca.crt`
 (needed when `issuerURL` is a Route and the cluster service CA does not trust
 it). `insecureSkipVerify` is lab-only.
 
-When `url` is set, a failed JWKS probe sets `AuthenticationReady=False`. That
-does not by itself block `GatewayReady`.
+When `url` is missing, the webhook/CRD reject the CR. When `url` is set, a
+failed JWKS probe sets `AuthenticationReady=False`. That does not by itself
+block `GatewayReady`.
 
 ### UI OAuth client Secret
 

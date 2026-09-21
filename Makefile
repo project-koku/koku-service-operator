@@ -366,12 +366,41 @@ OPERATOR_SDK = $(shell which operator-sdk)
 endif
 endif
 
+
+YQ_VERSION ?= v4.53.6
+IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
+IMAGE_SHA ?= $(IMG)
+OCP_VERSION ?= v4.22
+MIN_KUBE_VERSION = 1.25.0
+
+YQ ?= $(LOCALBIN)/yq
+
+.PHONY: yq
+yq: ## Download yq locally into bin/ if necessary.
+ifeq (,$(wildcard $(YQ)))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(YQ)) ;\
+	OS=$$(go env GOOS) && ARCH=$$(go env GOARCH) && \
+	curl -sSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH} && chmod +x $(YQ) ;\
+	}
+endif
+
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+bundle: manifests kustomize operator-sdk yq ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
 	$(OPERATOR_SDK) bundle validate ./bundle
+
+	$(YQ) -i '.annotations."com.redhat.openshift.versions" = "$(OCP_VERSION)"' bundle/metadata/annotations.yaml
+	$(YQ) -i '(.annotations."com.redhat.openshift.versions" | key) head_comment="OpenShift specific annotations."' bundle/metadata/annotations.yaml
+	$(YQ) -i '.metadata.annotations.containerImage = "$(IMAGE_SHA)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/arch.amd64"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.metadata.labels["operatorframework.io/os.linux"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
@@ -407,26 +436,43 @@ OPM = $(shell which opm)
 endif
 endif
 
-# A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
-# These images MUST exist in a registry and be pull-able.
-BUNDLE_IMGS ?= $(BUNDLE_IMG)
-
 # The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=example.com/operator-catalog:v0.2.0).
 CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)
 
-# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
-ifneq ($(origin CATALOG_BASE_IMG), undefined)
-FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
-endif
+# Build a File-Based Catalog (FBC) image from the bundle image, BUNDLE_IMG.
+CATALOG_DIR ?= catalog
 
-# Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
-# This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
-# https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
+.PHONY: catalog-render
+catalog-render: opm ## Render bundle images into an FBC catalog directory.
+	rm -rf $(CATALOG_DIR) $(CATALOG_DIR).Dockerfile
+	mkdir -p $(CATALOG_DIR)
+	$(OPM) init koku-service-operator --default-channel=$(DEFAULT_CHANNEL) -o yaml > $(CATALOG_DIR)/index.yaml
+	$(OPM) render $(BUNDLE_IMG) -o yaml >> $(CATALOG_DIR)/index.yaml
+	@BUNDLE_NAME=$$(grep -B 1 "^package:" $(CATALOG_DIR)/index.yaml | grep "^name:" | head -n 1 | awk '{print $$2}') ; \
+	echo "Detected Bundle Entry: $$BUNDLE_NAME" ; \
+	echo "---"                                                        >> $(CATALOG_DIR)/index.yaml ; \
+	echo "schema: olm.channel"                                        >> $(CATALOG_DIR)/index.yaml ; \
+	echo "package: koku-service-operator"                            >> $(CATALOG_DIR)/index.yaml ; \
+	echo "name: $(DEFAULT_CHANNEL)"                                   >> $(CATALOG_DIR)/index.yaml ; \
+	echo "entries:"                                                   >> $(CATALOG_DIR)/index.yaml ; \
+	echo "  - name: $$BUNDLE_NAME"                                     >> $(CATALOG_DIR)/index.yaml
+	$(OPM) validate $(CATALOG_DIR)
+	$(OPM) generate dockerfile $(CATALOG_DIR)
+
 .PHONY: catalog-build
-catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool $(CONTAINER_TOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+catalog-build: catalog-render ## Build an FBC catalog image.
+	$(CONTAINER_TOOL) build -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
+
+.PHONY: catalog-build-amd64
+catalog-build-amd64: catalog-render ## Build a linux/amd64 FBC catalog image (Mac ARM → remote amd64 cluster).
+	$(CONTAINER_TOOL) build --platform linux/amd64 -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
 
 # Push the catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+.PHONY: catalog-build-multiplatform
+catalog-build-multiplatform: catalog-render ## Build and push a multiplatform FBC catalog image.
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 --push -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
+

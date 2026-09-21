@@ -1,12 +1,15 @@
-# Public images for oauth2-proxy, Envoy, Postgres, and Valkey.
-# Same metadata.name as the default sample — apply this file instead of it.
+# Community / turnkey dev/ci/lab sample — bundled Postgres + Valkey, public
+# images (oauth2-proxy, Envoy, Postgres, Valkey). Unlike the BYOI default, this
+# CR is ready to apply: the operator provisions DB/cache in-cluster and object
+# storage is resolved by discovery. Not for production — bundled DB/cache have
+# no HA/backup story; use the BYOI default or _production sample there.
 #
 # Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
 # POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.
 apiVersion: service.costmanagement.openshift.io/v1alpha1
 kind: CostManagementServiceConfig
 metadata:
-  name: cost-onprem
+  name: cost-onprem-community
   namespace: cost-onprem
 spec:
   global:
@@ -35,7 +38,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
 
   objectStorage:
     endpoint: "s3.openshift-storage.svc.cluster.local"
@@ -45,13 +48,13 @@ spec:
   costManagement:
     api:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "d8055ac"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
     listener:
       replicas: 2
@@ -80,8 +83,8 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      repository: quay.io/project-koku/insights-rbac
+      tag: "34e25ed"
     api:
       replicas: 1
     worker:
@@ -128,7 +131,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
 
   monitoring:
     enabled: true

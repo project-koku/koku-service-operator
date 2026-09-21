@@ -153,7 +153,18 @@ jobs:
           key: bundle-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
 
       - name: Regenerate bundle
-        run: make bundle
+        # IMAGE_SHA is a release input and changes for every operator build. Read
+        # the committed value before regeneration so this job checks generated
+        # drift without hardcoding a release-specific digest in the Makefile.
+        run: |
+          make yq
+          BUNDLE_CSV="bundle/manifests/koku-service-operator.clusterserviceversion.yaml"
+          BUNDLE_IMAGE="$(./bin/yq -r '.metadata.annotations.containerImage // ""' "${BUNDLE_CSV}")"
+          if [[ ! "${BUNDLE_IMAGE}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::${BUNDLE_CSV} must contain a digest-pinned metadata.annotations.containerImage"
+            exit 1
+          fi
+          make bundle IMAGE_SHA="${BUNDLE_IMAGE}"
 
       - name: Detect drift (committed vs generated)
         # `createdAt` is stamped with the current wall-clock time on every
@@ -163,18 +174,10 @@ jobs:
         # it explicitly.
         run: |
           if ! git diff --ignore-matching-lines='^[[:space:]]*createdAt:' --quiet -- bundle/ bundle.Dockerfile; then
-            echo "::error::bundle/ (or bundle.Dockerfile) is out of sync. Run 'make bundle' and commit."
+            echo "::error::bundle/ (or bundle.Dockerfile) is out of sync. Run 'make bundle IMAGE_SHA=<operator-image-digest>' and commit."
             git diff --stat -- bundle/ bundle.Dockerfile
             exit 1
           fi
-
-      - name: Validate bundle (OperatorHub + multiarch)
-        # `make bundle` already runs the default `operator-sdk bundle
-        # validate ./bundle`; this adds the optional suites. Reuses the
-        # Makefile-downloaded, version-pinned operator-sdk binary instead of
-        # a second hardcoded install, so there's one source of truth for the
-        # version.
-        run: ./bin/operator-sdk bundle validate ./bundle --select-optional name=operatorhub/v2 --select-optional name=multiarch
 
   links:
     name: Check Links
@@ -254,6 +257,20 @@ jobs:
           username: ${{ secrets.QUAY_USER }}
           password: ${{ secrets.QUAY_TOKEN }}
 
+      - name: Cache bundle build tools
+        uses: actions/cache@v5
+        with:
+          path: bin
+          key: bundle-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - name: Regenerate bundle with published operator image
+        # The committed release bundle uses an immutable digest. container-build
+        # publishes latest/main/<sha> tags, so regenerate the main-branch catalog
+        # with the SHA tag that this workflow just published.
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          make bundle IMG="quay.io/project-koku/koku-service-operator:${SHORT_SHA}"
+
       - name: Bundle image metadata
         id: bundle-meta
         uses: docker/metadata-action@v5
@@ -283,7 +300,7 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           CATALOG_IMG="quay.io/project-koku/koku-service-operator-catalog:${SHORT_SHA}"
           make catalog-build \
-            BUNDLE_IMGS=quay.io/project-koku/koku-service-operator-bundle@${{ steps.bundle-push.outputs.digest }} \
+            BUNDLE_IMG=quay.io/project-koku/koku-service-operator-bundle@${{ steps.bundle-push.outputs.digest }} \
             CATALOG_IMG="${CATALOG_IMG}"
           docker tag "${CATALOG_IMG}" \
             quay.io/project-koku/koku-service-operator-catalog:latest

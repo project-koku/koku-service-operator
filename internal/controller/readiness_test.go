@@ -22,9 +22,13 @@ func TestIsDeploymentReady(t *testing.T) {
 		{
 			name: "ready",
 			deploy: &appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 1},
 				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
-				Status:     appsv1.DeploymentStatus{AvailableReplicas: 2},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 1,
+					UpdatedReplicas:    2,
+					AvailableReplicas:  2,
+				},
 			},
 			want: true,
 		},
@@ -34,6 +38,32 @@ func TestIsDeploymentReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},
 				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
 				Status:     appsv1.DeploymentStatus{AvailableReplicas: 1},
+			},
+			want: false,
+		},
+		{
+			name: "stale observed generation",
+			deploy: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 2},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 1,
+					UpdatedReplicas:    2,
+					AvailableReplicas:  2,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "old replicas available during rollout",
+			deploy: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 2},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 2,
+					UpdatedReplicas:    1,
+					AvailableReplicas:  2,
+				},
 			},
 			want: false,
 		},

@@ -11,6 +11,8 @@
 #
 # Skip steps:
 #   SKIP_KAFKA=1 SKIP_INFRA=1 SKIP_KEYCLOAK=1 SKIP_OAUTH_MIRROR=1 ./hack/deploy-byoi.sh
+# Skip Keycloak realm user provisioning (manual user testing):
+#   SKIP_REALM_USERS=1 ./hack/deploy-byoi.sh
 #
 # Keycloak uses this repo's scripts/deploy-rhbk.sh by default.
 # Override with RHBK_SCRIPT or CHART_ROOT (chart copy) if needed.
@@ -34,6 +36,7 @@ SKIP_KAFKA="${SKIP_KAFKA:-0}"
 SKIP_INFRA="${SKIP_INFRA:-0}"
 SKIP_KEYCLOAK="${SKIP_KEYCLOAK:-0}"
 SKIP_OAUTH_MIRROR="${SKIP_OAUTH_MIRROR:-0}"
+SKIP_REALM_USERS="${SKIP_REALM_USERS:-0}"
 
 KUBECTL="${KUBECTL:-kubectl}"
 if ! command -v "$KUBECTL" >/dev/null 2>&1; then
@@ -154,6 +157,7 @@ if [[ "$SKIP_KEYCLOAK" != "1" ]]; then
     export LOG_LEVEL="$LOG_LEVEL"
     export KUBECTL
     export KUBE_CONTEXT="${KUBE_CONTEXT:-}"
+    export SKIP_REALM_USERS
     if [[ -n "$UI_BASE_URL" ]]; then
       export COST_MGMT_UI_BASE_URL="$UI_BASE_URL"
     fi

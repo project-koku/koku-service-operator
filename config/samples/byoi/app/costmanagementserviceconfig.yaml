@@ -37,19 +37,20 @@ spec:
     port: 9000
     useSSL: false
     secretName: "byoi-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"
 
   costManagement:
-    storage:
-      bucketName: "koku-bucket"
-      rosBucketName: "ros-data"
     api:
       image:
         # amd64 — suitable for clusterbot / typical OpenShift nodes
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
       # Live exchange rates for IQE smoke (applied to all koku containers).
       # Leave unset for airgapped on-prem.
@@ -57,8 +58,8 @@ spec:
         CURRENCY_URL: "https://open.er-api.com/v6/latest/USD"
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
       # Registers masu test-only routes (/enabled_tags/) for IQE. Lab/CI only.
       env:
@@ -85,8 +86,8 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      repository: quay.io/project-koku/insights-rbac
+      tag: "34e25ed"
     api:
       replicas: 1
     worker:
@@ -95,7 +96,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
 
   # Envoy JWT gateway requires a reachable Keycloak/RHBK JWKS endpoint.
   # Placeholder URL — replace with a real Keycloak before exercising the /api Route.
@@ -105,6 +106,8 @@ spec:
       # hostname, tokens use that URL as iss — set issuerURL to match.
       url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
+      # For production with a public Route issuer, prefer tls.caCertSecretName
+      # (ingress CA) over insecureSkipVerify — see docs/install/keycloak.md.
       # tls:
       #   insecureSkipVerify: true   # dev only when issuer uses a private CA
       realm: "kubernetes"
@@ -124,7 +127,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
     oauthProxy:
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9

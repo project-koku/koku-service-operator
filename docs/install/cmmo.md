@@ -121,15 +121,37 @@ certificates instead.
 - Do not enable ROS collection against a Cost-only (`ros.enabled: false`)
   instance.
 
+## Upload timing
+
+`spec.upload.upload_cycle` is in **minutes**. The example above uses `360`
+(six hours), the CMMO default. CMMO clamps values below **60** minutes up to
+60. For lab testing only, you may lower `upload_cycle` to `60` — keep
+production values conservative.
+
+How soon the first upload runs depends on CMMO startup and Prometheus
+collection; use `status.upload` (below) instead of assuming an immediate cycle.
+
 ## Check
 
-On the reporting cluster:
+On the **reporting** cluster:
 
 ```bash
-oc -n costmanagement-metrics-operator get costmanagementmetricsconfig
-oc -n costmanagement-metrics-operator logs deploy/costmanagement-metrics-operator
+oc -n costmanagement-metrics-operator get costmanagementmetricsconfig -o yaml
+oc -n costmanagement-metrics-operator logs deploy/costmanagement-metrics-operator --tail=100
+oc -n costmanagement-metrics-operator get costmanagementmetricsconfig \
+  -o jsonpath='upload={.status.upload.last_upload_status} time={.status.upload.last_successful_upload_time}{"\n"}'
 ```
 
-On the Cost Management cluster, Listener and Ingress should see uploads on
-topic `platform.upload.announce` after a successful CMMO cycle. The UI Sources
-page lists the cluster when `source.create_source` is true.
+A successful cycle often shows `status.upload.last_upload_status` such as
+`202 Accepted` and a recent `status.upload.last_successful_upload_time`.
+
+On the **Cost Management** cluster:
+
+1. **UI** → **Integrations** (or **Sources**) — a new OpenShift source when
+   `spec.source.create_source` is true.
+2. Listener / Ingress activity on topic `platform.upload.announce` after a
+   successful cycle (operator logs or your Kafka tooling).
+
+Do not rely on a single `grep` in Listener logs before the first CMMO cycle
+completes — other uploads (for example lab seed data) may use different
+cluster IDs or timestamps.

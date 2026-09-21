@@ -46,23 +46,24 @@ spec:
     port: 9000
     useSSL: false
     secretName: "byoi-s3-credentials"
+    buckets:
+      koku: "koku-bucket"
+      ingress: "koku-upload-bucket"
+      ros: "ros-data"
     s3:
       region: "us-east-1"
       addressingStyle: "path"
 
   costManagement:
-    storage:
-      bucketName: "koku-bucket"
-      rosBucketName: "ros-data"
     api:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
     masu:
       image:
-        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
-        tag: "768be82"
+        repository: quay.io/project-koku/koku
+        tag: "422f758"
       replicas: 1
     listener:
       replicas: 1
@@ -85,8 +86,8 @@ spec:
 
   rbac:
     image:
-      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
-      tag: "73870d8"
+      repository: quay.io/project-koku/insights-rbac
+      tag: "34e25ed"
     api:
       replicas: 1
     worker:
@@ -95,7 +96,7 @@ spec:
   ingress:
     image:
       repository: quay.io/iop/ingress
-      tag: "master"
+      tag: "sha-6dde23d"
 
   auth:
     keycloak:
@@ -116,7 +117,7 @@ spec:
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
-        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+        tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
     oauthProxy:
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9

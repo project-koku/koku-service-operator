@@ -3,6 +3,7 @@ package resources
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -81,12 +82,30 @@ func TestIngressDeployment(t *testing.T) {
 	if len(c.Ports) != 2 {
 		t.Fatalf("ports = %+v", c.Ports)
 	}
+	for name, probe := range map[string]*corev1.Probe{
+		"liveness":  c.LivenessProbe,
+		"readiness": c.ReadinessProbe,
+	} {
+		if probe == nil || probe.HTTPGet == nil {
+			t.Fatalf("%s probe = %+v, want HTTP probe", name, probe)
+		}
+		wantPath := "/healthz"
+		if name == "readiness" {
+			wantPath = "/status/"
+		}
+		if probe.HTTPGet.Path != wantPath || probe.HTTPGet.Port.IntVal != ingressHTTPPort || probe.HTTPGet.Scheme != corev1.URISchemeHTTP {
+			t.Errorf("%s probe HTTPGet = %+v, want path %q on HTTP port %d", name, probe.HTTPGet, wantPath, ingressHTTPPort)
+		}
+		if probe.InitialDelaySeconds != 35 || probe.PeriodSeconds != 5 || probe.TimeoutSeconds != 120 || probe.FailureThreshold != 3 || probe.SuccessThreshold != 1 {
+			t.Errorf("%s probe timings = %+v", name, probe)
+		}
+	}
 	env := envValues(c)
 	checks := map[string]string{
 		"INGRESS_WEBPORT":              "8080",
 		"INGRESS_METRICSPORT":          "9000",
 		"INGRESS_MINIOENDPOINT":        "minio.cost-byoi-infra.svc:9000",
-		"INGRESS_STAGEBUCKET":          "koku-bucket",
+		"INGRESS_STAGEBUCKET":          "",
 		"INGRESS_USESSL":               "false",
 		"INGRESS_VALID_UPLOAD_TYPES":   "hccm",
 		"INGRESS_STAGERIMPLEMENTATION": "s3",
@@ -118,36 +137,36 @@ func TestIngressDeployment(t *testing.T) {
 func TestIngressDeploymentStageBucket(t *testing.T) {
 	tests := []struct {
 		name             string
-		stagingBucket    string
-		bucketName       string
+		ingressBucket    string
+		kokuBucket       string
 		discoveredBucket string
 		want             string
 	}{
 		{
-			name: "omitted staging and bucketName falls back to koku-bucket",
-			want: "koku-bucket",
+			name: "omitted ingress bucket stays empty when unresolved",
+			want: "",
 		},
 		{
-			name:       "omitted staging uses costManagement.storage.bucketName",
-			bucketName: "my-data",
+			name:       "omitted ingress bucket inherits objectStorage.buckets.koku",
+			kokuBucket: "my-data",
 			want:       "my-data",
 		},
 		{
-			name:             "omitted staging prefers discovered S3 bucket over spec",
-			bucketName:       "koku-bucket",
+			name:             "omitted ingress bucket inherits discovered S3 bucket",
+			kokuBucket:       "koku-bucket",
 			discoveredBucket: "obc-provisioned-bucket",
 			want:             "obc-provisioned-bucket",
 		},
 		{
-			name:          "explicit stagingBucket is honored over bucketName",
-			stagingBucket: "insights-upload-perma",
-			bucketName:    "koku-bucket",
+			name:          "explicit ingress bucket is honored over koku bucket",
+			ingressBucket: "insights-upload-perma",
+			kokuBucket:    "koku-bucket",
 			want:          "insights-upload-perma",
 		},
 		{
-			name:             "explicit stagingBucket is honored over discovered bucket",
-			stagingBucket:    "insights-upload-perma",
-			bucketName:       "koku-bucket",
+			name:             "explicit ingress bucket is honored over discovered bucket",
+			ingressBucket:    "insights-upload-perma",
+			kokuBucket:       "koku-bucket",
 			discoveredBucket: "obc-provisioned-bucket",
 			want:             "insights-upload-perma",
 		},
@@ -155,8 +174,8 @@ func TestIngressDeploymentStageBucket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := ingressCfg()
-			cfg.Spec.Ingress.StagingBucket = tt.stagingBucket
-			cfg.Spec.CostManagement.Storage.BucketName = tt.bucketName
+			cfg.Spec.ObjectStorage.Buckets.Ingress = tt.ingressBucket
+			cfg.Spec.ObjectStorage.Buckets.Koku = tt.kokuBucket
 			if tt.discoveredBucket != "" {
 				cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{
 					S3: &costv1alpha1.DiscoveredS3{Bucket: tt.discoveredBucket},

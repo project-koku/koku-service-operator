@@ -16,6 +16,63 @@ cluster-bot reproduction are tracked in
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
+| [openshift-ci.md](../openshift-ci/openshift-ci.md) | Prow analogue: OLM catalog install + same stack/pytest scripts |
+| [olm-bundle-testing.md](olm-bundle-testing.md) | Personal Quay bundle/catalog build (`catalog-build-amd64` on Mac ARM) |
+
+## IQE OLM smoke only (no full stack)
+
+Use this path to validate **OLM catalog install** (CatalogSource → Subscription
+→ CSV → controller Deployment → CRD) **without** RHBK, Kafka, S3, or CMSC
+reconcile. Tracked in [COST-8166](https://redhat.atlassian.net/browse/COST-8166)
+(iqe-cost-management-plugin).
+
+| Path | Infra needed | Validates |
+|------|----------------|-----------|
+| **IQE OLM smoke** (this section) | cluster-bot + `oc login` only | OLM wiring, operator pod, CRD, RBAC |
+| **Full pytest** (below) | RHBK + Kafka + S4 + CMSC Ready | Application/day-one stack |
+
+### Prerequisites
+
+- MCE / cluster-bot cluster (OCP **4.18+**, **amd64** workers)
+- IQE venv with `iqe-cost-management-plugin` checked out
+- Pullable catalog image (see [catalog image](#catalog-image))
+
+### Catalog image
+
+| Source | When |
+|--------|------|
+| `quay.io/project-koku/koku-service-operator-catalog:latest` | After [operator CI](https://github.com/project-koku/koku-service-operator) publishes a bundle whose CSV references a pullable operator tag (see project PRs fixing `bundle-publish`) |
+| Personal Quay (`quay.io/<user>/koku-service-operator-catalog:<tag>`) | PR branches, Mac-built catalogs — must be **public** (or cluster pull secret) and **linux/amd64** on cluster-bot |
+
+Build personal catalog on Mac ARM: [olm-bundle-testing.md](olm-bundle-testing.md#build-and-push-catalog-personal-quay).
+
+### Run IQE smoke
+
+From `iqe-cost-management-plugin` (does not need local koku API or full `iqe tests plugin`):
+
+```bash
+export SERVICE_OPERATOR_CATALOG_IMAGE=quay.io/project-koku/koku-service-operator-catalog:latest
+
+pytest --noconftest -p iqe_cost_management.fixtures.operator_fixtures \
+  iqe_cost_management/tests/operator/test_service_operator.py::test_service_operator_clean_olm_catalog_installation \
+  -vv -s --log-cli-level=INFO
+```
+
+Expect ~1–3 min after catalog is READY: CSV `Succeeded`, controller pod in
+`openshift-operators`, operand namespace `cost-byoi` (default).
+
+**Note:** The published CSV uses **AllNamespaces** install mode — controller in
+`openshift-operators`, not OwnNamespace `cost-onprem`. Full CMSC pytest still
+follows [Critical rules](#critical-rules-read-first) below.
+
+### OLM cleanup between runs
+
+```bash
+oc delete subscription koku-service-operator -n openshift-operators --ignore-not-found
+oc delete csv -n openshift-operators -l operators.coreos.com/koku-service-operator.openshift-operators --ignore-not-found
+oc delete catalogsource koku-service-operator-catalog -n openshift-marketplace --ignore-not-found
+oc delete namespace cost-byoi --ignore-not-found
+```
 
 ## Goal
 
@@ -211,6 +268,51 @@ kubectl create secret generic cost-onprem-storage-credentials \
 Required buckets: `koku-bucket`, `ros-data`, `insights-upload-perma`
 (`deploy-s4-test.sh` does not create them).
 
+### S3 buckets before CMSC (recommended)
+
+Step 1 deploys S4 and syncs credentials but **does not create** application
+bucket names. Without buckets, `StorageReady` stays False and ingress readiness
+fails (`HeadBucket` 404) until buckets exist. Create them **after Step 2**
+(operator running) and **before Step 3** (or rely on pytest
+`s3_bucket_preflight` at the start of Step 4 — that is too late for ingress
+during CMSC reconcile):
+
+```bash
+oc -n cost-onprem exec deploy/cost-onprem-koku-api -- python3 -c "
+import boto3, os
+s3 = boto3.client('s3',
+  endpoint_url=os.environ.get('S3_ENDPOINT'),
+  aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+  aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+  verify=False)
+for b in ['koku-bucket', 'ros-data', 'insights-upload-perma']:
+    try:
+        s3.head_bucket(Bucket=b)
+        print('exists', b)
+    except Exception:
+        s3.create_bucket(Bucket=b)
+        print('created', b)
+"
+```
+
+If the `exec` fails because `cost-onprem-koku-api` does not exist yet, create
+buckets after CMSC reconcile using the same command, or use the pytest preflight
+in Step 4.
+
+### Keycloak Admin Console (lab)
+
+RHBK stores bootstrap credentials in `keycloak-initial-admin`. Decode **both**
+fields (username is base64-encoded in the Secret):
+
+```bash
+echo -n 'user='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d; echo
+echo -n 'pass='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+Open `https://<keycloak-route>/admin`, select realm **`kubernetes`** (not
+`master`). Customer-facing Keycloak user and **CMMO service account**
+procedures: [keycloak.md](../install/keycloak.md) and [cmmo.md](../install/cmmo.md).
+
 ## Step 2 — Operator in-cluster
 
 ```bash
@@ -225,7 +327,11 @@ oc -n cost-onprem logs deploy/koku-service-operator --tail=30
 
 ## Step 3 — CMSC + cluster-bot patches
 
-Apply the default sample into **`cost-onprem`** (same NS as Step 2):
+Apply the **community lab sample** (bundled Postgres/Valkey in `cost-onprem`) into
+**`cost-onprem`** (same NS as Step 2). Do **not** use
+`service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` unedited —
+that file is a BYOI template (`database.deploy: false` / `cache.deploy: false`)
+and admission rejects it until hosts and secrets are filled in.
 
 ```bash
 DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
@@ -233,26 +339,20 @@ KEYCLOAK_HOST="$(oc get route keycloak -n keycloak -o jsonpath='{.spec.host}')"
 test -n "$KEYCLOAK_HOST"
 KEYCLOAK_URL="https://${KEYCLOAK_HOST}"
 
-oc apply -f config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml
-
-oc patch cmsc cost-onprem -n cost-onprem --type merge -p "{
-  \"spec\": {
-    \"global\": {\"clusterDomain\": \"${DOMAIN}\"},
-    \"objectStorage\": {
-      \"endpoint\": \"s4.s4-test.svc.cluster.local\",
-      \"port\": 7480,
-      \"useSSL\": false,
-      \"secretName\": \"cost-onprem-storage-credentials\",
-      \"s3\": {\"region\": \"us-east-1\"}
-    },
-    \"auth\": {
-      \"keycloak\": {
-        \"url\": \"http://keycloak-service.keycloak.svc.cluster.local:8080\",
-        \"issuerURL\": \"${KEYCLOAK_URL}\"
-      }
-    }
-  }
-}"
+DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
+  .metadata.namespace = "cost-onprem" |
+  .metadata.name = "cost-onprem" |
+  .spec.global.clusterDomain = strenv(DOMAIN) |
+  .spec.objectStorage.endpoint = "s4.s4-test.svc.cluster.local" |
+  .spec.objectStorage.port = 7480 |
+  .spec.objectStorage.useSSL = false |
+  .spec.objectStorage.secretName = "cost-onprem-storage-credentials" |
+  .spec.objectStorage.buckets.koku = "koku-bucket" |
+  .spec.objectStorage.s3.region = "us-east-1" |
+  .spec.auth.keycloak.url = "http://keycloak-service.keycloak.svc.cluster.local:8080" |
+  .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL)
+' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml \
+  | oc apply -f -
 ```
 
 `hack/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
@@ -264,8 +364,8 @@ Why these patches (sample defaults are ODF/CRC, not cluster-bot S4):
 |-------|----------------|-------------------|
 | `objectStorage.endpoint` | ODF `s3.openshift-storage.svc` | S4 in `s4-test` |
 | `objectStorage.s3.region` | unset | `us-east-1` (SigV4 with S4) |
-| `auth.keycloak.url` | `https://keycloak...:8443` | RHBK in-cluster HTTPS `:8443` |
-| `auth.keycloak.issuerURL` | commented | public Route host (tokens use this iss) |
+| `auth.keycloak.url` | empty (`""`) | JWKS on in-cluster HTTP `:8080` (`http://keycloak-service.keycloak.svc.cluster.local:8080`) |
+| `auth.keycloak.issuerURL` | commented | public Route HTTPS (tokens use this `iss`) |
 
 Watch reconcile (~10–20 min):
 

@@ -5,8 +5,10 @@ a live, reconciled `CostManagementServiceConfig` stack. They are **not**
 application-level tests — those live in the pytest suite
 ([clusterbot-operator-pytest.md](clusterbot-operator-pytest.md), COST-7697).
 
-This suite is **not** run in GitHub Actions Kind CI (`make test-e2e`); the Prow
-gate is deferred to [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
+This suite is **not** run in GitHub Actions Kind CI (`make test-e2e`) and is **not**
+wired into Prow yet ([COST-7699](https://redhat.atlassian.net/browse/COST-7699)).
+Operator Prow jobs (OLM, pytest, IQE) are documented in
+[openshift-ci.md](../openshift-ci/openshift-ci.md).
 
 ## Quick start
 
@@ -61,8 +63,8 @@ image tags on the CMSC. A new operator tag does not satisfy `E2E_KOKU_UPGRADE_TA
 | Image | Example registry path | How it is set | Go e2e specs |
 |-------|----------------------|---------------|--------------|
 | Operator | `quay.io/project-koku/koku-service-operator:<tag>` | `IMG=` at deploy | All specs after deploy (pause, drift, dependency, …) |
-| Koku app | `quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
-| RBAC app | `quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
+| Koku app | `quay.io/project-koku/koku:<tag>` | CMSC `spec.costManagement.api.image` | OP-E2E-005 (`E2E_KOKU_UPGRADE_TAG`), OP-E2E-005b (`E2E_KOKU_DOWNGRADE_TAG`) |
+| RBAC app | `quay.io/project-koku/insights-rbac:<tag>` | CMSC `spec.rbac.image` | OP-E2E-006 (`E2E_RBAC_UPGRADE_TAG`) |
 
 **What you need to run migration specs**
 
@@ -202,13 +204,16 @@ go test -tags cluster_e2e ./test/e2e/ -run TestCMSCE2E \
 
 ## Prow integration (COST-7699)
 
-Prow wiring is tracked in [COST-7699](https://redhat.atlassian.net/browse/COST-7699).
-After the stack is Ready (`SchemaUpToDate=True`, `Available=True`), run
-`make test-e2e-cmsc` with `E2E_CLUSTER=1` (see env vars above).
+Prow wiring for this Go suite is tracked in [COST-7699](https://redhat.atlassian.net/browse/COST-7699)
+and is **not** in `openshift/release` yet. Existing operator Prow jobs:
+[openshift-ci.md](../openshift-ci/openshift-ci.md). After the stack is Ready
+(`SchemaUpToDate=True`, `Available=True`), run `make test-e2e-cmsc` with
+`E2E_CLUSTER=1` (see env vars above).
 
 ## Related
 
 - [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) — Cluster Bot deploy + pytest (same namespace; run Go suite after Ready)
+- [openshift-ci.md](../openshift-ci/openshift-ci.md) — OpenShift CI (Prow) for this repo
 - [COST-7698 Jira](../jira/COST-7698.md)
 - [COST-7699](https://redhat.atlassian.net/browse/COST-7699) — Prow CI gate
 - [COST-7694](https://redhat.atlassian.net/browse/COST-7694) — blocks OP-E2E-009 (secret rotation)

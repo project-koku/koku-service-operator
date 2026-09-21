@@ -180,26 +180,170 @@ For each claim:
 Do **not** map `organization_id`, `tenant_id`, `account_id`, or `account`.
 Lua does not read those names.
 
-### Optional claims and roles
+### Optional claims
 
-| Claim / role | If missing |
-|--------------|------------|
+| Claim | If missing |
+|-------|------------|
 | `preferred_username` | Lua uses `sub`, then `"user"` |
 | `email` | Lua synthesizes `{username}@example.com` |
-| Realm role `org-admin` | `is_org_admin` in `X-Rh-Identity` is `false` |
 
-To grant org-admin: **Realm roles** → create `org-admin` if needed → assign
-it to the user (UI) or the service-account user (CMMO) under **Role
-mapping**.
+## Org-admin realm role (first administrator)
+
+The operator **does not create human users**. A Keycloak (or IdP) admin
+provisions users, sets `org_id` and `account_number` attributes (above), and
+assigns the **`org-admin` realm role** to anyone who should administer Cost
+Management or delegate access to others.
+
+### What it does
+
+On each request, Envoy Lua reads the access token. If the token includes the
+**realm role** `org-admin`, Envoy sets `is_org_admin: true` in the
+`X-Rh-Identity` header it forwards to koku and insights-rbac. Without that
+role, `is_org_admin` is `false`.
+
+insights-rbac uses `is_org_admin` to apply the **admin_default** role bundle
+at runtime. That bundle includes permissions such as:
+
+| Role | Permission |
+|------|------------|
+| Cost Administrator | `cost-management:*:*` |
+| User Access administrator | `rbac:*:*` |
+| Sources administrator | `sources:*:*` |
+
+Plus other platform admin roles seeded by the operator's RBAC migration Job.
+The migrate Job seeds roles into the database; it does **not** assign them
+to a named user. The realm role is what grants them on login.
+
+### Why it is required
+
+Without `org-admin`, a user can authenticate (valid JWT with `org_id` and
+`account_number`) but receives **no** admin_default permissions — they cannot
+manage Cost data or use the User Access UI to delegate roles. There is no
+chicken-and-egg for the **first** administrator: assigning the realm role is
+enough; the user does not need a pre-existing RBAC group membership.
+
+RBAC migration alone does not make anyone an admin. Keycloak user creation
+plus the `org-admin` realm role is the supported first-admin path.
+
+### How to assign it
+
+> **Use the correct realm.** The Admin Console opens in the **`master`**
+> realm by default. Cost Management UI login uses the realm named by
+> `spec.auth.keycloak.realm` (default **`kubernetes`**). Create human users
+> in that realm — not in `master` when your CR uses the default. Confirm the
+> realm dropdown (top-left) matches `spec.auth.keycloak.realm` and
+> **Clients** lists `cost-management-ui` before you create a user. With the
+> default `kubernetes` realm, a user created only in `master` cannot log
+> into the UI.
+
+1. **Realm roles** → create realm role `org-admin` if it does not exist
+   (in the realm named by `spec.auth.keycloak.realm`).
+2. **Users** → **Create user** (in that realm). Leave **Required user
+   actions** empty. Set **First name** and **Last name** when your realm
+   user profile requires them (otherwise `VERIFY_PROFILE` can block login).
+   Then set **Credentials** → add `org_id` and `account_number` on
+   **Attributes** → **Role mapping** → **Assign role** → `org-admin`.
+3. User logs in through the UI (oauth2-proxy → Keycloak).
+
+Service-account users (CMMO) follow the same steps if they need org-admin
+claims; most reporting clusters only need the attribute mappers, not
+`org-admin`.
+
+### Not the same as the `org-admin` Keycloak subgroup
+
+If you enable `spec.rbac.keycloakSync`, labs often create a group layout such
+as `org-{orgId}/org-admin/`. That **subgroup name is for observability only**
+in the sync CronJob — it does **not** grant admin access and is not a
+substitute for the realm role.
+
+| Mechanism | Grants admin access? |
+|-----------|----------------------|
+| **`org-admin` realm role** | **Yes** — JWT → `is_org_admin=true` → admin_default |
+| **`org-admin` Keycloak subgroup** | **No** — sync logs membership; admin stays JWT-based |
+
+For gateway authentication, assign the **realm role**.
+
+## UI login troubleshooting
+
+The UI Deployment runs **oauth2-proxy** beside the nginx app container.
+oauth2-proxy performs OIDC discovery against `spec.auth.keycloak.issuerURL`
+(or the issuer derived from `url` + realm when `issuerURL` is unset).
+
+That is a **different** URL than the JWKS probe the operator uses for
+`AuthenticationReady`. Envoy fetches JWKS from `spec.auth.keycloak.url`
+(often an in-cluster HTTP Service). The UI talks to the **public issuer**
+(typically an HTTPS OpenShift Route). `AuthenticationReady=True` and
+`UIReady=True` do **not** guarantee the UI Route serves traffic.
+
+### `UIReady` vs a working UI
+
+`UIReady=True` means the UI OAuth client Secret exists (and the UI Route is
+admitted when a cluster domain is known). It does **not** check that UI pods
+are Ready. Always confirm the Deployment after conditions look good:
+
+```bash
+export NAMESPACE=cost-onprem
+export CR_NAME=cost-management-minimal
+
+oc -n "$NAMESPACE" get deploy "${CR_NAME}-ui"
+oc -n "$NAMESPACE" get pods -l app.kubernetes.io/component=ui
+oc -n "$NAMESPACE" logs deploy/"${CR_NAME}"-ui -c oauth-proxy --tail=50
+```
+
+Both containers (`oauth-proxy` and the app) should be `Running` and the
+Deployment should show `READY` matching desired replicas.
+
+### TLS when `issuerURL` is a public Route
+
+When RHBK issues tokens with `iss` on a public HTTPS Route, set
+`spec.auth.keycloak.issuerURL` to that Route host. oauth2-proxy then verifies
+the Route certificate using `spec.auth.keycloak.tls.caCertSecretName` (Secret
+key `ca.crt`).
+
+Without a custom CA Secret, the operator mounts the OpenShift **service-CA**
+for `--provider-ca-file`. Public Routes use the **ingress/router** CA, not
+the service CA. A common symptom is oauth-proxy in CrashLoopBackOff with:
+
+`x509: certificate signed by unknown authority`
+
+**Production fix:** create a Secret with the ingress/router CA (or a bundle
+that includes it) and set `spec.auth.keycloak.tls.caCertSecretName`. See
+[production.md](production.md).
+
+**Lab only:** `spec.auth.keycloak.tls.insecureSkipVerify: true` skips TLS
+verification for oauth2-proxy. Do not use in production.
+
+Example (replace Secret name and issuer host):
+
+```yaml
+spec:
+  auth:
+    keycloak:
+      url: "http://keycloak-service.keycloak.svc.cluster.local:8080"
+      issuerURL: "https://keycloak-keycloak.apps.cluster.example.com"
+      tls:
+        caCertSecretName: "keycloak-ingress-ca"
+```
+
+### Symptom table
+
+| Symptom | Check |
+|---------|-------|
+| `UIReady=False`, reason `OAuthClientSecretMissing` | Create `{cr-name}-ui-oauth-client` with `client-id` / `client-secret` |
+| `UIReady=True`, Route shows "Application is not available" | `oc logs deploy/{cr}-ui -c oauth-proxy` for TLS or OIDC errors |
+| oauth-proxy `x509: unknown authority` on issuer host | Set `tls.caCertSecretName` to ingress CA when `issuerURL` is a Route |
+| Login redirect fails after UI loads | Redirect URI in Keycloak must match `https://{cr}-ui-{ns}.{domain}/oauth2/callback` |
 
 ## Authorization
 
 Koku runs with `ENHANCED_ORG_ADMIN=False`. Authorization goes through
-insights-rbac. Do not disable that path or treat `org-admin` as a bypass for
-RBAC.
+insights-rbac. The `org-admin` realm role is the supported way to receive
+admin_default permissions at login; it is not a bypass of RBAC.
 
 Keycloak-to-RBAC principal sync (`spec.rbac.keycloakSync`) is a separate
-CronJob. It is not required for the JWT gateway.
+CronJob. It copies top-level `org-{orgId}` group members into RBAC
+Principals. It is not required for JWT gateway auth and does not replace
+assigning the `org-admin` realm role to administrators.
 
 ## Upgrade note
 

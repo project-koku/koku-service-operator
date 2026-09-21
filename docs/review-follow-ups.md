@@ -144,29 +144,6 @@ is COST-7687; Envoy/UI are COST-7688.
 
 ---
 
-## 13. `isDeploymentReady` accepts stale replicas during a rollout
-
-**Source:** [PR #105 CodeRabbit](https://github.com/project-koku/koku-service-operator/pull/105); already tracked as [D14](code-review-fixmes.md) in `docs/code-review-fixmes.md`.
-
-**Problem:** `isDeploymentReady` is `AvailableReplicas >= spec.replicas`
-(or 0 replicas). It does not require `status.observedGeneration >=
-metadata.generation` or `status.updatedReplicas >= spec.replicas`. After
-an image/spec change, old ready pods still satisfy the gate.
-
-**Impact:** The CR can go `Available=True` / `AllComponentsReady` while
-the current ReplicaSet has zero available pods. Pre-existing; this PR
-only added more callers (Masu, Listener, Kruize, ROS API/Processor).
-
-**Suggested fix:** Require observed generation + updated + available
-replicas (same contract as `isStatefulSetReady`). Update
-`TestIsDeploymentReady` and `markDeploymentReady`; add a stale-replica
-case.
-
-**Out of scope for PR #105** — changes every existing gate (RBAC, Koku
-API, Ingress, Envoy, Valkey), not just COST-7686.
-
----
-
 ## 15. RBAC API wait has no 5-minute `DeploymentNotReady` timeout
 
 **Source:** João's [PR #105 review](https://github.com/project-koku/koku-service-operator/pull/105#issuecomment-5354975468).

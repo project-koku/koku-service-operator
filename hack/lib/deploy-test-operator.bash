@@ -298,11 +298,13 @@ dto_apply_cmsc() {
   keycloak_url="https://${keycloak_host}"
   s4_endpoint="s4.${S4_NAMESPACE}.svc.cluster.local"
 
-  yq e ".metadata.namespace = \"${NAMESPACE}\" | .metadata.name = \"${CR_NAME}\"" "${CMSC_SAMPLE}" \
-    | dto_kubectl_mutate apply -f -
-
   dto_ensure_odf_s3_ca_secret
 
+  # Build the full spec overlay first, then apply the sample and overlay as a
+  # single merged manifest. The BYOI template is admission-rejected unedited
+  # (empty auth.keycloak.url, and objectStorage.buckets.koku is required once
+  # secretName is set), so applying it raw and patching afterwards would fail at
+  # the first apply. Merge-then-apply keeps every applied object valid.
   patch_file="$(mktemp)"
   trap 'rm -f "${patch_file:-}"' RETURN
   python3 - "$patch_file" "$domain" "$s4_endpoint" "$keycloak_url" "${KEYCLOAK_NAMESPACE}" "${DEPLOY_S4:-false}" "${ODF_S3_CA_SECRET_NAME:-}" <<'PY'
@@ -315,23 +317,28 @@ spec = {
             "issuerURL": keycloak_url,
         }
     },
+    # buckets.koku is required (the operator does not create buckets). Set it on
+    # every path so the merged CR passes admission and, on ODF/NooBaa discovery,
+    # resolves to a real cost bucket.
+    "objectStorage": {"buckets": {"koku": "koku-bucket"}},
 }
 if domain:
     spec["global"] = {"clusterDomain": domain}
 if deploy_s4 == "true":
-    spec["objectStorage"] = {
+    spec["objectStorage"].update({
         "endpoint": s4_endpoint,
         "port": 7480,
         "useSSL": False,
         "secretName": "cost-onprem-storage-credentials",
         "s3": {"region": "us-east-1"},
-    }
+    })
 elif odf_ca_secret:
-    # Merge patch: keep sample endpoint (ODF) and add CA for operator StorageReady probe.
-    spec["objectStorage"] = {"caCertSecretName": odf_ca_secret}
+    # Keep sample endpoint (ODF) and add CA for the operator StorageReady probe.
+    spec["objectStorage"]["caCertSecretName"] = odf_ca_secret
 open(path, "w").write(json.dumps({"spec": spec}))
 PY
-  dto_kubectl_mutate patch cmsc "${CR_NAME}" -n "${NAMESPACE}" --type merge --patch-file "${patch_file}"
+  yq e ".metadata.namespace = \"${NAMESPACE}\" | .metadata.name = \"${CR_NAME}\" | . *= load(\"${patch_file}\")" "${CMSC_SAMPLE}" \
+    | dto_kubectl_mutate apply -f -
   if [[ "${DEPLOY_S4:-false}" == "true" ]]; then
     dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (S4 + Keycloak)"
   elif [[ -n "${ODF_S3_CA_SECRET_NAME:-}" ]]; then
