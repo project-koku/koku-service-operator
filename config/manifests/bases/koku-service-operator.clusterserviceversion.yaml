@@ -155,6 +155,15 @@ metadata:
         }
       }
     operatorframework.io/suggested-namespace: cost-onprem
+    operatorframework.io/suggested-namespace-template: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: cost-onprem
+        labels:
+          pod-security.kubernetes.io/enforce: restricted
+          pod-security.kubernetes.io/audit: restricted
+          pod-security.kubernetes.io/warn: restricted
     repository: https://github.com/project-koku/koku-service-operator
     support: Cost Management
   labels:

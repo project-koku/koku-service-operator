@@ -94,6 +94,7 @@ var _ = Describe("cross-namespace reconcile (AllNamespaces)", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: probeNamespace},
 		})).To(Succeed())
 
+		deployTrue := true
 		probe := &costv1alpha1.CostManagementServiceConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        probeKey.Name,
@@ -101,6 +102,8 @@ var _ = Describe("cross-namespace reconcile (AllNamespaces)", func() {
 				Annotations: map[string]string{pauseAnnotation: annotationTrue},
 			},
 			Spec: costv1alpha1.CostManagementServiceConfigSpec{
+				Database: costv1alpha1.DatabaseConfig{Deploy: &deployTrue},
+				Cache:    costv1alpha1.CacheConfig{Deploy: &deployTrue},
 				Auth: costv1alpha1.AuthConfig{
 					Keycloak: costv1alpha1.KeycloakSpec{
 						URL: "http://keycloak.example.svc:8080",

@@ -301,7 +301,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-09-21T15:57:09Z"
+    createdAt: "2026-09-22T02:11:40Z"
     description: |
       Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift
       that deploys and manages the Cost Management stack against external infrastructure
@@ -453,6 +453,15 @@ metadata:
         }
       }
     operatorframework.io/suggested-namespace: cost-onprem
+    operatorframework.io/suggested-namespace-template: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: cost-onprem
+        labels:
+          pod-security.kubernetes.io/enforce: restricted
+          pod-security.kubernetes.io/audit: restricted
+          pod-security.kubernetes.io/warn: restricted
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/project-koku/koku-service-operator
