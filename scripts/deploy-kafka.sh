@@ -8,11 +8,11 @@
 # architecture) with persistent JBOD storage. ZooKeeper is not used — Kafka 4.1
 # operates exclusively in KRaft mode.
 #
-# PREREQUISITE: This script should be run BEFORE install-helm-chart.sh
+# PREREQUISITE: This script should be run BEFORE install-cmsc.sh
 #
 # Typical workflow:
 #   1. ./deploy-kafka.sh            # Deploy Kafka infrastructure (this script)
-#   2. ./install-helm-chart.sh     # Deploy cost management on-premise application
+#   2. ./install-cmsc.sh           # Deploy the Cost Management Service configuration
 #
 # Environment Variables:
 #   LOG_LEVEL - Control output verbosity (ERROR|WARN|INFO|DEBUG, default: WARN)
@@ -744,7 +744,7 @@ display_summary() {
     echo ""
     echo_info "Next Steps:"
     echo_info "  1. (Optional) Verify Kafka cluster: kubectl get kafka $KAFKA_CLUSTER_NAME -n $KAFKA_NAMESPACE"
-    echo_info "  2. Deploy Cost Management On-Premise application: ./install-helm-chart.sh"
+    echo_info "  2. Deploy Cost Management Service configuration: ./scripts/install-cmsc.sh"
     echo ""
 }
 

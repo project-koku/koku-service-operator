@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Unit tests for hack/lib/demo-preprod.bash (no cluster required).
+# Unit tests for scripts/lib/demo-preprod.bash (no cluster required).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
-source "${ROOT}/hack/lib/demo-preprod.bash"
+source "${ROOT}/scripts/lib/demo-preprod.bash"
 
 fail=0
 assert_eq() {
@@ -116,14 +116,14 @@ assert_eq "$ok_rc" "0" "live cluster: read_apps_domain succeeds"
 assert_eq "$ok_dom" "apps.chat-bot.example.com" "live cluster: domain value"
 rm -rf "$stub_dir"
 
-# --help must work when invoked from hack/ (relative $0 after cd to repo root)
-help_out="$(cd "${ROOT}/hack" && ./demo-preprod.sh --help 2>&1)" || {
-  echo "FAIL: --help from hack/ exited $? " >&2
+# --help must work when invoked from scripts/ (relative $0 after cd to repo root)
+help_out="$(cd "${ROOT}/scripts" && ./demo-preprod.sh --help 2>&1)" || {
+  echo "FAIL: --help from scripts/ exited $? " >&2
   echo "$help_out" >&2
   fail=1
 }
-assert_contains "$help_out" "./hack/demo-preprod.sh --dry-run" "--help from hack/ prints usage"
-assert_not_contains "$help_out" "No such file or directory" "--help from hack/ must not sed a relative \$0"
+assert_contains "$help_out" "./scripts/demo-preprod.sh --dry-run" "--help from scripts/ prints usage"
+assert_not_contains "$help_out" "No such file or directory" "--help from scripts/ must not sed a relative \$0"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2

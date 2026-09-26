@@ -623,7 +623,7 @@ Operator Managed (NOT in Git):
 - `internal/controller/*_test.go` -- unit tests (envtest)
 - `test/e2e/` -- E2E tests (existing pytest suite, adapted)
 - `test/scorecard/` -- OLM scorecard tests
-- `hack/` -- dev scripts, test utilities
+- `scripts/` -- dev scripts, test utilities
 
 ### Test Pyramid
 1. **Unit tests (envtest)**: Reconciliation logic with fake API server; ~70% coverage target
@@ -774,7 +774,7 @@ cost-management-operator/
       costmanagement-production.yaml # Production sizing
       costmanagement-byoi.yaml      # External DB, cache, Kafka, OIDC
   bundle/
-  hack/
+  scripts/
   test/
     e2e/                            # Adapted pytest suite
   docs/

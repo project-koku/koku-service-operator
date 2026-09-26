@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# No-cluster tests for hack/deploy-test-operator.sh
+# No-cluster tests for scripts/deploy-test-operator.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="${ROOT}/hack/deploy-test-operator.sh"
+SCRIPT="${ROOT}/scripts/deploy-test-operator.sh"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-dry-run}"
 fail=0
 
@@ -84,7 +84,7 @@ assert_eq "$ros_needed" "1" "api-only suite does not need ROS"
 
 # --- parse duration helper ---
 # shellcheck disable=SC1091
-source "${ROOT}/hack/lib/deploy-test-operator.bash"
+source "${ROOT}/scripts/lib/deploy-test-operator.bash"
 assert_eq "$(dto_parse_duration_seconds 45m)" "2700" "45m → seconds"
 assert_eq "$(dto_parse_duration_seconds 90s)" "90" "90s → seconds"
 warn_file="$(mktemp)"
@@ -97,7 +97,7 @@ assert_contains "$(cat "$warn_file")" "unrecognized" "bogus emits duration warni
 rm -f "$warn_file"
 
 # --- additive: must not invoke chart-only entrypoints ---
-lib="${ROOT}/hack/lib/deploy-test-operator.bash"
+lib="${ROOT}/scripts/lib/deploy-test-operator.bash"
 for pattern in 'deploy-test-cost-onprem' 'install-cmsc' 'helm install' 'helm upgrade'; do
   if grep -E "execute_script.*${pattern}|\\$\\{ROOT\\}/scripts/${pattern}" "$lib" 2>/dev/null; then
     echo "FAIL: lib must not invoke chart path: ${pattern}" >&2

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# No-cluster tests for hack/ci CMSC issuer injection (Prow e2e-pytest 401s).
+# No-cluster tests for scripts/ci CMSC issuer injection (Prow e2e-pytest 401s).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SAMPLE="${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml"
-INJECT="${ROOT}/hack/ci/inject_cmsc_issuer.py"
+INJECT="${ROOT}/scripts/ci/inject_cmsc_issuer.py"
 
 fail=0
 assert_contains() {
@@ -54,7 +54,7 @@ else
 fi
 
 if [[ "$fail" -ne 0 ]]; then
-  echo "hack/ci/e2e_test.sh: FAILED" >&2
+  echo "scripts/ci/e2e_test.sh: FAILED" >&2
   exit 1
 fi
-echo "hack/ci/e2e_test.sh: ok"
+echo "scripts/ci/e2e_test.sh: ok"

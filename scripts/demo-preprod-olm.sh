@@ -7,10 +7,10 @@
 # reconciliation and open the UI once it is available.
 #
 # Usage (from repo root):
-#   ./hack/demo-preprod-olm.sh --prepare
-#   ./hack/demo-preprod-olm.sh --console
-#   ./hack/demo-preprod-olm.sh --watch
-#   ./hack/demo-preprod-olm.sh --dry-run
+#   ./scripts/demo-preprod-olm.sh --prepare
+#   ./scripts/demo-preprod-olm.sh --console
+#   ./scripts/demo-preprod-olm.sh --watch
+#   ./scripts/demo-preprod-olm.sh --dry-run
 #
 # The default catalog is the published file-based catalog image. The console
 # creates the Subscription; NAMESPACE is both its install namespace and the
@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$ROOT"
 # shellcheck disable=SC1091
-source "${ROOT}/hack/lib/demo-preprod.bash"
+source "${ROOT}/scripts/lib/demo-preprod.bash"
 
 MODE="prepare"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
@@ -85,8 +85,8 @@ load_env_file() {
 
 # The local file is intentionally shared so the two demos target the same
 # Cluster Bot without duplicate configuration. Caller-exported values win.
-load_env_file "${ROOT}/hack/demo-preprod.env.example"
-load_env_file "${ROOT}/hack/demo-preprod.local.env"
+load_env_file "${ROOT}/scripts/demo-preprod.env.example"
+load_env_file "${ROOT}/scripts/demo-preprod.local.env"
 KUBE_CONTEXT="${KUBE_CONTEXT:-clusterbot}"
 NAMESPACE="${NAMESPACE:-cost-byoi}"
 CR_NAME="${CR_NAME:-cost-management}"
@@ -169,7 +169,7 @@ if [[ "$MODE" == "prepare" ]]; then
     NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" \
     INFRA_NAMESPACE="$INFRA_NAMESPACE" KAFKA_NAMESPACE="$KAFKA_NAMESPACE" \
     KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
-    ./hack/deploy-byoi.sh
+    ./scripts/deploy-byoi.sh
 
   render_preprod_cr \
     "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
@@ -197,7 +197,7 @@ Install the operator through the OpenShift console:
 
 Then start the demo observers:
 
-  ./hack/demo-preprod-olm.sh --watch
+  ./scripts/demo-preprod-olm.sh --watch
 EOF
   exit 0
 fi

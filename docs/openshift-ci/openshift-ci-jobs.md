@@ -40,7 +40,7 @@ Namespaces used:
 
 OwnNamespace is required for the stack jobs: the operator watches only the namespace it is installed in. See [ownnamespace.md](../development/ownnamespace.md).
 
-The committed BYOI sample uses namespace `cost-byoi` and CR name `cost-management` ([`hack/deploy-byoi.sh`](../../hack/deploy-byoi.sh) defaults). The stack step rewrites those to the Prow names above before apply.
+The committed BYOI sample uses namespace `cost-byoi` and CR name `cost-management` ([`scripts/deploy-byoi.sh`](../../scripts/deploy-byoi.sh) defaults). The stack step rewrites those to the Prow names above before apply.
 
 Each e2e job section below starts with **Answers** (the question a green run answers) and **Does not prove**. Snapshot counts for a first-time reader: [What a green run looks like](#what-a-green-run-looks-like).
 
@@ -100,7 +100,7 @@ It does **not** source `koso-sanitize` and has **no** dump trap. Failures are th
 
 That includes OLM CatalogSource + Subscription, BYOI + CMSC to `status.phase=Ready`, then pytest covering auth/JWT, infra (DB/S3/Kafka), Sources API, Koku processing, and this repo’s OCP e2e (NISE → ingress → masu). ROS follows the BYOI sample (`spec.ros.enabled: false`): ROS tests are **collected then skipped**, not deselected.
 
-**Does not prove:** Cost Management Metrics Operator (CMMO) uploads, Playwright UI, Helm chart tests, IQE, or ROS/Kruize. CMMO is a [separate product](../install/cmmo.md); [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) never installs it.
+**Does not prove:** Cost Management Metrics Operator (CMMO) uploads, Playwright UI, Helm chart tests, IQE, or ROS/Kruize. CMMO is a [separate product](../install/cmmo.md); [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) never installs it.
 
 Timeout: 2h **lease**. Test container: `koku-service-operator-e2e` (has `oc` via `cli: latest`, Python 3.11, pytest, koku-nise).
 
@@ -109,7 +109,7 @@ sequenceDiagram
   participant Prow
   participant Sanitize as koso-sanitize
   participant OLM as install step
-  participant Stack as hack/ci/e2e.sh
+  participant Stack as scripts/ci/e2e.sh
   participant Smoke as run-pytest.sh -m smoke
   participant Full as run-pytest.sh
   participant Hive as Claimed OCP 4.20
@@ -147,7 +147,7 @@ Dynamic `oc` calls use `_run_sanitized` / `_capture_sanitized` so kube API hostn
 
 ### Step `stack`
 
-Runs [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) with:
+Runs [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) with:
 
 ```bash
 export KUBE_CONTEXT="$(kubectl config current-context)"
@@ -165,15 +165,15 @@ What `e2e.sh` does (operator **must already be installed**):
 | Phase | Script / fixture | Result |
 |-------|------------------|--------|
 | Pin kubeconfig | isolated flattened kubeconfig for `$KUBE_CONTEXT` | CI pod cannot drift to another cluster |
-| BYOI | [`hack/deploy-byoi.sh`](../../hack/deploy-byoi.sh) → [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) | Kafka (AMQ Streams), Postgres/Valkey/MinIO in `cost-onprem-infra`, RHBK in `keycloak`, OAuth secret mirror. No sibling `cost-onprem-chart` clone. |
+| BYOI | [`scripts/deploy-byoi.sh`](../../scripts/deploy-byoi.sh) → [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) | Kafka (AMQ Streams), Postgres/Valkey/MinIO in `cost-onprem-infra`, RHBK in `keycloak`, OAuth secret mirror. No sibling `cost-onprem-chart` clone. |
 | Secret aliases | copies `byoi-*` secrets to `{CR_NAME}-*` names | Pytest fixtures expect `{cr.name}-db-credentials` etc. |
 | CMSC | [`config/samples/byoi/app/costmanagementserviceconfig.yaml`](../../config/samples/byoi/app/costmanagementserviceconfig.yaml) | awk rewrites `cost-byoi` / `cost-management` / `cost-byoi-infra` to Prow NS/CR/infra, plus domain and Kafka bootstrap. `ros.enabled` as in the sample (beta: typically false). |
-| Keycloak issuer | [`hack/ci/inject_cmsc_issuer.py`](../../hack/ci/inject_cmsc_issuer.py) + merge-patch | `issuerURL` = `https://<keycloak route>` (tokens); JWKS stays on in-cluster `url`; `tls.insecureSkipVerify: true` because claimed-cluster ingress certs are not in the oauth2-proxy trust store |
+| Keycloak issuer | [`scripts/ci/inject_cmsc_issuer.py`](../../scripts/ci/inject_cmsc_issuer.py) + merge-patch | `issuerURL` = `https://<keycloak route>` (tokens); JWKS stays on in-cluster `url`; `tls.insecureSkipVerify: true` because claimed-cluster ingress certs are not in the oauth2-proxy trust store |
 | Ready | `oc wait cmsc/cost-onprem --for=jsonpath='{.status.phase}'=Ready` | Default `CMSC_READY_TIMEOUT=45m` |
 
 `KEYCLOAK_ADMIN_VIA` defaults to `port-forward` in this script because the Prow pod cannot reach Hive apps Routes for the Keycloak Admin API.
 
-No-cluster regression tests for issuer injection: [`hack/ci/e2e_test.sh`](../../hack/ci/e2e_test.sh) (run via `make test-hack` on GitHub Actions).
+No-cluster regression tests for issuer injection: [`scripts/ci/e2e_test.sh`](../../scripts/ci/e2e_test.sh) (run via `make test-scripts` on GitHub Actions).
 
 Do **not** call Helm / [`scripts/install-cmsc.sh`](../../scripts/install-cmsc.sh) on this path. The operator reconciles the CMSC.
 
@@ -208,7 +208,7 @@ HELM_RELEASE_NAME=cost-onprem   # resource prefix (app.kubernetes.io/instance), 
 KUBE_CONTEXT=<claimed cluster>
 ```
 
-Reproduce locally / on Cluster Bot: [clusterbot-operator-pytest.md](../development/clusterbot-operator-pytest.md). The Prow difference is OLM catalog install instead of `hack/deploy-incluster.sh`.
+Reproduce locally / on Cluster Bot: [clusterbot-operator-pytest.md](../development/clusterbot-operator-pytest.md). The Prow difference is OLM catalog install instead of `scripts/deploy-incluster.sh`.
 
 ---
 
@@ -342,7 +342,7 @@ Prow also collects JUnit from `${ARTIFACT_DIR}/junit*.xml` for the job’s test 
 | Prow step | This repo |
 |-----------|-----------|
 | Catalog / CSV wait | (inline in `openshift/release` config; no script) |
-| `stack` | [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) → [`hack/deploy-byoi.sh`](../../hack/deploy-byoi.sh) → [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) → [`hack/ci/inject_cmsc_issuer.py`](../../hack/ci/inject_cmsc_issuer.py) |
+| `stack` | [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) → [`scripts/deploy-byoi.sh`](../../scripts/deploy-byoi.sh) → [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) → [`scripts/ci/inject_cmsc_issuer.py`](../../scripts/ci/inject_cmsc_issuer.py) |
 | CMSC sample | [`config/samples/byoi/app/costmanagementserviceconfig.yaml`](../../config/samples/byoi/app/costmanagementserviceconfig.yaml) |
 | `smoke` / `pytest` | [`scripts/run-pytest.sh`](../../scripts/run-pytest.sh) → [`test/pytest/`](../../test/pytest/) (`test/pytest/reports/` in the workspace) |
 | `iqe` | [`scripts/run-iqe-tests.sh`](../../scripts/run-iqe-tests.sh) → [`scripts/lib/iqe-filters.sh`](../../scripts/lib/iqe-filters.sh) (`tests/reports/iqe_junit.xml` in the workspace). Pull secret: inline in `openshift/release` (`insights-qe-secrets`) |

@@ -158,7 +158,7 @@ Summary:
 
 # 2. Operator in-cluster (AllNamespaces; suggested NS cost-onprem)
 export IMG=quay.io/<you>/koku-service-operator:<tag>
-./hack/deploy-incluster.sh cost-onprem
+./scripts/deploy-incluster.sh cost-onprem
 
 # 3. Apply + patch CMSC (S4 endpoint, Keycloak, clusterDomain) — see runbook
 

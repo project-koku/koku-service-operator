@@ -2,8 +2,8 @@
 # Uses lightweight Redpanda in cost-byoi-infra (no AMQ Streams OLM install).
 #
 # Happy path:
-#   ./hack/clusterbot-smoke.sh
-#   IMG=… ./hack/deploy-incluster.sh cost-byoi
+#   ./scripts/clusterbot-smoke.sh
+#   IMG=… ./scripts/deploy-incluster.sh cost-byoi
 #
 # Or manually: apply infra + kafka.yaml, copy secrets, then this CR.
 # Patch spec.global.clusterDomain to your apps.* domain before relying on Routes.

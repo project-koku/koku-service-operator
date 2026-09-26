@@ -138,7 +138,7 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, "  Examples:")
 		_, _ = fmt.Fprintln(os.Stderr, "    IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make run")
 		_, _ = fmt.Fprintln(os.Stderr, "    go run ./cmd/main.go --dev --operator-image=quay.io/.../koku-service-operator:tag")
-		_, _ = fmt.Fprintln(os.Stderr, "  In-cluster lab: IMG=... ./hack/deploy-incluster.sh <ns> (passes the flag for you).")
+		_, _ = fmt.Fprintln(os.Stderr, "  In-cluster lab: IMG=... ./scripts/deploy-incluster.sh <ns> (passes the flag for you).")
 		os.Exit(1)
 	}
 	resources.OperatorImage = operatorImage

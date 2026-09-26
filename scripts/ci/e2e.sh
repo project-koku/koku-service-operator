@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Prow / Cluster Bot: BYOI + CMSC Ready + pytest against an already-installed
 # operator. Does NOT install the operator (OLM `install` step or
-# hack/deploy-incluster.sh must have already run). Does NOT call Helm
+# scripts/deploy-incluster.sh must have already run). Does NOT call Helm
 # (scripts/install-cmsc.sh is the chart installer — never use it here).
 #
 # Usage (from operator repo root, operator already installed):
 #   KUBE_CONTEXT=<context> NAMESPACE=cost-onprem CR_NAME=cost-onprem \
-#     INFRA_NAMESPACE=cost-onprem-infra ./hack/ci/e2e.sh
+#     INFRA_NAMESPACE=cost-onprem-infra ./scripts/ci/e2e.sh
 #
 # KUBE_CONTEXT is required unless KUBECONFIG points at a single-context kubeconfig.
 # The script pins an isolated KUBECONFIG (exported to child scripts) so kubectl/oc
@@ -166,7 +166,7 @@ resolve_chart_root() {
 }
 
 # Optional sibling chart checkout. Prow does not clone cost-onprem-chart:
-# hack/deploy-byoi.sh uses this repo's scripts/deploy-rhbk.sh.
+# scripts/deploy-byoi.sh uses this repo's scripts/deploy-rhbk.sh.
 ensure_chart_root() {
   local found
   found="$(resolve_chart_root || true)"
@@ -355,7 +355,7 @@ trap on_exit EXIT
 
 if ! "$KUBECTL" get crd costmanagementserviceconfigs.service.costmanagement.openshift.io >/dev/null 2>&1; then
   echo "error: CMSC CRD not found. Install the operator first" >&2
-  echo "  (Prow e2e 'install' step, or IMG=… ./hack/deploy-incluster.sh ${NAMESPACE})." >&2
+  echo "  (Prow e2e 'install' step, or IMG=… ./scripts/deploy-incluster.sh ${NAMESPACE})." >&2
   exit 1
 fi
 
@@ -382,7 +382,7 @@ KUBE_CONTEXT="$KUBE_CONTEXT" KUBECTL="$KUBECTL" \
   KAFKA_NAMESPACE="$KAFKA_NAMESPACE" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
   CHART_ROOT="${CHART_ROOT:-}" \
   KEYCLOAK_ADMIN_VIA="$KEYCLOAK_ADMIN_VIA" \
-  ./hack/deploy-byoi.sh
+  ./scripts/deploy-byoi.sh
 
 echo "[2/4] Pytest-compatible Secret names ({cr.name}-*)..."
 copy_secret byoi-db-credentials "${CR_NAME}-db-credentials" "$NAMESPACE"
@@ -448,7 +448,7 @@ awk -v ns="$NAMESPACE" -v cr="$CR_NAME" -v infra="$INFRA_NAMESPACE" \
   in_meta && /^  name: cost-management$/ { print "  name: " cr; next }
   { print }
 ' "$SAMPLE_CR" >"$TMP_CR"
-python3 "${ROOT}/hack/ci/inject_cmsc_issuer.py" "$TMP_CR" "$KEYCLOAK_ISSUER"
+python3 "${ROOT}/scripts/ci/inject_cmsc_issuer.py" "$TMP_CR" "$KEYCLOAK_ISSUER"
 "$KUBECTL" apply -f "$TMP_CR"
 rm -f "$TMP_CR"
 

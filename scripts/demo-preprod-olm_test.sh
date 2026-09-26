@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-help="$(cd "$ROOT" && ./hack/demo-preprod-olm.sh --help)"
+help="$(cd "$ROOT" && ./scripts/demo-preprod-olm.sh --help)"
 case "$help" in
   *"published catalog"*) ;;
   *)
@@ -13,21 +13,21 @@ case "$help" in
     ;;
 esac
 case "$help" in
-  *"./hack/demo-preprod-olm.sh --watch"*) ;;
+  *"./scripts/demo-preprod-olm.sh --watch"*) ;;
   *)
     echo "FAIL: help must describe the watch phase" >&2
     exit 1
     ;;
 esac
 case "$help" in
-  *"./hack/demo-preprod-olm.sh --console"*) ;;
+  *"./scripts/demo-preprod-olm.sh --console"*) ;;
   *)
     echo "FAIL: help must describe the Console URL mode" >&2
     exit 1
     ;;
 esac
 
-plan="$(cd "$ROOT" && ./hack/demo-preprod-olm.sh --dry-run)"
+plan="$(cd "$ROOT" && ./scripts/demo-preprod-olm.sh --dry-run)"
 case "$plan" in
   *"quay.io/project-koku/koku-service-operator-catalog:latest"*) ;;
   *)
@@ -50,20 +50,20 @@ case "$plan" in
     ;;
 esac
 
-if rg -Fq 'CONSOLE_URL="https://console-openshift-console.${DOMAIN}"' "$ROOT/hack/demo-preprod-olm.sh"; then
+if grep -Fq 'CONSOLE_URL="https://console-openshift-console.${DOMAIN}"' "$ROOT/scripts/demo-preprod-olm.sh"; then
   :
 else
   echo "FAIL: prepare output must derive the OpenShift Console URL" >&2
   exit 1
 fi
-if rg -Fq 'if [[ "$MODE" == "console" ]]' "$ROOT/hack/demo-preprod-olm.sh"; then
+if grep -Fq 'if [[ "$MODE" == "console" ]]' "$ROOT/scripts/demo-preprod-olm.sh"; then
   :
 else
   echo "FAIL: helper must offer a no-mutation Console URL mode" >&2
   exit 1
 fi
-if rg -Fq 'Console username: ${CONSOLE_USERNAME}' "$ROOT/hack/demo-preprod-olm.sh" && \
-   rg -Fq 'retrieve it from the ClusterBot provisioning output' "$ROOT/hack/demo-preprod-olm.sh"; then
+if grep -Fq 'Console username: ${CONSOLE_USERNAME}' "$ROOT/scripts/demo-preprod-olm.sh" && \
+   grep -Fq 'retrieve it from the ClusterBot provisioning output' "$ROOT/scripts/demo-preprod-olm.sh"; then
   :
 else
   echo "FAIL: helper must accurately describe the ClusterBot Console credentials" >&2

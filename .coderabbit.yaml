@@ -214,7 +214,7 @@ reviews:
         prod credentials, and cases that skip cleanup. Prefer existing
         helpers (e2e_helpers, jwt_forge) over new ad-hoc clients.
 
-    - path: "{hack,scripts}/**"
+    - path: "scripts/**"
       instructions: |
         Shell must be `set -euo pipefail` where bash. Flag unquoted
         expansions, kubectl against implicit current-context in destructive

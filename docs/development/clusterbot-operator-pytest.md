@@ -11,7 +11,7 @@ cluster-bot reproduction are tracked in
 
 | Related docs | When to use |
 |--------------|-------------|
-| [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`hack/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
+| [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`scripts/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
 | [allnamespaces.md](allnamespaces.md) | AllNamespaces watch vs suggested install NS |
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
@@ -112,15 +112,15 @@ into `cost-onprem`.
 
 See [allnamespaces.md](allnamespaces.md).
 
-### 2. Use `hack/deploy-incluster.sh`, not `make deploy` from a laptop
+### 2. Use `scripts/deploy-incluster.sh`, not `make deploy` from a laptop
 
 | Path | Cluster Bot pytest? |
 |------|---------------------|
-| `IMG=quay.io/... ./hack/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, AllNamespaces |
+| `IMG=quay.io/... ./scripts/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, AllNamespaces |
 | `make deploy` / `install-cmsc.sh` operator step | **No** — integrated registry push from laptop, cert-manager |
 | `make run` / `go run ./cmd/main.go` | **No** — `*.svc.cluster.local` not reachable from laptop |
 
-`deploy-incluster.sh` calls `hack/deploy-dev.sh` (CRDs + RBAC), creates a
+`deploy-incluster.sh` calls `scripts/deploy-dev.sh` (CRDs + RBAC), creates a
 self-signed webhook serving-cert Secret, and rolls out the manager. It does
 **not** install Validating/MutatingWebhookConfiguration — CR apply is not
 admission-gated on this lab path (OLM/cert-manager covers production).
@@ -317,7 +317,7 @@ procedures: [keycloak.md](../install/keycloak.md) and [cmmo.md](../install/cmmo.
 
 ```bash
 export IMG=quay.io/<your-quay-user>/koku-service-operator:clusterbot-test
-./hack/deploy-incluster.sh cost-onprem
+./scripts/deploy-incluster.sh cost-onprem
 ```
 
 ```bash
@@ -355,7 +355,7 @@ DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   | oc apply -f -
 ```
 
-`hack/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
+`scripts/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
 default ServiceAccount in the operator namespace.
 
 Why these patches (sample defaults are ODF/CRC, not cluster-bot S4):
@@ -529,9 +529,9 @@ oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 | Script | Cluster-bot pytest path? |
 |--------|--------------------------|
 | `deploy-test-cost-onprem.sh --deploy-s4 --skip-helm ...` | **Yes** — infra (RHBK, Kafka, S4) |
-| `hack/deploy-incluster.sh` | **Yes** — operator (preferred) |
-| `hack/deploy-byoi.sh` | Optional — full BYOI deps (see pre-prod) |
-| `hack/clusterbot-smoke.sh` | **Alternate** — Redpanda smoke, not this path |
+| `scripts/deploy-incluster.sh` | **Yes** — operator (preferred) |
+| `scripts/deploy-byoi.sh` | Optional — full BYOI deps (see pre-prod) |
+| `scripts/clusterbot-smoke.sh` | **Alternate** — Redpanda smoke, not this path |
 | `install-cmsc.sh` / `make deploy` | **Avoid** on cluster-bot from laptop |
 | `make run` | **No** — BYOI hostnames not reachable from laptop |
 | `scripts/run-pytest.sh` | **Yes** — test orchestration |

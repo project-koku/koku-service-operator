@@ -27,21 +27,21 @@
 #
 # Examples:
 #   # Default (clean output with successes/warnings/errors only)
-#   ./install-helm-chart.sh
+#   ./install-cmsc.sh
 #
 #   # Detailed output with all info messages
-#   LOG_LEVEL=INFO ./install-helm-chart.sh
+#   LOG_LEVEL=INFO ./install-cmsc.sh
 #
 #   # Quiet (errors only)
-#   LOG_LEVEL=ERROR ./install-helm-chart.sh
+#   LOG_LEVEL=ERROR ./install-cmsc.sh
 #
 #   # Generic S3 backend (non-ODF)
-#   S3_ENDPOINT=s3.openshift-storage.svc S3_PORT=443 ./install-helm-chart.sh
+#   S3_ENDPOINT=s3.openshift-storage.svc S3_PORT=443 ./install-cmsc.sh
 #
 #   # AWS S3 (credentials via env; use public CA / verify SSL; buckets must be globally unique)
 #   S3_ENDPOINT=s3.us-east-1.amazonaws.com S3_REGION=us-east-1 S3_VERIFY_SSL=true \\
 #     S3_BUCKET_PREFIX=myorg-costonprem-prod \\
-#     S3_ACCESS_KEY=... S3_SECRET_KEY=... ./install-helm-chart.sh
+#     S3_ACCESS_KEY=... S3_SECRET_KEY=... ./install-cmsc.sh
 
 set -e  # Exit on any error
 

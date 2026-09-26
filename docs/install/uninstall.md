@@ -78,7 +78,7 @@ The namespace should finish terminating within a few seconds.
 
 If `oc patch` is denied with a webhook timeout, the operator Service is gone
 but the cluster-scoped admission configs remain (`failurePolicy: Fail` on CMSC
-CREATE/UPDATE). That is the OLM path; in-cluster `hack/deploy-incluster.sh`
+CREATE/UPDATE). That is the OLM path; in-cluster `scripts/deploy-incluster.sh`
 does not install those configs. Delete the Cost Management webhook
 configurations (or the CSV, which owns them), then retry the patch:
 
@@ -92,7 +92,7 @@ Then retry the `oc patch` above, then ConsoleLink / Kruize RBAC.
 
 ## Lab reset
 
-`hack/demo-preprod.sh --reset` deletes the CR first while the operator is
+`scripts/demo-preprod.sh --reset` deletes the CR first while the operator is
 Available, and strips the finalizer (plus ConsoleLink / Kruize RBAC) if the
 operator is already gone.
 

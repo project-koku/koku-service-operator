@@ -5,11 +5,11 @@
 # This script uses a temporary port-forward and skopeo with --dest-tls-verify=false.
 #
 # Usage:
-#   ./hack/push-image-crc.sh <full-image-ref>
+#   ./scripts/push-image-crc.sh <full-image-ref>
 #
 # Example:
 #   make docker-build IMG=default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev
-#   ./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev
+#   ./scripts/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku-service-operator:dev
 #
 # Prerequisites:
 #   - CRC running; oc logged in

@@ -7,8 +7,8 @@
 # (*.svc.cluster.local) — those names are not resolvable from a laptop.
 #
 # Usage (from repo root):
-#   IMG=quay.io/example/koku-service-operator:tag ./hack/deploy-incluster.sh cost-byoi
-#   IMG=... ./hack/deploy-incluster.sh cost-tests
+#   IMG=quay.io/example/koku-service-operator:tag ./scripts/deploy-incluster.sh cost-byoi
+#   IMG=... ./scripts/deploy-incluster.sh cost-tests
 #
 # Build an amd64 image for typical OpenShift nodes:
 #   docker buildx build --platform linux/amd64 -t "$IMG" --push .
@@ -45,7 +45,7 @@ echo "Cluster:   $(oc whoami --show-server)"
 echo ""
 
 # CRDs + ClusterRoleBindings (default SA) + anyuid SCC.
-./hack/deploy-dev.sh "$NS"
+./scripts/deploy-dev.sh "$NS"
 
 echo "[in-cluster] Ensuring webhook serving-cert Secret (${WEBHOOK_SECRET})..."
 # controller-runtime defaults to tls.crt / tls.key under this mount path.
@@ -131,7 +131,7 @@ oc -n "$NS" rollout status deploy/koku-service-operator --timeout=180s
 echo ""
 echo "Operator is running in ${NS}."
 echo ""
-echo "If you already ran ./hack/clusterbot-smoke.sh, Secrets + the Redpanda smoke CR"
+echo "If you already ran ./scripts/clusterbot-smoke.sh, Secrets + the Redpanda smoke CR"
 echo "are applied — watch conditions (do not re-apply the AMQ Streams sample CR;"
 echo "that would overwrite bootstrapServers):"
 echo "  oc -n ${NS} get cmsc -w"

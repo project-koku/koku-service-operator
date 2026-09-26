@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Full pre-prod demo: BYOI (AMQ Streams + Keycloak) → in-cluster operator → UI.
 #
-# Usage (from repo root or hack/):
-#   ./hack/demo-preprod.sh
-#   ./hack/demo-preprod.sh --dry-run
-#   ./hack/demo-preprod.sh --reset          # delete app/infra/kafka/keycloak NS first
-#   ./hack/demo-preprod.sh --no-tmux
-#   ./hack/demo-preprod.sh --rebuild        # force operator image rebuild
-#   ./hack/demo-preprod.sh --crc            # target local CRC (arm64, single node)
+# Usage (from repo root or scripts/):
+#   ./scripts/demo-preprod.sh
+#   ./scripts/demo-preprod.sh --dry-run
+#   ./scripts/demo-preprod.sh --reset          # delete app/infra/kafka/keycloak NS first
+#   ./scripts/demo-preprod.sh --no-tmux
+#   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
+#   ./scripts/demo-preprod.sh --crc            # target local CRC (arm64, single node)
 #
-# Settings: env vars, then hack/demo-preprod.local.env, then
-# hack/demo-preprod.env.example (and hack/demo-preprod.crc.env with --crc).
+# Settings: env vars, then scripts/demo-preprod.local.env, then
+# scripts/demo-preprod.env.example (and scripts/demo-preprod.crc.env with --crc).
 #
 # tmux (default): left pane = numbered steps; top-right = kubectl klock pods
 # in NAMESPACE; bottom-right = kubectl klock pods in KAFKA_NAMESPACE.
@@ -23,7 +23,7 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 cd "$ROOT"
 # shellcheck disable=SC1091
-source "${ROOT}/hack/lib/demo-preprod.bash"
+source "${ROOT}/scripts/lib/demo-preprod.bash"
 
 DEMO_RESET="${DEMO_RESET:-0}"
 DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
@@ -83,13 +83,13 @@ if [[ "$DEMO_CRC" == "1" ]]; then
   # The CRC/arm64 profile overrides the shipped amd64 defaults in .env.example
   # (KUBE_CONTEXT, BUILD_MODE, Kafka sizing, image overrides) but still yields to
   # anything you export or put in .local.env.
-  load_env_file "${ROOT}/hack/demo-preprod.local.env"
-  load_env_file "${ROOT}/hack/demo-preprod.crc.env"
-  load_env_file "${ROOT}/hack/demo-preprod.env.example"
+  load_env_file "${ROOT}/scripts/demo-preprod.local.env"
+  load_env_file "${ROOT}/scripts/demo-preprod.crc.env"
+  load_env_file "${ROOT}/scripts/demo-preprod.env.example"
 else
   # amd64 / clusterbot: unchanged, .crc.env is never read.
-  load_env_file "${ROOT}/hack/demo-preprod.env.example"
-  load_env_file "${ROOT}/hack/demo-preprod.local.env"
+  load_env_file "${ROOT}/scripts/demo-preprod.env.example"
+  load_env_file "${ROOT}/scripts/demo-preprod.local.env"
 fi
 
 if [[ "$DEMO_CRC" == "1" ]]; then
@@ -185,14 +185,14 @@ Pre-prod demo plan
   tmux:        ${TMUX_SESSION}  (NO_TMUX=${DEMO_NO_TMUX})
   reset:       ${DEMO_RESET}
   rebuild:     ${DEMO_REBUILD}
-  crc mode:    ${DEMO_CRC}$([[ "$DEMO_CRC" == "1" ]] && echo "  (arm64 image overrides + single-node Kafka from hack/demo-preprod.crc.env)")
+  crc mode:    ${DEMO_CRC}$([[ "$DEMO_CRC" == "1" ]] && echo "  (arm64 image overrides + single-node Kafka from scripts/demo-preprod.crc.env)")
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
   [1/8] Preflight (context, oc, CHART_ROOT, StorageClass)
   [2/8] --reset: delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}
-  [3/8] BYOI (./hack/deploy-byoi.sh) — skip inner stages that are already Ready
+  [3/8] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
   [4/8] Operator image (${BUILD_MODE}: docker or OpenShift binary build)
-  [5/8] In-cluster operator (./hack/deploy-incluster.sh)
+  [5/8] In-cluster operator (./scripts/deploy-incluster.sh)
   [6/8] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
   [7/8] Wait until UI Deployment is Ready
   [8/8] open the UI Route
@@ -244,7 +244,7 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/hack/demo-preprod.sh")"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -280,15 +280,15 @@ if [[ "$DEMO_CRC" == "1" ]]; then
   NODE_ARCH="$("$KUBECTL" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true)"
   if [[ "$NODE_ARCH" != "arm64" ]]; then
     echo "warning: --crc expects an arm64 node but the cluster reports '${NODE_ARCH:-unknown}'." >&2
-    echo "  The arm64 image overrides in hack/demo-preprod.crc.env may not match this node." >&2
+    echo "  The arm64 image overrides in scripts/demo-preprod.crc.env may not match this node." >&2
   else
-    ok "node architecture ${NODE_ARCH} (arm64 image overrides from hack/demo-preprod.crc.env)"
+    ok "node architecture ${NODE_ARCH} (arm64 image overrides from scripts/demo-preprod.crc.env)"
   fi
 fi
 
 if [[ ! -x "${CHART_ROOT}/scripts/deploy-rhbk.sh" ]]; then
   echo "error: CHART_ROOT has no scripts/deploy-rhbk.sh: ${CHART_ROOT}" >&2
-  echo "  copy hack/demo-preprod.env.example → hack/demo-preprod.local.env and set CHART_ROOT" >&2
+  echo "  copy scripts/demo-preprod.env.example → scripts/demo-preprod.local.env and set CHART_ROOT" >&2
   exit 1
 fi
 ok "CHART_ROOT=${CHART_ROOT}"
@@ -550,7 +550,7 @@ else
     crc_fix_keycloak_hostname_v2 "$KEYCLOAK_NAMESPACE" &
     KC_FIX_PID=$!
   fi
-  ./hack/deploy-byoi.sh
+  ./scripts/deploy-byoi.sh
   [[ -n "$KC_FIX_PID" ]] && wait "$KC_FIX_PID" 2>/dev/null || true
 fi
 ok "BYOI ready"
@@ -620,7 +620,7 @@ step "In-cluster operator"
 if [[ "$DEMO_REBUILD" != "1" && "$BUILT_IMAGE" != "1" ]] && operator_ready; then
   skip "koku-service-operator Deployment already Available"
 else
-  IMG="$IMG" ./hack/deploy-incluster.sh "$NAMESPACE"
+  IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 fi
 ok "operator running"
 

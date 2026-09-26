@@ -19,8 +19,8 @@ NS is `cost-onprem`. OwnNamespace is not supported. Two current vehicles:
    [olm-bundle-testing.md](../development/olm-bundle-testing.md)
    (`make bundle-run`). Create the target namespace first and install into it.
 2. **In-cluster Deployment** from this repo —
-   `IMG=<your-image> ./hack/deploy-incluster.sh "$NAMESPACE"` after CRDs/RBAC
-   (`./hack/deploy-dev.sh "$NAMESPACE"`).
+   `IMG=<your-image> ./scripts/deploy-incluster.sh "$NAMESPACE"` after CRDs/RBAC
+   (`./scripts/deploy-dev.sh "$NAMESPACE"`).
 
 The generated CSV advertises **AllNamespaces** and the manager watches every
 namespace. Put the CR in the install namespace. Recommended: put the CR in `cost-onprem` (same as the suggested
@@ -33,8 +33,8 @@ with an `OperatorGroup` that sets `targetNamespaces` can fail the CSV with
 `OwnNamespace InstallModeType not supported` when the published catalog only
 supports AllNamespaces. Working paths today:
 
-- **In-cluster** (this repo): `IMG=<image> ./hack/deploy-incluster.sh
-  "$NAMESPACE"` after `./hack/deploy-dev.sh "$NAMESPACE"`.
+- **In-cluster** (this repo): `IMG=<image> ./scripts/deploy-incluster.sh
+  "$NAMESPACE"` after `./scripts/deploy-dev.sh "$NAMESPACE"`.
 - **OLM + lab layout:** the catalog Subscription installs the **OLM package**
   only; it does not place the manager Deployment in your app namespace. Install
   the catalog Subscription in `openshift-operators` (or another namespace OLM

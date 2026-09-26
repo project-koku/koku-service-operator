@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helpers for hack/demo-preprod.sh. Sourced; do not execute.
+# Helpers for scripts/demo-preprod.sh. Sourced; do not execute.
 # OpenShift's UBI go-toolset image runs as a random UID. Writing the Go binary
 # into WORKDIR /workspace fails with "open manager: permission denied".
 patch_operator_dockerfile() {

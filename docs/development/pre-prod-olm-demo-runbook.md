@@ -1,7 +1,7 @@
 # Pre-prod OLM demo runbook
 
 Use this on a freshly provisioned Cluster Bot OpenShift cluster. It keeps the
-existing `hack/demo-preprod.sh` path untouched and installs the published OLM
+existing `scripts/demo-preprod.sh` path untouched and installs the published OLM
 catalog through the OpenShift console instead of building or pushing an
 operator image locally.
 
@@ -34,7 +34,7 @@ KUBE_CONTEXT=clusterbot \
   NAMESPACE=cost-byoi \
   CR_NAME=cost-management \
   INFRA_NAMESPACE=cost-byoi-infra \
-  ./hack/demo-preprod-olm.sh --prepare
+  ./scripts/demo-preprod-olm.sh --prepare
 ```
 
 Wait for this command to complete. It writes the rendered CMSC to:
@@ -47,13 +47,13 @@ If infrastructure is already present, do not rerun `--prepare`. Print the
 current cluster Console URL and username instead:
 
 ```bash
-./hack/demo-preprod-olm.sh --console
+./scripts/demo-preprod-olm.sh --console
 ```
 
 Use the `kubeadmin` password issued with the ClusterBot provisioning output.
 It cannot be retrieved from the cluster: `kube-system/kubeadmin` contains only
 a one-way password hash. If you want the helper to repeat the issued password,
-set `CONSOLE_PASSWORD` in `hack/demo-preprod.local.env` (which remains
+set `CONSOLE_PASSWORD` in `scripts/demo-preprod.local.env` (which remains
 untracked). The application UI uses the separate demo realm login `admin` /
 `admin` after it is deployed.
 
@@ -105,7 +105,7 @@ The script starts tmux panes for CMSC status and workloads. A third pane waits
 for the UI Deployment and opens the browser once it is ready.
 
 ```bash
-KUBE_CONTEXT=clusterbot ./hack/demo-preprod-olm.sh --watch
+KUBE_CONTEXT=clusterbot ./scripts/demo-preprod-olm.sh --watch
 ```
 
 Success is `Available=True` and `UIReady=True` on the CMSC, followed by a
@@ -115,7 +115,7 @@ log in with `admin` / `admin`.
 If you do not want the browser to open automatically:
 
 ```bash
-KUBE_CONTEXT=clusterbot ./hack/demo-preprod-olm.sh --watch --no-open
+KUBE_CONTEXT=clusterbot ./scripts/demo-preprod-olm.sh --watch --no-open
 ```
 
 ## Cleanup

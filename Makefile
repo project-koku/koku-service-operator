@@ -99,7 +99,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" \
+	$(CONTROLLER_GEN) object:headerFile="scripts/boilerplate.go.txt" \
 	  "paths=./api/...;./internal/...;./cmd/...;./test/..."
 
 .PHONY: fmt
@@ -114,12 +114,12 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-.PHONY: test-hack
-test-hack: ## Run no-cluster hack/ script tests (pre-prod demos, deploy-test-operator).
-	./hack/demo-preprod_test.sh
-	./hack/demo-preprod-olm_test.sh
-	./hack/deploy-test-operator_test.sh
-	./hack/ci/e2e_test.sh
+.PHONY: test-scripts
+test-scripts: ## Run no-cluster script tests (pre-prod demos, deploy-test-operator).
+	./scripts/demo-preprod_test.sh
+	./scripts/demo-preprod-olm_test.sh
+	./scripts/deploy-test-operator_test.sh
+	./scripts/ci/e2e_test.sh
 	./scripts/pytest_markexpr_test.sh
 	./scripts/deploy-rhbk_test.sh
 
@@ -229,12 +229,12 @@ CRC_OPERATOR_IMG ?= $(CRC_REGISTRY_HOST)/$(CRC_NAMESPACE)/koku-service-operator:
 
 .PHONY: crc-dev
 crc-dev: ## Install CRDs and RBAC on CRC (namespace=$(CRC_NAMESPACE)).
-	./hack/deploy-crc.sh $(CRC_NAMESPACE)
+	./scripts/deploy-crc.sh $(CRC_NAMESPACE)
 
 .PHONY: crc-operator-image
 crc-operator-image: ## Build and push operator image to the CRC internal registry.
 	$(MAKE) docker-build IMG=$(CRC_OPERATOR_IMG)
-	./hack/push-image-crc.sh $(CRC_OPERATOR_IMG)
+	./scripts/push-image-crc.sh $(CRC_OPERATOR_IMG)
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

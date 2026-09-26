@@ -32,7 +32,7 @@ go.work
 .serena
 
 # Machine-local demo settings (CHART_ROOT, etc.)
-hack/demo-preprod.local.env
+scripts/demo-preprod.local.env
 
 # Git worktrees and Claude session data
 .worktrees/

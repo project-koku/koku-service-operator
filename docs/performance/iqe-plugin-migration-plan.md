@@ -11,7 +11,7 @@
 The operator performance test suite lives in
 `test/pytest/suites/performance/` (61 tests, 21 modules).  It was ported
 from `cost-onprem-chart` as part of COST-8147 and is runnable today via
-`hack/deploy-test-operator.sh --perf-only` or `scripts/run-pytest.sh`.
+`scripts/deploy-test-operator.sh --perf-only` or `scripts/run-pytest.sh`.
 
 This document captures a plan and open questions for the team to evaluate
 whether these tests should be moved into an IQE plugin, and if so, which
@@ -207,7 +207,7 @@ utility is not a template to copy — it is unrelated tooling.
 
 | Job / file | Change |
 |---|---|
-| `insights_onprem.groovy` | Replace the current `hack/deploy-test-operator.sh --perf-only` stage with an IQE job invocation (`iqe-cost-management-performance-plugin`, marker `cost_management_performance`) |
+| `insights_onprem.groovy` | Replace the current `scripts/deploy-test-operator.sh --perf-only` stage with an IQE job invocation (`iqe-cost-management-performance-plugin`, marker `cost_management_performance`) |
 | IQE Jenkins job template | New job entry in the `insights-qe` Jenkins folder pointing at the new plugin and the on-prem cluster config |
 | `1.7_plugins_under_test.txt` (workspace) | Add `iqe-cost-management-performance-plugin` to the list |
 
@@ -217,7 +217,7 @@ Once tests are live in the plugin:
 
 - Remove `test/pytest/suites/performance/` (or keep as a dev/smoke alias)
 - Remove `--perf-only`, `--perf-suite`, `--perf-profile` flags from
-  `hack/deploy-test-operator.sh` and `hack/lib/deploy-test-operator.bash`
+  `scripts/deploy-test-operator.sh` and `scripts/lib/deploy-test-operator.bash`
 - Update `docs/performance/README.md` to point at the new plugin repo
 
 ---
@@ -258,7 +258,7 @@ The suite is fully functional today via the operator repo:
 
 ```bash
 # Full perf run via deploy-test-operator.sh
-hack/deploy-test-operator.sh \
+scripts/deploy-test-operator.sh \
     --perf-only \
     --perf-profile medium \
     --perf-suite all

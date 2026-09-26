@@ -94,8 +94,8 @@ day-one** so Kafka is not a second OLM project:
 
 ```bash
 # One-shot: infra + Redpanda + secrets + smoke CR
-./hack/clusterbot-smoke.sh
-# Then: IMG=… ./hack/deploy-incluster.sh cost-byoi
+./scripts/clusterbot-smoke.sh
+# Then: IMG=… ./scripts/deploy-incluster.sh cost-byoi
 # Docs: docs/development/clusterbot.md
 ```
 
@@ -150,7 +150,7 @@ for UI smoke without ROS images. Set `enabled: true` only when opting in.
 
 ```bash
 # 0. Optional one-shot BYOI (Kafka + infra + Keycloak + OAuth mirror + Secrets):
-#    NAMESPACE=cost-byoi CR_NAME=cost-management ./hack/deploy-byoi.sh
+#    NAMESPACE=cost-byoi CR_NAME=cost-management ./scripts/deploy-byoi.sh
 #    Or step through config/samples/byoi pieces manually — see
 #    docs/development/pre-prod-install.md
 

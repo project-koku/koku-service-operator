@@ -107,7 +107,7 @@ it refuses to start rather than defaulting to AllNamespaces — so the bare
 `go run …` form needs the pin too, not just the `make run` wrapper.
 
 ```bash
-./hack/deploy-dev.sh cost-onprem   # alias: ./hack/deploy-crc.sh
+./scripts/deploy-dev.sh cost-onprem   # alias: ./scripts/deploy-crc.sh
 NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make run
 # or: NAMESPACE=… go run ./cmd/main.go --dev --operator-image=…
 ```
@@ -124,8 +124,8 @@ probes.
 
 ```bash
 # Day-one Cluster Bot (Redpanda, no AMQ Streams):
-./hack/clusterbot-smoke.sh
-IMG=quay.io/<org>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-onprem
+./scripts/clusterbot-smoke.sh
+IMG=quay.io/<org>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh cost-onprem
 ```
 
 Recommended: operator + CMSC both in `cost-onprem`. BYOI may stay in
@@ -141,7 +141,7 @@ Pytest `NAMESPACE` is the **CR** namespace (operands), not necessarily the
 operator pod NS. Prefer one NS for the lab:
 
 ```bash
-IMG=quay.io/<you>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-onprem
+IMG=quay.io/<you>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh cost-onprem
 ```
 
 See [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md).

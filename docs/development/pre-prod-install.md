@@ -25,7 +25,7 @@ The worked example uses the checked-in BYOI sample names. Override as needed
 |----------|----------------|---------|
 | `NAMESPACE` | `cost-byoi` | CR (operands) namespace. This walkthrough colocates the operator here as an example; AllNamespaces does not require it. Suggested operator install NS is `cost-onprem`. |
 | `CR_NAME` | `cost-management` | `CostManagementServiceConfig` metadata.name |
-| `INFRA_NAMESPACE` | `cost-byoi-infra` | Postgres, Valkey, MinIO (`./hack/deploy-byoi.sh`) |
+| `INFRA_NAMESPACE` | `cost-byoi-infra` | Postgres, Valkey, MinIO (`./scripts/deploy-byoi.sh`) |
 | `KAFKA_NAMESPACE` | `kafka` | AMQ Streams cluster |
 | `KEYCLOAK_NAMESPACE` | `keycloak` | RHBK (external; never owned by this operator) |
 
@@ -70,7 +70,7 @@ export CR_NAME=cost-management
 export INFRA_NAMESPACE=cost-byoi-infra
 # Optional overrides: KAFKA_NAMESPACE, KEYCLOAK_NAMESPACE, STORAGE_CLASS, CHART_ROOT
 
-./hack/deploy-byoi.sh
+./scripts/deploy-byoi.sh
 ```
 
 This runs A1–A4 plus app Secrets in `$NAMESPACE`:
@@ -161,10 +161,10 @@ docker buildx build --platform linux/amd64 -t "$IMG" --push .
 
 `make run` / out-of-cluster controllers **cannot** resolve `*.svc.cluster.local`
 BYOI hosts from a laptop. Use the in-cluster helper (binds `default` SA in
-`$NAMESPACE`, same as `./hack/deploy-dev.sh` / `./hack/deploy-crc.sh`):
+`$NAMESPACE`, same as `./scripts/deploy-dev.sh` / `./scripts/deploy-crc.sh`):
 
 ```bash
-IMG="$IMG" ./hack/deploy-incluster.sh "$NAMESPACE"
+IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 ```
 
 That script:
@@ -189,7 +189,7 @@ Watch logs:
 kubectl -n "$NAMESPACE" logs -f deploy/koku-service-operator
 ```
 
-`hack/deploy-incluster.sh` / `hack/deploy-dev.sh` bind `default` SA to
+`scripts/deploy-incluster.sh` / `scripts/deploy-dev.sh` bind `default` SA to
 `manager-role`, `manager-cluster-role`, and the namespaced
 `leader-election-role` (leases). Requires `openssl` on the machine running the
 script (for the lab webhook cert).
@@ -198,7 +198,7 @@ Day-one Cluster Bot (Redpanda, no Keycloak): [clusterbot.md](clusterbot.md).
 
 ### B3. App Secrets, then the CR
 
-If you used `./hack/deploy-byoi.sh`, app Secrets are already in `$NAMESPACE`.
+If you used `./scripts/deploy-byoi.sh`, app Secrets are already in `$NAMESPACE`.
 Otherwise apply them first (retarget `metadata.namespace` if needed):
 
 ```bash
@@ -308,19 +308,19 @@ side effect. See
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Probes fail / DB unreachable from laptop `make run` | No cluster DNS out-of-cluster | Use `./hack/deploy-incluster.sh` |
+| Probes fail / DB unreachable from laptop `make run` | No cluster DNS out-of-cluster | Use `./scripts/deploy-incluster.sh` |
 | `InvalidImageName` / image `:` | Missing `repository`/`tag` on UI, oauth-proxy, ingress, ROS, … | Set images in the CR (see sample) |
 | Stuck creating Kruize `ClusterRole` (RBAC escalation) | ROS/Kruize applied with insufficient SA rights | Keep `ros.enabled: false` for UI smoke, or grant/hold the verbs Kruize’s role needs |
 | `UIReady=False` | OAuth client Secret missing | Re-run `mirror-ui-oauth-secret.sh` |
 | Login redirect_uri mismatch | Keycloak client built for wrong UI host | Re-run RHBK with `COST_MGMT_NAMESPACE` / `COST_MGMT_RELEASE_NAME` / `COST_MGMT_UI_BASE_URL` |
 | ImagePullBackOff on amd64 node | arm64-only image | Rebuild with `--platform linux/amd64` |
 | StorageClass list/watch forbidden | Stale cluster role | Re-apply `config/rbac/cluster_access_role.yaml` (`get;list;watch`) |
-| CrashLoop: `open …/serving-certs/tls.crt: no such file` | Webhook server has no TLS mount | Re-run `./hack/deploy-incluster.sh` (creates/mounts `koku-webhook-server-cert`), or mount a Secret with `tls.crt`/`tls.key` at `/tmp/k8s-webhook-server/serving-certs` |
+| CrashLoop: `open …/serving-certs/tls.crt: no such file` | Webhook server has no TLS mount | Re-run `./scripts/deploy-incluster.sh` (creates/mounts `koku-webhook-server-cert`), or mount a Secret with `tls.crt`/`tls.key` at `/tmp/k8s-webhook-server/serving-certs` |
 | Namespace stuck `Terminating` after `oc delete ns` | Operator died before the CR finalizer ran | [uninstall.md](../install/uninstall.md#if-the-namespace-is-already-terminating) |
 
 ## Tear down
 
-Delete the CR first while the operator is still running. `hack/demo-preprod.sh --reset` already does this (and strips the finalizer if the operator is gone). Manual order and recovery: [uninstall.md](../install/uninstall.md).
+Delete the CR first while the operator is still running. `scripts/demo-preprod.sh --reset` already does this (and strips the finalizer if the operator is gone). Manual order and recovery: [uninstall.md](../install/uninstall.md).
 
 ```bash
 oc -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s
@@ -335,6 +335,6 @@ oc delete ns "$NAMESPACE" "$INFRA_NAMESPACE" --ignore-not-found
 
 - [allnamespaces.md](allnamespaces.md) — AllNamespaces install/watch model and RBAC shape
 - [crc-testing.md](crc-testing.md) — local CRC: this same BYOI flow via
-  `./hack/demo-preprod.sh --crc` (arm64), or the out-of-cluster `make run` path
+  `./scripts/demo-preprod.sh --crc` (arm64), or the out-of-cluster `make run` path
 - [uninstall.md](../install/uninstall.md) — CR-first uninstall and stuck-namespace recovery
 - [config/samples/byoi/README.md](../../config/samples/byoi/README.md) — fixture details, monitoring, teardown

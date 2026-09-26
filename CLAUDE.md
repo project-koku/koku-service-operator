@@ -176,7 +176,7 @@ operator-managed stack (COST-7697), use the in-cluster operator path — not lap
 | Rule | Detail |
 |------|--------|
 | AllNamespaces | Operator watches CMSC in every NS. Suggested install NS is `cost-onprem`. Pytest `NAMESPACE` is the CR NS. BYOI may live elsewhere. |
-| Deploy operator | `IMG=quay.io/<user>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-onprem` |
+| Deploy operator | `IMG=quay.io/<user>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh cost-onprem` |
 | Avoid on laptop | `make deploy`, `install-cmsc.sh` registry push, `make run` against `*.svc.cluster.local` BYOI |
 | Infra | `./scripts/deploy-test-cost-onprem.sh --deploy-s4 --skip-helm --skip-chart-tests ...` |
 | Pytest | `NAMESPACE=cost-onprem ./scripts/run-pytest.sh --no-ui` (Mac: see runbook for SSL/Playwright) |

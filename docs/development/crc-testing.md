@@ -7,7 +7,7 @@ Two paths:
 
 | Path | What it exercises | Section |
 |------|-------------------|---------|
-| **`./hack/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
+| **`./scripts/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
 | **`make run` + a bundled sample CR** | Operator out-of-cluster, operator-provisioned Postgres/Valkey, no Kafka/Keycloak | rest of this document |
 
 **Scope:** use the minimal koku-only path for **operator + koku API/celery**
@@ -44,15 +44,15 @@ Custom koku build (feature branch on Apple Silicon):
 
 ```bash
 docker build --platform linux/arm64 -t default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag .
-./hack/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag
+./scripts/push-image-crc.sh default-route-openshift-image-registry.apps-crc.testing/cost-onprem/koku:my-tag
 # patch spec.costManagement.api/masu.image in the CR, then:
 oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 ```
 
 ## Full BYOI demo on CRC
 
-`./hack/demo-preprod.sh --crc` runs the [pre-prod demo](pre-prod-install.md)
-against local CRC. It layers `hack/demo-preprod.crc.env` under the normal
+`./scripts/demo-preprod.sh --crc` runs the [pre-prod demo](pre-prod-install.md)
+against local CRC. It layers `scripts/demo-preprod.crc.env` under the normal
 settings:
 
 - `KUBE_CONTEXT=crc` (create it once — see below)
@@ -87,15 +87,15 @@ later reports `Unauthorized`.
 
 ```bash
 # needs the sibling cost-onprem-chart checkout for scripts/deploy-rhbk.sh
-./hack/demo-preprod.sh --crc --dry-run     # show the plan
-./hack/demo-preprod.sh --crc               # tmux: steps + two klock panes
-./hack/demo-preprod.sh --crc --reset       # tear the four namespaces down first
+./scripts/demo-preprod.sh --crc --dry-run     # show the plan
+./scripts/demo-preprod.sh --crc               # tmux: steps + two klock panes
+./scripts/demo-preprod.sh --crc --reset       # tear the four namespaces down first
 ```
 
 Override any image from the profile with a matching env var, e.g.
-`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64 ./hack/demo-preprod.sh --crc`.
+`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64 ./scripts/demo-preprod.sh --crc`.
 Rebuilding the arm64 workload images: see
-[the profile file](../../hack/demo-preprod.crc.env) for the source repos.
+[the profile file](../../scripts/demo-preprod.crc.env) for the source repos.
 
 ## Prerequisites
 
@@ -148,8 +148,8 @@ oc login -u kubeadmin -p <password> https://api.crc.testing:6443 \
 ## Install CRDs and RBAC
 
 ```bash
-./hack/deploy-dev.sh cost-onprem
-# Alias (same script): ./hack/deploy-crc.sh cost-onprem
+./scripts/deploy-dev.sh cost-onprem
+# Alias (same script): ./scripts/deploy-crc.sh cost-onprem
 # or: make crc-dev CRC_NAMESPACE=cost-onprem
 ```
 
@@ -194,7 +194,7 @@ In-cluster OLM installs watch every namespace. See
 
 **Cluster Bot / remote OpenShift:** do not use `make run` with BYOI
 `*.svc.cluster.local` hosts — use [clusterbot.md](clusterbot.md) /
-`./hack/deploy-incluster.sh` instead.
+`./scripts/deploy-incluster.sh` instead.
 
 ## Apply a sample CR
 
@@ -247,7 +247,7 @@ Direct `docker push` to the registry Route often fails TLS verification on macOS
 Use the helper script (port-forward + skopeo):
 
 ```bash
-./hack/push-image-crc.sh <host>/<namespace>/<image>:<tag>
+./scripts/push-image-crc.sh <host>/<namespace>/<image>:<tag>
 ```
 
 ### UI OAuth client Secret (Keycloak stays external)
@@ -298,7 +298,7 @@ CRC's default storage class is `crc-csi-hostpath-provisioner`. Leave
 | `Missing or incomplete configuration` | `KUBECONFIG` not set | `export KUBECONFIG=$HOME/.crc/machines/crc/kubeconfig` |
 | `ImagePullBackOff` on init container | `--operator-image` points to missing Quay tag | `make crc-operator-image` |
 | `Illegal instruction` on migrate | amd64 koku image on arm64 CRC | arm64 image; `docker build --platform linux/arm64` |
-| Registry push TLS / EOF | Route cert / podman VM networking | `./hack/push-image-crc.sh` |
+| Registry push TLS / EOF | Route cert / podman VM networking | `./scripts/push-image-crc.sh` |
 | Kafka brokers `Pending` forever | 100Gi PVC on CRC disk | `KAFKA_BROKER_STORAGE=20Gi` + `CRC=1` |
 | Kafka pods never created | Missing `strimzi.io/node-pools: enabled` | Fixed in `deploy-kafka.sh` |
 | BYOI CR `Progressing`, no pods | External DB/Kafka hosts don't exist | Delete stale CRs; use bundled or minimal sample |

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Stub curl is expected to fail; keep retry warnings off the test-hack log.
+# Stub curl is expected to fail; keep retry warnings off the test-scripts log.
 export LOG_LEVEL=ERROR
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/deploy-rhbk.sh"
@@ -188,7 +188,7 @@ assert_eq "$KEYCLOAK_ADMIN_BASE" "http://127.0.0.1:18080" \
 unset KEYCLOAK_ADMIN_BASE OPENSHIFT_CI
 rm -f "${stub_dir}/oc"
 
-rhbk_default="$(grep -E '^RHBK_SCRIPT=' "${ROOT}/hack/deploy-byoi.sh" || true)"
+rhbk_default="$(grep -E '^RHBK_SCRIPT=' "${ROOT}/scripts/deploy-byoi.sh" || true)"
 assert_eq "$rhbk_default" \
   'RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"' \
   "deploy-byoi.sh defaults RHBK_SCRIPT to this repo"

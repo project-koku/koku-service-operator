@@ -3,16 +3,16 @@
 #   Kafka (AMQ Streams) → Postgres/Valkey/MinIO → Keycloak/RHBK → UI OAuth mirror.
 #
 # This does NOT install the operator or apply the CostManagementServiceConfig.
-# See docs/development/pre-prod-install.md (Part B) and hack/deploy-incluster.sh.
+# See docs/development/pre-prod-install.md (Part B) and scripts/deploy-incluster.sh.
 #
 # Usage (from operator repo root):
-#   ./hack/deploy-byoi.sh
-#   NAMESPACE=cost-gold CR_NAME=cost-onprem INFRA_NAMESPACE=cost-gold-infra ./hack/deploy-byoi.sh
+#   ./scripts/deploy-byoi.sh
+#   NAMESPACE=cost-gold CR_NAME=cost-onprem INFRA_NAMESPACE=cost-gold-infra ./scripts/deploy-byoi.sh
 #
 # Skip steps:
-#   SKIP_KAFKA=1 SKIP_INFRA=1 SKIP_KEYCLOAK=1 SKIP_OAUTH_MIRROR=1 ./hack/deploy-byoi.sh
+#   SKIP_KAFKA=1 SKIP_INFRA=1 SKIP_KEYCLOAK=1 SKIP_OAUTH_MIRROR=1 ./scripts/deploy-byoi.sh
 # Skip Keycloak realm user provisioning (manual user testing):
-#   SKIP_REALM_USERS=1 ./hack/deploy-byoi.sh
+#   SKIP_REALM_USERS=1 ./scripts/deploy-byoi.sh
 #
 # Keycloak uses this repo's scripts/deploy-rhbk.sh by default.
 # Override with RHBK_SCRIPT or CHART_ROOT (chart copy) if needed.
@@ -231,5 +231,5 @@ if [[ -n "$DOMAIN" ]]; then
 fi
 echo ""
 echo "Next (Part B): build/push an amd64 operator image, then:"
-echo "  IMG=<image> ./hack/deploy-incluster.sh ${NAMESPACE}"
+echo "  IMG=<image> ./scripts/deploy-incluster.sh ${NAMESPACE}"
 echo "Render/apply a CR with matching hosts (see docs/development/pre-prod-install.md)."

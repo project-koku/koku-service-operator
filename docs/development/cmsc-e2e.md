@@ -14,7 +14,7 @@ Operator Prow jobs (OLM, pytest, IQE) are documented in
 
 ```bash
 # 1. Deploy stack (pick one lab path below)
-IMG=quay.io/.../koku-service-operator:<tag> ./hack/deploy-test-operator.sh --namespace cost-onprem --skip-test
+IMG=quay.io/.../koku-service-operator:<tag> ./scripts/deploy-test-operator.sh --namespace cost-onprem --skip-test
 
 # 2. Confirm day-one gate
 oc get cmsc -n cost-onprem -o jsonpath='SchemaUpToDate={.status.conditions[?(@.type=="SchemaUpToDate")].status} Available={.status.conditions[?(@.type=="Available")].status}{"\n"}'
@@ -36,8 +36,8 @@ Any path that leaves a reconciled CMSC in `cost-onprem` with
 
 | Path | When to use |
 |------|-------------|
-| [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) | Cluster Bot / MCE lab: infra + `hack/deploy-incluster.sh` + CMSC — then run **pytest** and/or this Go suite |
-| `hack/deploy-test-operator.sh --skip-test` | Chart-parity orchestrator (RHBK, Kafka, ODF/S4, operator, CMSC); skips pytest |
+| [clusterbot-operator-pytest.md](clusterbot-operator-pytest.md) | Cluster Bot / MCE lab: infra + `scripts/deploy-incluster.sh` + CMSC — then run **pytest** and/or this Go suite |
+| `scripts/deploy-test-operator.sh --skip-test` | Chart-parity orchestrator (RHBK, Kafka, ODF/S4, operator, CMSC); skips pytest |
 | Existing stack | Already deployed — go straight to step 2 above |
 
 Use the **same** `NAMESPACE` / `CMSC_NAME` as the deploy runbook (`cost-onprem` by default).

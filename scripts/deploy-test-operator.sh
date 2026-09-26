@@ -7,9 +7,9 @@
 #
 # Additive only — this script does NOT modify or replace:
 #   - scripts/deploy-test-cost-onprem.sh (legacy chart orchestrator; still valid)
-#   - hack/ci/e2e.sh (Prow/BYOI path; operator must be pre-installed)
-#   - hack/demo-preprod.sh, hack/clusterbot-smoke.sh, hack/deploy-byoi.sh
-#   - hack/deploy-incluster.sh or any scripts/*.sh it calls (invoked as subprocesses)
+#   - scripts/ci/e2e.sh (Prow/BYOI path; operator must be pre-installed)
+#   - scripts/demo-preprod.sh, scripts/clusterbot-smoke.sh, scripts/deploy-byoi.sh
+#   - scripts/deploy-incluster.sh or any scripts/*.sh it calls (invoked as subprocesses)
 #
 # No --reset / teardown: does not delete namespaces or uninstall releases.
 # S4 is opt-in (--deploy-s4). Re-runs use oc apply / merge patch (idempotent-ish).
@@ -18,13 +18,13 @@
 #   # ODF / NooBaa (no S4) — default lab path when cluster has openshift-storage:
 #   # Installs openshift service CA Secret + spec.objectStorage.caCertSecretName for StorageReady.
 #   IMG=quay.io/<you>/koku-service-operator:<tag> \
-#     ./hack/deploy-test-operator.sh --namespace cost-onprem
+#     ./scripts/deploy-test-operator.sh --namespace cost-onprem
 #
 #   # Clusters without ODF (S4 stand-in):
-#   IMG=... ./hack/deploy-test-operator.sh --namespace cost-onprem --deploy-s4
+#   IMG=... ./scripts/deploy-test-operator.sh --namespace cost-onprem --deploy-s4
 #
-#   ./hack/deploy-test-operator.sh --tests-only --no-ui
-#   ./hack/deploy-test-operator.sh --dry-run --verbose
+#   ./scripts/deploy-test-operator.sh --tests-only --no-ui
+#   ./scripts/deploy-test-operator.sh --dry-run --verbose
 #
 set -euo pipefail
 
@@ -32,7 +32,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # shellcheck disable=SC1091
-source "${ROOT}/hack/lib/deploy-test-operator.bash"
+source "${ROOT}/scripts/lib/deploy-test-operator.bash"
 
 # Defaults (match cluster-bot pytest runbook).
 NAMESPACE="${NAMESPACE:-cost-onprem}"
@@ -108,9 +108,9 @@ Environment:
 
 Coexistence (unchanged workflows):
   Chart path             scripts/deploy-test-cost-onprem.sh
-  Prow / BYOI pytest     hack/ci/e2e.sh (after OLM or deploy-incluster)
-  Quick smoke            hack/clusterbot-smoke.sh + deploy-incluster.sh
-  UI demo                hack/demo-preprod.sh
+  Prow / BYOI pytest     scripts/ci/e2e.sh (after OLM or deploy-incluster)
+  Quick smoke            scripts/clusterbot-smoke.sh + deploy-incluster.sh
+  UI demo                scripts/demo-preprod.sh
 EOF
 }
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # AllNamespaces CRD + RBAC bootstrap for local / lab clusters (CRC, Cluster Bot, …).
-# Does NOT deploy the manager — use make run (laptop) or hack/deploy-incluster.sh.
+# Does NOT deploy the manager — use make run (laptop) or scripts/deploy-incluster.sh.
 #
-# Usage: ./hack/deploy-dev.sh [namespace]
+# Usage: ./scripts/deploy-dev.sh [namespace]
 #
 # Run this ONCE. AllNamespaces means one operator (one SA) watches every
 # namespace, so a single bootstrap is enough — a CMSC in any namespace is
 # reconcilable. The ClusterRoleBindings below (koku-operator-dev,
 # koku-operator-dev-cluster) are cluster-scoped with fixed names, so a second
-# `./hack/deploy-dev.sh other-ns` does not add a namespace — it overwrites the
+# `./scripts/deploy-dev.sh other-ns` does not add a namespace — it overwrites the
 # subject, repointing the grant to other-ns's SA and breaking the first NS.
 # If you truly need two operator SAs, give the bindings distinct names.
 #
-# Alias: ./hack/deploy-crc.sh still works and calls this script.
+# Alias: ./scripts/deploy-crc.sh still works and calls this script.
 set -euo pipefail
 
 NS="${1:-cost-onprem}"
@@ -106,7 +106,7 @@ echo "  export KUBECONFIG=\${HOME}/.crc/machines/crc/kubeconfig"
 echo ""
 echo "Build and push the operator image (required for wait-for init containers):"
 echo "  make docker-build IMG=${OPERATOR_IMG}"
-echo "  ./hack/push-image-crc.sh ${OPERATOR_IMG}"
+echo "  ./scripts/push-image-crc.sh ${OPERATOR_IMG}"
 echo ""
 echo "Next — pick ONE run mode:"
 echo ""
@@ -115,7 +115,7 @@ echo "  NAMESPACE=$NS IMG=${OPERATOR_IMG} make run"
 echo "  # or: NAMESPACE=$NS go run ./cmd/main.go --dev --operator-image=\$IMG"
 echo ""
 echo "  # Cluster Bot / any remote OpenShift (in-cluster manager):"
-echo "  IMG=<registry>/koku-service-operator:<tag> ./hack/deploy-incluster.sh $NS"
+echo "  IMG=<registry>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh $NS"
 echo ""
 echo "Then apply a sample CR:"
 echo "  # Minimal koku-only dev (no UI/Kafka/Keycloak):"

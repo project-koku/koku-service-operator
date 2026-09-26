@@ -5,11 +5,11 @@
 # Requires: oc (deploy-dev.sh uses oc for RBAC / SCC). kubectl alone is not enough.
 #
 # Usage (from repo root):
-#   ./hack/clusterbot-smoke.sh
-#   NAMESPACE=cost-byoi INFRA_NAMESPACE=cost-byoi-infra ./hack/clusterbot-smoke.sh
+#   ./scripts/clusterbot-smoke.sh
+#   NAMESPACE=cost-byoi INFRA_NAMESPACE=cost-byoi-infra ./scripts/clusterbot-smoke.sh
 #
 # Next:
-#   IMG=quay.io/<you>/koku-service-operator:<tag> ./hack/deploy-incluster.sh "$NAMESPACE"
+#   IMG=quay.io/<you>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh "$NAMESPACE"
 #
 # See docs/development/clusterbot.md
 #
@@ -44,14 +44,14 @@ echo "CR:        $CR_NAME"
 echo "Cluster:   $($KUBECTL config current-context 2>/dev/null || echo unknown)"
 echo ""
 echo "NOTE: Do not use laptop 'make run' against this BYOI — *.svc is not"
-echo "resolvable from your machine. Use ./hack/deploy-incluster.sh after this."
+echo "resolvable from your machine. Use ./scripts/deploy-incluster.sh after this."
 echo ""
 
 # ---------------------------------------------------------------------------
 # CRDs + RBAC (so the CR can be applied even before the manager is up)
 # ---------------------------------------------------------------------------
 echo "[1/4] CRDs + AllNamespaces RBAC (deploy-dev.sh)..."
-./hack/deploy-dev.sh "$NAMESPACE"
+./scripts/deploy-dev.sh "$NAMESPACE"
 
 # ---------------------------------------------------------------------------
 # Infra + Redpanda
@@ -135,7 +135,7 @@ echo "[4/4] Next — run the operator IN-CLUSTER (not laptop go run):"
 echo ""
 echo "  export IMG=quay.io/<you>/koku-service-operator:clusterbot"
 echo "  docker buildx build --platform linux/amd64 -t \"\$IMG\" --push ."
-echo "  IMG=\"\$IMG\" ./hack/deploy-incluster.sh ${NAMESPACE}"
+echo "  IMG=\"\$IMG\" ./scripts/deploy-incluster.sh ${NAMESPACE}"
 echo ""
 echo "Then (smoke CR is already applied — do not re-apply the AMQ Streams sample):"
 echo "  oc -n ${NAMESPACE} get cmsc ${CR_NAME} -w"

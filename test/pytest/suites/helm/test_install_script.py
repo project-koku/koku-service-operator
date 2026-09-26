@@ -1,5 +1,5 @@
 """
-Unit tests for install-helm-chart.sh bash functions via subprocess.
+Unit tests for install-cmsc.sh bash functions via subprocess.
 
 Tests S3 URL parsing, endpoint detection, bucket validation, region resolution,
 and deploy_helm_chart --set injection logic without cluster access.
@@ -14,7 +14,7 @@ import pytest
 
 
 def run_bash_function(script_path, bash_code, env=None):
-    """Source install-helm-chart.sh and execute bash code."""
+    """Source install-cmsc.sh and execute bash code."""
     full_env = {
         **os.environ,
         "LOG_LEVEL": "ERROR",
@@ -34,8 +34,8 @@ def run_bash_function(script_path, bash_code, env=None):
 
 @pytest.fixture(scope="module")
 def install_script(cluster_config):
-    path = Path(cluster_config.project_root) / "scripts" / "install-helm-chart.sh"
-    assert path.exists(), "install-helm-chart.sh not found"
+    path = Path(cluster_config.project_root) / "scripts" / "install-cmsc.sh"
+    assert path.exists(), "install-cmsc.sh not found"
     return str(path)
 
 

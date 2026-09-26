@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helpers for hack/deploy-test-operator.sh. Sourced; do not execute.
+# Helpers for scripts/deploy-test-operator.sh. Sourced; do not execute.
 
 dto_log_info() { echo -e "\033[0;34mℹ INFO:\033[0m $*"; }
 dto_log_success() { echo -e "\033[0;32m✅ SUCCESS:\033[0m $*"; }
@@ -218,10 +218,10 @@ dto_deploy_operator() {
   fi
   dto_log_step "Deploying operator in-cluster (4/5)"
   if [[ "${DRY_RUN:-false}" == "true" ]]; then
-    dto_log_info "DRY RUN: would run IMG=${IMG} ${ROOT}/hack/deploy-incluster.sh ${NAMESPACE}"
+    dto_log_info "DRY RUN: would run IMG=${IMG} ${ROOT}/scripts/deploy-incluster.sh ${NAMESPACE}"
     return 0
   fi
-  IMG="${IMG}" "${ROOT}/hack/deploy-incluster.sh" "${NAMESPACE}"
+  IMG="${IMG}" "${ROOT}/scripts/deploy-incluster.sh" "${NAMESPACE}"
   dto_kubectl -n "${NAMESPACE}" rollout status deploy/koku-service-operator --timeout=180s
   dto_log_success "operator deployment step finished"
 }
