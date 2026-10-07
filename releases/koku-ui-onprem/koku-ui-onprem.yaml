@@ -1,0 +1,28 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  labels:
+    release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
+  namespace: cost-mgmt-dev-tenant
+  name: koku-ui-onprem-20261006-155227-000-prod-1
+spec:
+  releasePlan: koku-ui-onprem-prod
+  snapshot: koku-ui-onprem-20261006-155227-000
+  data:
+    releaseNotes:
+      type: RHSA
+      topic: "Cost Management Frontend Image version 20261006-155227-000 release."
+      issues:
+        fixed:
+          - id: COST-8298
+            source: issues.redhat.com
+      cves:
+        - key: CVE-2026-93749
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - source-map-js
+      references:
+        - https://access.redhat.com/security/updates/classification
+        - https://access.redhat.com/security/cve/CVE-2026-93749
+        - https://docs.redhat.com/en/documentation/cost_management_service/1-latest/html/getting_started_with_cost_management/steps-to-cost-management
