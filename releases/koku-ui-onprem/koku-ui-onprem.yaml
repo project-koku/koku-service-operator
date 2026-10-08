@@ -5,154 +5,150 @@ metadata:
   labels:
     release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
   namespace: cost-mgmt-dev-tenant
-  name: koku-ui-onprem-20261008-115904-000-prod-1
+  name: koku-ui-onprem-20261008-115904-000-prod-6
 spec:
   releasePlan: koku-ui-onprem-prod
   snapshot: koku-ui-onprem-20261008-115904-000
   data:
     releaseNotes:
       type: RHSA
-      topic: "Cost Management Frontend Image version 20261006-155227-000 release."
-      issues:
-        fixed:
-          - id: COST-8298
-            source: issues.redhat.com
+      topic: "Cost Management Frontend Image version koku-ui-onprem-20261008-115904-000 release."
       cves:
         - key: CVE-2026-93749
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - source-map-js
         - key: CVE-2026-75899
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - fast-uri
         - key: CVE-2026-75931
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - fast-uri
         - key: CVE-2026-84292
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - fast-uri
         - key: CVE-2026-14456
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - openssl-libs
         - key: CVE-2026-70452
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70456
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53803
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70460
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70463
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53783
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53791
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70464
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53790
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53802
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53795
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53784
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70455
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53793
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70458
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53785
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70461
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-8458
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-74860
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-86140
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-86140
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-13732
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - gdb-gdbserver
         - key: CVE-2026-93990
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - expat
         - key: CVE-2026-66046
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - expat
         - key: CVE-2026-42784
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rpm-sequoia
         - key: CVE-2026-34743
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - xz-libs
         - key: CVE-2026-50219
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - expat
         - key: CVE-2026-16118
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - glib2
         - key: CVE-2026-13221
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - perl-B
             - perl-Symbol
@@ -180,7 +176,7 @@ spec:
             - perl-File-Basename
             - perl-locale
         - key: CVE-2026-42533
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - nginx
             - nginx-core
@@ -188,93 +184,93 @@ spec:
             - nginx-mod-stream
             - nginx-mod-http-perl
         - key: CVE-2026-63076
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - openssl-libs
         - key: CVE-2026-63072
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - openssl-libs
         - key: CVE-2026-18798
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - openssl-libs
         - key: CVE-2026-70457
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70454
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-70453
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-53789
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - rsync
         - key: CVE-2026-8924
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-11856
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-8932
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-8926
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-15028
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - bsdtar
             - libarchive
         - key: CVE-2026-56392
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - coreutils-single
         - key: CVE-2026-9079
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libcurl-minimal
             - curl
         - key: CVE-2026-86144
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-86143
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-86138
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-86142
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - libxml2
         - key: CVE-2026-40467
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - gawk
         - key: CVE-2026-40553
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - gawk
         - key: CVE-2026-40468
-          component: costmanagement/costmanagement-ui-rhel10
+          component: koku-ui-onprem
           packages:
             - gawk
 
