@@ -5,10 +5,10 @@ metadata:
   labels:
     release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
   namespace: cost-mgmt-dev-tenant
-  name: koku-ui-onprem-20261006-155227-000-prod-1
+  name: koku-ui-onprem-20261008-115904-000-prod-1
 spec:
   releasePlan: koku-ui-onprem-prod
-  snapshot: koku-ui-onprem-20261006-155227-000
+  snapshot: koku-ui-onprem-20261008-115904-000
   data:
     releaseNotes:
       type: RHSA
@@ -22,7 +22,319 @@ spec:
           component: costmanagement/costmanagement-ui-rhel10
           packages:
             - source-map-js
+        - key: CVE-2026-75899
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - fast-uri
+        - key: CVE-2026-75931
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - fast-uri
+        - key: CVE-2026-84292
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - fast-uri
+        - key: CVE-2026-14456
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - openssl-libs
+        - key: CVE-2026-70452
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70456
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53803
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70460
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70463
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53783
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53791
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70464
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53790
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53802
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53795
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53784
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70455
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53793
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70458
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53785
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70461
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-8458
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-74860
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-86140
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-86140
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-13732
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - gdb-gdbserver
+        - key: CVE-2026-93990
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - expat
+        - key: CVE-2026-66046
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - expat
+        - key: CVE-2026-42784
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rpm-sequoia
+        - key: CVE-2026-34743
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - xz-libs
+        - key: CVE-2026-50219
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - expat
+        - key: CVE-2026-16118
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - glib2
+        - key: CVE-2026-13221
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - perl-B
+            - perl-Symbol
+            - perl-SelectSaver
+            - perl-Fcntl
+            - perl-overloading
+            - perl-libs
+            - perl-DynaLoader
+            - perl-if
+            - perl-Class-Struct
+            - perl-FileHandle
+            - perl-interpreter
+            - perl-POSIX
+            - perl-File-stat
+            - perl-overload
+            - perl-vars
+            - perl-Getopt-Std
+            - perl-NDBM_File
+            - perl-Errno
+            - perl-mro
+            - perl-IPC-Open3
+            - perl-AutoLoader
+            - perl-IO
+            - perl-base
+            - perl-File-Basename
+            - perl-locale
+        - key: CVE-2026-42533
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - nginx
+            - nginx-core
+            - nginx-filesystem
+            - nginx-mod-stream
+            - nginx-mod-http-perl
+        - key: CVE-2026-63076
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - openssl-libs
+        - key: CVE-2026-63072
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - openssl-libs
+        - key: CVE-2026-18798
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - openssl-libs
+        - key: CVE-2026-70457
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70454
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-70453
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-53789
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - rsync
+        - key: CVE-2026-8924
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-11856
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-8932
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-8926
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-15028
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - bsdtar
+            - libarchive
+        - key: CVE-2026-56392
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - coreutils-single
+        - key: CVE-2026-9079
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libcurl-minimal
+            - curl
+        - key: CVE-2026-86144
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-86143
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-86138
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-86142
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - libxml2
+        - key: CVE-2026-40467
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - gawk
+        - key: CVE-2026-40553
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - gawk
+        - key: CVE-2026-40468
+          component: costmanagement/costmanagement-ui-rhel10
+          packages:
+            - gawk
+
       references:
         - https://access.redhat.com/security/updates/classification
         - https://access.redhat.com/security/cve/CVE-2026-93749
+        - https://access.redhat.com/security/cve/CVE-2026-75899
+        - https://access.redhat.com/security/cve/CVE-2026-75931
+        - https://access.redhat.com/security/cve/CVE-2026-84292
+        - https://access.redhat.com/security/cve/CVE-2026-14456
+        - https://access.redhat.com/security/cve/CVE-2026-70452
+        - https://access.redhat.com/security/cve/CVE-2026-70456
+        - https://access.redhat.com/security/cve/CVE-2026-53803
+        - https://access.redhat.com/security/cve/CVE-2026-70460
+        - https://access.redhat.com/security/cve/CVE-2026-70463
+        - https://access.redhat.com/security/cve/CVE-2026-53783
+        - https://access.redhat.com/security/cve/CVE-2026-53791
+        - https://access.redhat.com/security/cve/CVE-2026-70464
+        - https://access.redhat.com/security/cve/CVE-2026-53790
+        - https://access.redhat.com/security/cve/CVE-2026-53802
+        - https://access.redhat.com/security/cve/CVE-2026-53795
+        - https://access.redhat.com/security/cve/CVE-2026-53784
+        - https://access.redhat.com/security/cve/CVE-2026-70455
+        - https://access.redhat.com/security/cve/CVE-2026-53793
+        - https://access.redhat.com/security/cve/CVE-2026-70458
+        - https://access.redhat.com/security/cve/CVE-2026-53785
+        - https://access.redhat.com/security/cve/CVE-2026-70461
+        - https://access.redhat.com/security/cve/CVE-2026-8458
+        - https://access.redhat.com/security/cve/CVE-2026-74860
+        - https://access.redhat.com/security/cve/CVE-2026-86140
+        - https://access.redhat.com/security/cve/CVE-2026-86140
+        - https://access.redhat.com/security/cve/CVE-2026-13732
+        - https://access.redhat.com/security/cve/CVE-2026-93990
+        - https://access.redhat.com/security/cve/CVE-2026-66046
+        - https://access.redhat.com/security/cve/CVE-2026-42784
+        - https://access.redhat.com/security/cve/CVE-2026-34743
+        - https://access.redhat.com/security/cve/CVE-2026-50219
+        - https://access.redhat.com/security/cve/CVE-2026-16118
+        - https://access.redhat.com/security/cve/CVE-2026-13221
+        - https://access.redhat.com/security/cve/CVE-2026-42533
+        - https://access.redhat.com/security/cve/CVE-2026-63076
+        - https://access.redhat.com/security/cve/CVE-2026-63072
+        - https://access.redhat.com/security/cve/CVE-2026-18798
+        - https://access.redhat.com/security/cve/CVE-2026-70457
+        - https://access.redhat.com/security/cve/CVE-2026-70454
+        - https://access.redhat.com/security/cve/CVE-2026-70453
+        - https://access.redhat.com/security/cve/CVE-2026-53789
+        - https://access.redhat.com/security/cve/CVE-2026-8924
+        - https://access.redhat.com/security/cve/CVE-2026-11856
+        - https://access.redhat.com/security/cve/CVE-2026-8932
+        - https://access.redhat.com/security/cve/CVE-2026-8926
+        - https://access.redhat.com/security/cve/CVE-2026-15028
+        - https://access.redhat.com/security/cve/CVE-2026-56392
+        - https://access.redhat.com/security/cve/CVE-2026-9079
+        - https://access.redhat.com/security/cve/CVE-2026-86144
+        - https://access.redhat.com/security/cve/CVE-2026-86143
+        - https://access.redhat.com/security/cve/CVE-2026-86138
+        - https://access.redhat.com/security/cve/CVE-2026-86142
+        - https://access.redhat.com/security/cve/CVE-2026-40467
+        - https://access.redhat.com/security/cve/CVE-2026-40553
+        - https://access.redhat.com/security/cve/CVE-2026-40468
+        - https://access.redhat.com/articles/7148128
         - https://docs.redhat.com/en/documentation/cost_management_service/1-latest/html/getting_started_with_cost_management/steps-to-cost-management
