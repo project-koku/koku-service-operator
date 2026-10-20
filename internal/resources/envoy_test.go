@@ -268,10 +268,44 @@ func TestEnvoyYAMLContainsIssuerAudiencesAndKokuCluster(t *testing.T) {
 	if !strings.Contains(rbacBlock, "port_value: 8080") {
 		t.Error("rbac-api-backend should use port 8080")
 	}
-	for _, tok := range []string{"__HTTP_PORT__", "__ISSUER__", "__LUA__", "__KOKU_HOST__", "__KC_TLS__", "__ROS_ROUTE__", "__ROS_CLUSTER__"} {
+	for _, tok := range []string{"__HTTP_PORT__", "__ISSUER__", "__LUA__", "__KOKU_HOST__", "__COST_EVENTS_HOST__", "__KC_TLS__", "__ROS_ROUTE__", "__ROS_CLUSTER__"} {
 		if strings.Contains(yaml, tok) {
 			t.Errorf("EnvoyYAML left unsubstituted token %q", tok)
 		}
+	}
+}
+
+func TestEnvoyCostEventsRouteAndCluster(t *testing.T) {
+	cfg := testCfg()
+	yaml := EnvoyYAML(cfg)
+
+	if !strings.Contains(yaml, "prefix: \"/api/cost-events/\"") {
+		t.Error("EnvoyYAML missing /api/cost-events/ route prefix")
+	}
+	if !strings.Contains(yaml, "prefix_rewrite: \"/api/\"") {
+		t.Error("EnvoyYAML missing prefix_rewrite: \"/api/\" for cost-events")
+	}
+	if !strings.Contains(yaml, "cluster: cost-events-backend") {
+		t.Error("EnvoyYAML missing route to cost-events-backend")
+	}
+
+	if !strings.Contains(yaml, "name: cost-events-backend") {
+		t.Error("EnvoyYAML missing cost-events-backend cluster definition")
+	}
+	if !strings.Contains(yaml, "address: cost-event-consumer.cost-mgmt.svc.cluster.local") {
+		t.Error("EnvoyYAML default cost-events backend address mismatch")
+	}
+	if !strings.Contains(yaml, "port_value: 8020") {
+		t.Error("EnvoyYAML cost-events backend port mismatch")
+	}
+
+	// Custom annotation override
+	cfg.Annotations = map[string]string{
+		"koku.costmanagement.io/cost-events-host": "my-custom-events.namespace.svc.cluster.local",
+	}
+	customYAML := EnvoyYAML(cfg)
+	if !strings.Contains(customYAML, "address: my-custom-events.namespace.svc.cluster.local") {
+		t.Error("EnvoyYAML custom cost-events host annotation was not respected")
 	}
 }
 
