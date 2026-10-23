@@ -275,37 +275,136 @@ func TestEnvoyYAMLContainsIssuerAudiencesAndKokuCluster(t *testing.T) {
 	}
 }
 
+type envoyConfigDoc struct {
+	StaticResources struct {
+		Listeners []struct {
+			Name         string `yaml:"name"`
+			FilterChains []struct {
+				Filters []struct {
+					Name        string `yaml:"name"`
+					TypedConfig struct {
+						RouteConfig struct {
+							VirtualHosts []struct {
+								Name   string `yaml:"name"`
+								Routes []struct {
+									Match struct {
+										Prefix string `yaml:"prefix"`
+										Path   string `yaml:"path"`
+									} `yaml:"match"`
+									Route struct {
+										Cluster       string `yaml:"cluster"`
+										Timeout       string `yaml:"timeout"`
+										PrefixRewrite string `yaml:"prefix_rewrite"`
+									} `yaml:"route"`
+								} `yaml:"routes"`
+							} `yaml:"virtual_hosts"`
+						} `yaml:"route_config"`
+					} `yaml:"typed_config"`
+				} `yaml:"filters"`
+			} `yaml:"filter_chains"`
+		} `yaml:"listeners"`
+		Clusters []struct {
+			Name           string `yaml:"name"`
+			LoadAssignment struct {
+				ClusterName string `yaml:"cluster_name"`
+				Endpoints   []struct {
+					LBEndpoints []struct {
+						Endpoint struct {
+							Address struct {
+								SocketAddress struct {
+									Address   string `yaml:"address"`
+									PortValue int    `yaml:"port_value"`
+								} `yaml:"socket_address"`
+							} `yaml:"address"`
+						} `yaml:"endpoint"`
+					} `yaml:"lb_endpoints"`
+				} `yaml:"endpoints"`
+			} `yaml:"load_assignment"`
+		} `yaml:"clusters"`
+	} `yaml:"static_resources"`
+}
+
 func TestEnvoyCostEventsRouteAndCluster(t *testing.T) {
+	assertRouteAndCluster := func(t *testing.T, yamlStr string, wantAddress string) {
+		t.Helper()
+		var doc envoyConfigDoc
+		if err := yaml.Unmarshal([]byte(yamlStr), &doc); err != nil {
+			t.Fatalf("yaml.Unmarshal EnvoyYAML: %v", err)
+		}
+		if len(doc.StaticResources.Listeners) == 0 ||
+			len(doc.StaticResources.Listeners[0].FilterChains) == 0 ||
+			len(doc.StaticResources.Listeners[0].FilterChains[0].Filters) == 0 {
+			t.Fatal("EnvoyYAML missing listener filter chain")
+		}
+		vhosts := doc.StaticResources.Listeners[0].FilterChains[0].Filters[0].TypedConfig.RouteConfig.VirtualHosts
+		if len(vhosts) == 0 {
+			t.Fatal("EnvoyYAML missing virtual_hosts")
+		}
+
+		var targetCluster string
+		foundRoute := false
+		for _, r := range vhosts[0].Routes {
+			if r.Match.Prefix == "/api/cost-events/" {
+				foundRoute = true
+				if r.Route.PrefixRewrite != "/api/" {
+					t.Errorf("cost-events route prefix_rewrite = %q, want %q", r.Route.PrefixRewrite, "/api/")
+				}
+				if r.Route.Cluster != "cost-events-backend" {
+					t.Errorf("cost-events route cluster = %q, want %q", r.Route.Cluster, "cost-events-backend")
+				}
+				if r.Route.Timeout != "60s" {
+					t.Errorf("cost-events route timeout = %q, want %q", r.Route.Timeout, "60s")
+				}
+				targetCluster = r.Route.Cluster
+				break
+			}
+		}
+		if !foundRoute {
+			t.Fatal("EnvoyYAML missing route with prefix /api/cost-events/")
+		}
+
+		foundCluster := false
+		for _, c := range doc.StaticResources.Clusters {
+			if c.Name == targetCluster {
+				foundCluster = true
+				if len(c.LoadAssignment.Endpoints) == 0 || len(c.LoadAssignment.Endpoints[0].LBEndpoints) == 0 {
+					t.Fatalf("cluster %q has no lb_endpoints", targetCluster)
+				}
+				sock := c.LoadAssignment.Endpoints[0].LBEndpoints[0].Endpoint.Address.SocketAddress
+				if sock.Address != wantAddress {
+					t.Errorf("cluster %q address = %q, want %q", targetCluster, sock.Address, wantAddress)
+				}
+				if sock.PortValue != 8020 {
+					t.Errorf("cluster %q port_value = %d, want 8020", targetCluster, sock.PortValue)
+				}
+				break
+			}
+		}
+		if !foundCluster {
+			t.Fatalf("EnvoyYAML missing cluster %q referenced by cost-events route", targetCluster)
+		}
+	}
+
+	const defaultHost = "cost-event-consumer.cost-mgmt.svc.cluster.local"
+
 	cfg := testCfg()
-	yaml := EnvoyYAML(cfg)
+	assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost)
 
-	if !strings.Contains(yaml, "prefix: \"/api/cost-events/\"") {
-		t.Error("EnvoyYAML missing /api/cost-events/ route prefix")
-	}
-	if !strings.Contains(yaml, "prefix_rewrite: \"/api/\"") {
-		t.Error("EnvoyYAML missing prefix_rewrite: \"/api/\" for cost-events")
-	}
-	if !strings.Contains(yaml, "cluster: cost-events-backend") {
-		t.Error("EnvoyYAML missing route to cost-events-backend")
-	}
-
-	if !strings.Contains(yaml, "name: cost-events-backend") {
-		t.Error("EnvoyYAML missing cost-events-backend cluster definition")
-	}
-	if !strings.Contains(yaml, "address: cost-event-consumer.cost-mgmt.svc.cluster.local") {
-		t.Error("EnvoyYAML default cost-events backend address mismatch")
-	}
-	if !strings.Contains(yaml, "port_value: 8020") {
-		t.Error("EnvoyYAML cost-events backend port mismatch")
-	}
-
-	// Custom annotation override
+	// Custom valid annotation override
 	cfg.Annotations = map[string]string{
 		"koku.costmanagement.io/cost-events-host": "my-custom-events.namespace.svc.cluster.local",
 	}
-	customYAML := EnvoyYAML(cfg)
-	if !strings.Contains(customYAML, "address: my-custom-events.namespace.svc.cluster.local") {
-		t.Error("EnvoyYAML custom cost-events host annotation was not respected")
+	assertRouteAndCluster(t, EnvoyYAML(cfg), "my-custom-events.namespace.svc.cluster.local")
+
+	// Malformed annotations (colon-space, embedded newline) must be rejected and fall back to defaultHost
+	for _, invalid := range []string{
+		"evil: value",
+		"evil.example.com\nport_value: 9999",
+		"http://not-a-hostname:8020",
+		"-leading-hyphen.example.com",
+	} {
+		cfg.Annotations["koku.costmanagement.io/cost-events-host"] = invalid
+		assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost)
 	}
 }
 

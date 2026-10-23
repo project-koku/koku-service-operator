@@ -418,7 +418,7 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 		"__INGRESS_PER_TRY_TIMEOUT__", envoyDuration(cfg.Spec.Auth.Envoy.IngressPerTryTimeout, knobs.EnvoyIngressPerTryTimeout),
 		"__INGRESS_HOST__", serviceFQDN(NameIngress(cfg), ns),
 		"__RBAC_HOST__", serviceFQDN(NameRBACAPI(cfg), ns),
-		"__COST_EVENTS_HOST__", CostEventsHost(cfg, ns),
+		"__COST_EVENTS_HOST__", yamlScalar(CostEventsHost(cfg, ns)),
 		"__KC_HOST__", kcHost,
 		"__KC_PORT__", strconv.Itoa(int(kcPort)),
 		"__KC_TLS__", tlsBlock,
@@ -437,10 +437,32 @@ func indentLua(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// isValidHostname returns true if s is a valid RFC 1123 DNS hostname without
+// embedded newlines, colons, or whitespace.
+func isValidHostname(s string) bool {
+	if s == "" || len(s) > 253 || strings.Contains(s, ": ") || strings.ContainsAny(s, "\n\r\x00 \t:/") {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			isAlphaNum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+			if !isAlphaNum && (c != '-' || i == 0 || i == len(label)-1) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // CostEventsHost returns the FQDN for the cost-event-consumer backend service.
+// Invalid or empty annotation values fall back to the default in-cluster FQDN.
 func CostEventsHost(cfg *costv1alpha1.CostManagementServiceConfig, ns string) string {
 	if cfg != nil && cfg.Annotations != nil {
-		if host := strings.TrimSpace(cfg.Annotations["koku.costmanagement.io/cost-events-host"]); host != "" {
+		if host := strings.TrimSpace(cfg.Annotations["koku.costmanagement.io/cost-events-host"]); isValidHostname(host) {
 			return host
 		}
 	}
