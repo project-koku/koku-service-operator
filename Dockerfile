@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26.7-1788409979 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.10-1792592174 AS builder
 
 # Pin the validated native Go module and retain the Red Hat toolchain. The
 # no_openssl build tag below selects native crypto instead of the legacy backend.
@@ -34,7 +34,7 @@ RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -tags=no_openssl,na
 RUN go version -m manager wait-for
 
 # Use Red Hat UBI Micro as the minimal supported runtime image.
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1789345812
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1791895366
 
 WORKDIR /
 COPY --from=builder /workspace/manager /manager
