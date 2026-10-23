@@ -21,7 +21,7 @@ Keycloak, Koku, or other managed applications.
 - `GOEXPERIMENT=strictfipsruntime` rejects startup if FIPS is disabled on a
   FIPS host. `GOTOOLCHAIN=local` prevents automatic toolchain replacement.
 
-The pinned Red Hat Go 1.26.7 builder supports `fips140=auto`: it reads
+The pinned Red Hat Go 1.26.10 builder supports `fips140=auto`: it reads
 `/proc/sys/crypto/fips_enabled` at startup. On a FIPS host the native module is
 enabled; on an ordinary host it is disabled. `auto` is a downstream extension,
 so do not infer support from the upstream Go version alone. Ordinary local
@@ -112,6 +112,32 @@ analyze ELF files for a different target architecture, but that is not a
 runtime test for that architecture.
 
 ## FIPS-enabled OpenShift acceptance
+
+### Credential and dependency regression tests
+
+The normal test suite and native-FIPS CI selection cover:
+
+- Generated database, Django, and UI cookie credential formats.
+- Create-only Secret preservation across repeated reconciliation, controller
+  reconstruction, and administrator replacement.
+- S3 and Keycloak JWKS HTTPS trust, hostname rejection, and recovery.
+- S3 authorization rejection and recovery through dependency conditions.
+
+These tests use local TLS servers and a fake Kubernetes client. The S3 server
+returns controlled responses; it does not validate request signatures. Live
+acceptance must also exercise signed `HeadBucket` requests against a real S3
+implementation, reject invalid credentials, and verify recovery. A JWKS fetch
+checks the operator's client, not browser login or downstream JWT verification.
+
+Use disposable resources for live negative tests and preserve the active CR,
+existing Secret values and UIDs, and working uploads. Record old/new manager
+image digests when testing image-change preservation; controller reconstruction
+alone does not prove a complete product or schema upgrade. A TLS front end with
+an HTTP backend proves only the operator-to-front-end HTTPS hop. Keep lab-specific
+fixtures, orchestration, and captured evidence outside the product repository.
+Random samples and correct output lengths alone do not prove cryptographic quality.
+
+### Broader acceptance
 
 After the checker scan passes, deploy the same image to a cluster installed
 with `fips: true`. Record host FIPS state and confirm it is visible in the

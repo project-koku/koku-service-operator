@@ -256,7 +256,7 @@ jobs:
             --workdir /workspace --entrypoint /bin/bash \
             koku-service-operator:fips-test -lc '
               go test -tags=no_openssl,nativefips ./api/... ./cmd/... ./internal/resources/... ./internal/fips/... &&
-              go test -tags=no_openssl,nativefips ./internal/controller -run "^Test(S3|ReconcileValidation|Kafka|JWKS|CertPool|TCPProbe|Required|TopicMissing)"
+              go test -tags=no_openssl,nativefips ./internal/controller -run "^Test(GeneratedSecrets|S3|OIDC|ReconcileValidation|Kafka|JWKS|CertPool|TCPProbe|Required|TopicMissing)"
             '
 
       - name: Push verified container image
