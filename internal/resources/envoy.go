@@ -443,7 +443,7 @@ func isValidHostname(s string) bool {
 	if s == "" || len(s) > 253 || strings.Contains(s, ": ") || strings.ContainsAny(s, "\n\r\x00 \t:/") {
 		return false
 	}
-	for _, label := range strings.Split(s, ".") {
+	for label := range strings.SplitSeq(s, ".") {
 		if len(label) == 0 || len(label) > 63 {
 			return false
 		}
