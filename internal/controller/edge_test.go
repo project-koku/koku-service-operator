@@ -48,6 +48,12 @@ func TestReconcileEdge_EnvoyNotReady(t *testing.T) {
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForGateway" {
 		t.Fatalf("expected GatewayReady=False WaitingForGateway, got %+v", cond)
 	}
+
+	// D20: the last sized workload (Envoy) is applied, so the tier is reported
+	// even though the gateway readiness gate (and the UI behind it) is unmet.
+	if cfg.Status.Profile != costv1alpha1.ProfileSmall {
+		t.Fatalf("status.profile = %q after Envoy applied, want small", cfg.Status.Profile)
+	}
 }
 
 func TestReconcileEdge_EnvoyReady_NoClusterDomain(t *testing.T) {
@@ -112,6 +118,9 @@ func TestReconcileEdge_EnvoyReady_WithDomain_NoOAuth(t *testing.T) {
 
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady) {
 		t.Fatal("expected GatewayReady=True once Envoy is ready and route is admitted")
+	}
+	if cfg.Status.Profile != costv1alpha1.ProfileSmall {
+		t.Fatalf("status.profile = %q with UIReady=False, want small", cfg.Status.Profile)
 	}
 	gwCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady)
 	if gwCond == nil || gwCond.Reason != "GatewayReady" {

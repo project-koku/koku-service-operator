@@ -41,10 +41,8 @@ var _ = Describe("CMSC drift correction", Label("cmsc", "drift"), func() {
 			Skip("koku-api Deployment not found in namespace")
 		}
 
-		desired := getCMSC().Spec.CostManagement.API.Replicas
-		if desired == 0 {
-			desired = 1
-		}
+		cmsc := getCMSC()
+		desired := desiredAPIReplicas(cmsc)
 		driftReplicas := desired + 2
 
 		By("recording desired replica count from CMSC spec")

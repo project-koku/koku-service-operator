@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/utils/ptr"
+
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
@@ -108,7 +110,7 @@ func TestROSAPIService_Ports(t *testing.T) {
 
 func TestROSProcessorDeployment_Shape(t *testing.T) {
 	cfg := rosCfg()
-	cfg.Spec.ROS.Processor.Replicas = 2
+	cfg.Spec.ROS.Processor.Replicas = ptr.To[int32](2)
 	cfg.Spec.ROS.Processor.LogLevel = "DEBUG"
 	d := ROSProcessorDeployment(cfg)
 	if d.Name != NameROSProcessor(cfg) {
@@ -209,5 +211,19 @@ func TestROSPartitionCleanerCronJob_DefaultSchedule(t *testing.T) {
 	c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
 	if c.Name != "ros-partition-cleaner" {
 		t.Errorf("container = %q", c.Name)
+	}
+}
+
+func TestROSProcessorDeployment_ProfileReplicas(t *testing.T) {
+	for p, want := range map[costv1alpha1.Profile]int32{
+		costv1alpha1.ProfileMedium: 2,
+		costv1alpha1.ProfileXLarge: 3,
+	} {
+		cfg := rosCfg()
+		cfg.Spec.Profile = p
+		d := ROSProcessorDeployment(cfg)
+		if d.Spec.Replicas == nil || *d.Spec.Replicas != want {
+			t.Errorf("profile %q: replicas = %v, want %d", p, d.Spec.Replicas, want)
+		}
 	}
 }

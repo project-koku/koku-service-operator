@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/utils/ptr"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -18,7 +19,7 @@ func uiTestCfg() *costv1alpha1.CostManagementServiceConfig {
 	cfg := testCfg()
 	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{ClusterDomain: "apps.example.com"}
 	cfg.Spec.UI = costv1alpha1.UIConfig{
-		ReplicaCount: 1,
+		ReplicaCount: ptr.To[int32](1),
 		OAuthProxy: costv1alpha1.OAuthProxySpec{
 			Image: costv1alpha1.ImageSpec{
 				Repository: "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
@@ -192,8 +193,10 @@ func TestUIDeploymentProfileResources(t *testing.T) {
 		wantMemLim string
 	}{
 		{"unset", "", "50m", "64Mi", "100m", "128Mi"},
-		{"standard", costv1alpha1.ProfileStandard, "50m", "64Mi", "100m", "128Mi"},
-		{"ha", costv1alpha1.ProfileHA, "100m", "128Mi", "200m", "256Mi"},
+		{"small", costv1alpha1.ProfileSmall, "50m", "64Mi", "100m", "128Mi"},
+		{"medium", costv1alpha1.ProfileMedium, "50m", "64Mi", "100m", "128Mi"},
+		{"large", costv1alpha1.ProfileLarge, "50m", "64Mi", "100m", "128Mi"},
+		{"xlarge", costv1alpha1.ProfileXLarge, "50m", "64Mi", "100m", "128Mi"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,7 +216,7 @@ func TestUIDeploymentProfileResources(t *testing.T) {
 
 func TestUIDeploymentHonorsResourceOverrides(t *testing.T) {
 	cfg := uiTestCfg()
-	cfg.Spec.Profile = costv1alpha1.ProfileHA
+	cfg.Spec.Profile = costv1alpha1.ProfileLarge
 	cfg.Spec.UI.OAuthProxy.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("300m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
@@ -233,7 +236,7 @@ func TestUIDeploymentHonorsResourceOverrides(t *testing.T) {
 
 func TestUIDeploymentHonorsRequestsOnlyOverride(t *testing.T) {
 	cfg := uiTestCfg()
-	cfg.Spec.Profile = costv1alpha1.ProfileHA
+	cfg.Spec.Profile = costv1alpha1.ProfileLarge
 	cfg.Spec.UI.OAuthProxy.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 	}

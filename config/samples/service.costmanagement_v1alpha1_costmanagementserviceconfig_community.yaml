@@ -12,6 +12,8 @@ metadata:
   name: cost-onprem-community
   namespace: cost-onprem
 spec:
+  # spec.profile drives replicas and resources for all workloads; explicit fields override it.
+  profile: small
   global:
     clusterDomain: "apps.cluster.local"
     storageClass: ""  # empty = use cluster default; set to ocs-storagecluster-ceph-rbd on ODF clusters
@@ -50,26 +52,10 @@ spec:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 1
     masu:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 1
-    listener:
-      replicas: 2
-    celery:
-      workers:
-        default:
-          replicas: 1
-        priority:
-          replicas: 1
-        summary:
-          replicas: 2
-        ocp:
-          replicas: 2
-        costModel:
-          replicas: 1
 
   # Beta: ROS and Kruize are out of scope — omit or keep enabled: false (CRD default).
   # Set enabled: true and fill ros.image / kruize.image only when opting in.
@@ -78,21 +64,14 @@ spec:
     image:
       repository: quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend
       tag: "ae8c990"
-    processor:
-      replicas: 1
 
   rbac:
     image:
       repository: quay.io/project-koku/insights-rbac
       tag: "34e25ed"
-    api:
-      replicas: 1
-    worker:
-      replicas: 1
 
   # Only applied when ros.enabled: true
   kruize:
-    replicas: 1
     image:
       repository: quay.io/redhat-services-prod/kruize-autotune-tenant/autotune
       tag: "d1f0140"
@@ -104,7 +83,6 @@ spec:
       image:
         repository: docker.io/envoyproxy/envoy
         tag: "v1.32.13"
-      replicas: 2
     keycloak:
       # Required JWKS fetch URL (prefer in-cluster Service). When RHBK sets a
       # public hostname, tokens use that URL as iss — set issuerURL to match.

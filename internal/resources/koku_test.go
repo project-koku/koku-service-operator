@@ -6,6 +6,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -101,8 +102,8 @@ func celeryWorkerCfg() *costv1alpha1.CostManagementServiceConfig {
 	cfg := testCfg()
 	cfg.Spec.CostManagement.API.Image.Repository = "quay.io/example/koku"
 	cfg.Spec.CostManagement.API.Image.Tag = "latest"
-	cfg.Spec.CostManagement.Celery.Workers.Default.Replicas = 1
-	cfg.Spec.CostManagement.Celery.Workers.Priority.Replicas = 1
+	cfg.Spec.CostManagement.Celery.Workers.Default.Replicas = ptr.To[int32](1)
+	cfg.Spec.CostManagement.Celery.Workers.Priority.Replicas = ptr.To[int32](1)
 	return cfg
 }
 
@@ -138,7 +139,7 @@ func TestCeleryWorkerDeployments_SaaSQueuesDefaultZero(t *testing.T) {
 
 func TestCeleryWorkerDeployment_MetricsOnlyWhenReplicasPositive(t *testing.T) {
 	cfg := celeryWorkerCfg()
-	active := CeleryWorkerDeployment(cfg, "download", costv1alpha1.CeleryWorkerSpec{Replicas: 1})
+	active := CeleryWorkerDeployment(cfg, "download", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](1)})
 	if active.Spec.Template.Labels[labelMetricsRole] != MetricsRoleCeleryWorker {
 		t.Fatalf("active worker missing metrics-role label")
 	}
@@ -152,7 +153,7 @@ func TestCeleryWorkerDeployment_MetricsOnlyWhenReplicasPositive(t *testing.T) {
 		t.Fatal("metrics-role must not be on Deployment selector")
 	}
 
-	idle := CeleryWorkerDeployment(cfg, "hcs", costv1alpha1.CeleryWorkerSpec{Replicas: 0})
+	idle := CeleryWorkerDeployment(cfg, "hcs", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](0)})
 	if idle.Spec.Template.Labels[labelMetricsRole] != "" {
 		t.Fatal("zero-replica worker must not carry metrics-role label")
 	}
@@ -216,5 +217,73 @@ func TestCeleryBeatDeployment_ContainerResources(t *testing.T) {
 	}
 	if memLim.String() != "400Mi" {
 		t.Errorf("Memory limit = %s, want 400Mi", memLim.String())
+	}
+}
+
+func replicasCfg(profile costv1alpha1.Profile) *costv1alpha1.CostManagementServiceConfig {
+	cfg := testCfg()
+	cfg.Spec.Profile = profile
+	cfg.Spec.CostManagement.API.Image.Repository = "quay.io/example/koku"
+	cfg.Spec.CostManagement.API.Image.Tag = "latest"
+	return cfg
+}
+
+func TestCeleryWorkerDeployments_SmallProfileReplicas(t *testing.T) {
+	cfg := replicasCfg(costv1alpha1.ProfileSmall)
+	deps := CeleryWorkerDeployments(cfg)
+	want := map[string]int32{
+		"celery": 1, "priority": 1, "summary": 2, "ocp": 2, "cost_model": 1,
+		"refresh": 0, "download": 0, "hcs": 0, "subs_extraction": 0, "subs_transmission": 0,
+	}
+	for q, w := range want {
+		if got := celeryDeploymentReplicas(t, cfg, deps, q); got != w {
+			t.Errorf("small: queue %q replicas = %d, want %d", q, got, w)
+		}
+	}
+}
+
+func TestCeleryWorkerDeployments_LargeProfileReplicas(t *testing.T) {
+	cfg := replicasCfg(costv1alpha1.ProfileLarge)
+	deps := CeleryWorkerDeployments(cfg)
+	want := map[string]int32{
+		"celery": 1, "priority": 1, "summary": 3, "ocp": 3, "cost_model": 1,
+		"refresh": 0, "download": 0, "hcs": 0, "subs_extraction": 0, "subs_transmission": 0,
+	}
+	for q, w := range want {
+		if got := celeryDeploymentReplicas(t, cfg, deps, q); got != w {
+			t.Errorf("large: queue %q replicas = %d, want %d", q, got, w)
+		}
+	}
+}
+
+func TestKokuAPIDeployment_ExplicitZeroReplicas(t *testing.T) {
+	cfg := replicasCfg(costv1alpha1.ProfileSmall)
+	cfg.Spec.CostManagement.API.Replicas = ptr.To[int32](0)
+	d := KokuAPIDeployment(cfg)
+	if d.Spec.Replicas == nil || *d.Spec.Replicas != 0 {
+		t.Errorf("replicas = %v, want 0", d.Spec.Replicas)
+	}
+	cfg.Spec.CostManagement.API.Replicas = nil
+	if d := KokuAPIDeployment(cfg); *d.Spec.Replicas != 1 {
+		t.Errorf("nil replicas = %d, want 1", *d.Spec.Replicas)
+	}
+}
+
+func TestListenerDeployment_ProfileReplicas(t *testing.T) {
+	for _, tc := range []struct {
+		profile  costv1alpha1.Profile
+		explicit *int32
+		want     int32
+	}{
+		{costv1alpha1.ProfileSmall, nil, 2},
+		{costv1alpha1.ProfileLarge, nil, 3},
+		{costv1alpha1.ProfileSmall, ptr.To[int32](5), 5},
+	} {
+		cfg := replicasCfg(tc.profile)
+		cfg.Spec.CostManagement.Listener.Replicas = tc.explicit
+		d := ListenerDeployment(cfg)
+		if *d.Spec.Replicas != tc.want {
+			t.Errorf("profile %q explicit %v: replicas = %d, want %d", tc.profile, tc.explicit, *d.Spec.Replicas, tc.want)
+		}
 	}
 }

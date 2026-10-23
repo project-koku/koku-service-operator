@@ -66,9 +66,14 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	falseVal := false
 
 	storageSecret := NameStorageSecret(cfg)
-	maxUpload := spec.MaxUploadSize
-	if maxUpload == 0 {
-		maxUpload = 104857600 // 100 MiB
+	knobs := ProfileKnobsFor(cfg)
+	maxUpload := knobs.MaxUploadSize
+	if spec.MaxUploadSize != nil {
+		maxUpload = *spec.MaxUploadSize
+	}
+	maxMem := knobs.MaxMemory
+	if spec.MaxMemory != nil {
+		maxMem = *spec.MaxMemory
 	}
 	validTypes := spec.ValidTypes
 	if validTypes == "" {
@@ -81,7 +86,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		EnvVal("INGRESS_METRICSPORT", int32String(ingressMetricsPort)),
 		EnvVal("INGRESS_DEBUG", "false"),
 		EnvVal("INGRESS_DEFAULTMAXSIZE", fmt.Sprintf("%d", maxUpload)),
-		EnvVal("INGRESS_MAXUPLOADMEM", "33554432"), // 32 MiB
+		EnvVal("INGRESS_MAXUPLOADMEM", fmt.Sprintf("%d", maxMem)),
 		EnvVal("INGRESS_VALID_UPLOAD_TYPES", validTypes),
 		// S3-compatible storage (insights-ingress-go uses MINIO env names)
 		EnvVal("INGRESS_MINIOENDPOINT", ingressS3Endpoint(cfg)),
@@ -145,7 +150,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 						Env:             env,
 						LivenessProbe:   livenessProbe,
 						ReadinessProbe:  readinessProbe,
-						Resources:       spec.Resources,
+						Resources:       ProfileResources(cfg, WorkloadIngress, spec.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},

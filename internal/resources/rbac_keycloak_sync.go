@@ -115,7 +115,7 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 								Args:            []string{"python manage.py shell < /opt/rbac/rbac/sync_keycloak_principals.py"},
 								Env:             env,
 								VolumeMounts:    mounts,
-								Resources:       spec.Resources,
+								Resources:       ProfileResources(cfg, WorkloadKeycloakSync, spec.Resources),
 								SecurityContext: rbacAppContainerSC(),
 							}},
 							Volumes: vols,

@@ -20,6 +20,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.profile
+      name: Profile
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -70,9 +73,36 @@ spec:
                         - repository
                         - tag
                         type: object
+                      ingressPerTryTimeout:
+                        description: |-
+                          IngressPerTryTimeout overrides the Envoy per-try (retry) timeout for
+                          /api/ingress/. Go duration format; must be positive. Unset uses the sizing
+                          profile value.
+                        maxLength: 64
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a positive duration
+                          rule: duration(self) > duration('0s')
+                      ingressTimeout:
+                        description: |-
+                          IngressTimeout overrides the Envoy route timeout for /api/ingress/
+                          (uploads). Go duration format, e.g. "180s" or "10m"; must be positive.
+                          Unset uses the sizing profile value.
+
+                          The OpenShift Route (HAProxy) timeout is separate: it comes from the
+                          profile (180s small/medium, 600s large/xlarge). If ingressTimeout exceeds
+                          it, also raise spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"],
+                          otherwise HAProxy cuts the upload first.
+                        maxLength: 64
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a positive duration
+                          rule: duration(self) > duration('0s')
                       replicas:
-                        default: 2
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -357,8 +387,8 @@ spec:
                         - tag
                         type: object
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -432,8 +462,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -504,8 +534,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -576,8 +606,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -722,8 +752,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -794,8 +824,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -866,8 +896,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -1088,8 +1118,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -1173,8 +1203,8 @@ spec:
                           type: string
                         type: object
                       replicas:
-                        default: 2
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -1262,8 +1292,8 @@ spec:
                         - tag
                         type: object
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -1567,10 +1597,18 @@ spec:
                     - repository
                     - tag
                     type: object
-                  maxUploadSize:
-                    default: 104857600
-                    description: Maximum upload size in bytes.
+                  maxMemory:
+                    description: |-
+                      MaxMemory is the in-memory upload buffer in bytes (INGRESS_MAXUPLOADMEM).
+                      Unset uses the sizing profile value.
                     format: int64
+                    minimum: 1
+                    type: integer
+                  maxUploadSize:
+                    description: Maximum upload size in bytes. Unset uses the sizing
+                      profile value.
+                    format: int64
+                    minimum: 1
                     type: integer
                   resources:
                     description: ResourceRequirements describes the compute resource
@@ -1767,8 +1805,9 @@ spec:
                         type: object
                     type: object
                   replicas:
-                    default: 1
                     format: int32
+                    maximum: 1
+                    minimum: 0
                     type: integer
                   resources:
                     description: ResourceRequirements describes the compute resource
@@ -1927,21 +1966,23 @@ spec:
                     type: boolean
                 type: object
               profile:
-                default: standard
+                default: small
                 description: |-
-                  Profile selects a pre-defined resource sizing tier.
-                  Currently applies to UI containers only; other workloads use per-component spec.*.resources fields.
+                  Profile selects a validated workload sizing tier (small, medium, large, xlarge).
+                  Explicit per-component fields in the spec always override profile values.
                 enum:
-                - standard
-                - ha
+                - small
+                - medium
+                - large
+                - xlarge
                 type: string
               rbac:
                 properties:
                   api:
                     properties:
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2114,8 +2155,8 @@ spec:
                   worker:
                     properties:
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2410,8 +2451,8 @@ spec:
                         default: INFO
                         type: string
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2744,8 +2785,8 @@ spec:
                         type: object
                     type: object
                   replicaCount:
-                    default: 1
                     format: int32
+                    minimum: 0
                     type: integer
                 type: object
             type: object
@@ -2865,6 +2906,17 @@ spec:
                 - Progressing
                 - Ready
                 - Degraded
+                type: string
+              profile:
+                description: |-
+                  Profile is the sizing tier whose workloads the operator applied for the
+                  current generation (spec.profile, or small when unset). It is set once the
+                  sized workloads are applied, not when every readiness gate passes.
+                enum:
+                - small
+                - medium
+                - large
+                - xlarge
                 type: string
             type: object
         type: object

@@ -26,6 +26,8 @@ metadata:
   name: cost-management
   namespace: cost-onprem
 spec:
+  # spec.profile drives replicas and resources for all workloads; explicit fields override it.
+  profile: small
   global:
     clusterDomain: "apps.cluster.example.com"
 
@@ -100,33 +102,16 @@ spec:
       image:
         repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
         tag: "2.6"
-      replicas: 2
 
   costManagement:
     api:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 1
     masu:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 1
-    listener:
-      replicas: 2
-    celery:
-      workers:
-        default:
-          replicas: 1
-        priority:
-          replicas: 1
-        summary:
-          replicas: 2
-        ocp:
-          replicas: 2
-        costModel:
-          replicas: 1
 
   # Beta: ROS and Kruize are out of scope. Keep enabled: false (CRD default).
   # Set enabled: true and fill images only when opting in.
@@ -135,17 +120,11 @@ spec:
     image:
       repository: quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend
       tag: "ae8c990"
-    processor:
-      replicas: 1
 
   rbac:
     image:
       repository: quay.io/project-koku/insights-rbac
       tag: "34e25ed"
-    api:
-      replicas: 1
-    worker:
-      replicas: 1
 
   ui:
     replicaCount: 1

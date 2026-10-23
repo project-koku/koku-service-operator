@@ -1,8 +1,12 @@
 # CRC minimal sample — bundled DB/cache + koku API/celery only.
 #
 # Use this for koku/operator dev on OpenShift Local (Apple Silicon). Skips ROS
-# and Kafka deployment. Does not disable listener or auth envoy: replicas 0 is
-# remapped to 2 by the operator; without Kafka those pods may CrashLoopBackOff.
+# and Kafka deployment. Listener and auth envoy are not pinned here, so they
+# take their replica counts from the default profile (small: 2 each); without
+# Kafka those pods may CrashLoopBackOff. An explicit replicas: 0 is honoured
+# (not remapped): kruize.replicas: 0 and ui.replicaCount: 0 below really
+# disable Kruize and the UI. The explicit 1-replica pins on celery summary/ocp
+# keep this footprint below the small profile.
 # KafkaReady/AuthenticationReady/UIReady may stay False; koku migrations and
 # API/celery pods can still run.
 #

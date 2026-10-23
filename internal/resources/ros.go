@@ -266,7 +266,7 @@ func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/status", Port: intstr.FromInt32(rosAPIPort)}},
 							InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 						},
-						Resources:       cfg.Spec.ROS.API.Resources,
+						Resources:       ProfileResources(cfg, WorkloadROSAPI, cfg.Spec.ROS.API.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -311,10 +311,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
 	selLabels := SelectorLabels(cfg, "ros-processor")
 	allLabels := Labels(cfg, "ros-processor")
-	replicas := cfg.Spec.ROS.Processor.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadROSProcessor, cfg.Spec.ROS.Processor.Replicas)
 	falseVal := false
 
 	cdappVol, cdappMount := cdappVolumeAndMount(cfg)
@@ -406,7 +403,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromInt32(rosMetricPort)}},
 							InitialDelaySeconds: 90, PeriodSeconds: 20, TimeoutSeconds: 10, FailureThreshold: 5,
 						},
-						Resources:       cfg.Spec.ROS.Processor.Resources,
+						Resources:       ProfileResources(cfg, WorkloadROSProcessor, cfg.Spec.ROS.Processor.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -484,7 +481,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromInt32(rosMetricPort)}},
 							InitialDelaySeconds: 90, PeriodSeconds: 20, TimeoutSeconds: 10, FailureThreshold: 5,
 						},
-						Resources:       cfg.Spec.ROS.RecommendationPoller.Resources,
+						Resources:       ProfileResources(cfg, WorkloadROSPoller, cfg.Spec.ROS.RecommendationPoller.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -551,7 +548,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 						Command:         []string{"sh", "-c"},
 						Args:            []string{"sleep 60 && ./rosocp start housekeeper --sources"},
 						Env:             env,
-						Resources:       cfg.Spec.ROS.Housekeeper.Resources,
+						Resources:       ProfileResources(cfg, WorkloadROSHousekeeper, cfg.Spec.ROS.Housekeeper.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -605,7 +602,7 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 								Command:         []string{"sh", "-c"},
 								Args:            []string{"./rosocp start housekeeper --partitions"},
 								Env:             env,
-								Resources:       pc.Resources,
+								Resources:       ProfileResources(cfg, WorkloadROSPartitionCleaner, pc.Resources),
 								SecurityContext: restrictedContainerSC(),
 							}},
 						},

@@ -5,6 +5,13 @@ results (FLPATH-4036, COST-7567). Profile definitions are derived from productio
 data analysis by Pau Garcia Quiles (April 2026) and validated through automated
 performance runs on a 3-worker OCP 4.20 cluster (54 CPU / 183 Gi).
 
+## Operator
+
+On the operator, `spec.profile` (`small|medium|large|xlarge`, default `small`)
+applies these tiers to the stack. Per-component CR fields override the profile.
+See [profile-sizing-maps.md](../design/profile-sizing-maps.md) and
+[operator-profile-crd-mapping.md](./operator-profile-crd-mapping.md).
+
 ## Changelog
 
 ### COST-7599: Chart Defaults Updated to Small Profile (2026-07-23)

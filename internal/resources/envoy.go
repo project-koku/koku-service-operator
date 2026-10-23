@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -160,10 +161,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 
 	image, _ := ImageRef(cfg.Spec.Auth.Envoy.Image)
 
-	replicas := cfg.Spec.Auth.Envoy.Replicas
-	if replicas == 0 {
-		replicas = 2
-	}
+	replicas := ProfileReplicas(cfg, WorkloadEnvoy, cfg.Spec.Auth.Envoy.Replicas)
 
 	falseVal := false
 	init := CACombineInitContainer(cfg)
@@ -233,7 +231,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 							PeriodSeconds:       10,
 							TimeoutSeconds:      3,
 						},
-						Resources:       cfg.Spec.Auth.Envoy.Resources,
+						Resources:       ProfileResources(cfg, WorkloadEnvoy, cfg.Spec.Auth.Envoy.Resources),
 						SecurityContext: restrictedContainerSC(),
 					}},
 					Volumes: envoyVolumes(cfg),
@@ -308,6 +306,20 @@ func yamlScalar(s string) string {
 		}
 	}
 	return s
+}
+
+// envoyDuration normalizes a Go duration string ("10m") to the seconds form
+// Envoy's protobuf Duration accepts ("600s"). Falls back to def when explicit
+// is empty. The CRD (pattern + positive-duration CEL rule) guarantees explicit
+// values are valid and positive, so the fallback for unparsable or non-positive
+// input is purely defensive and never reached for an admitted CR.
+func envoyDuration(explicit, def string) string {
+	if explicit != "" {
+		if d, err := time.ParseDuration(explicit); err == nil && d > 0 {
+			return strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + "s"
+		}
+	}
+	return def
 }
 
 // EnvoyYAML renders the Envoy static config from the CR (ported from the Helm chart).
@@ -390,6 +402,7 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 `
 	}
 
+	knobs := ProfileKnobsFor(cfg)
 	replacer := strings.NewReplacer(
 		"__HTTP_PORT__", strconv.Itoa(int(envoyHTTPPort)),
 		"__ADMIN_PORT__", strconv.Itoa(int(envoyAdminPort)),
@@ -400,6 +413,8 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 		"__ROS_ROUTE__", rosRoute,
 		"__ROS_CLUSTER__", rosCluster,
 		"__KOKU_HOST__", serviceFQDN(NameKokuAPI(cfg), ns),
+		"__INGRESS_TIMEOUT__", envoyDuration(cfg.Spec.Auth.Envoy.IngressTimeout, knobs.EnvoyIngressTimeout),
+		"__INGRESS_PER_TRY_TIMEOUT__", envoyDuration(cfg.Spec.Auth.Envoy.IngressPerTryTimeout, knobs.EnvoyIngressPerTryTimeout),
 		"__INGRESS_HOST__", serviceFQDN(NameIngress(cfg), ns),
 		"__RBAC_HOST__", serviceFQDN(NameRBACAPI(cfg), ns),
 		"__KC_HOST__", kcHost,
@@ -435,8 +450,10 @@ const envoyYAMLTemplate = `static_resources:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: gateway_http
           codec_type: AUTO
-          request_timeout: 60s
           stream_idle_timeout: 300s
+          common_http_protocol_options:
+            idle_timeout: 300s
+            max_connection_duration: 600s
           use_remote_address: true
           access_log:
           - name: envoy.access_loggers.file
@@ -477,11 +494,11 @@ __ROS_ROUTE__              - match:
                   prefix: "/api/ingress/"
                 route:
                   cluster: ingress-backend
-                  timeout: 180s
+                  timeout: __INGRESS_TIMEOUT__
                   retry_policy:
                     retry_on: 5xx,reset,connect-failure,refused-stream
                     num_retries: 2
-                    per_try_timeout: 60s
+                    per_try_timeout: __INGRESS_PER_TRY_TIMEOUT__
           http_filters:
           - name: envoy.filters.http.jwt_authn
             typed_config:

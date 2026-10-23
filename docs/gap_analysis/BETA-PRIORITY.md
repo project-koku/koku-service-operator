@@ -79,9 +79,9 @@ Several paths report success while the underlying dependency is wrong or while a
 
 ### T5. Profile / HA sizing — **P2 for beta** → [COST-8095](../jira/COST-8095.md)
 
-UI already reads `spec.profile` when `spec.ui.*.resources` are unset ([#65](https://github.com/project-koku/koku-service-operator/pull/65)). Remaining Cost workload maps (Koku, Celery, RBAC, …) and a meaningful `profile: ha` sample are **[COST-8095](https://redhat.atlassian.net/browse/COST-8095)**. ROS/Kruize rows stay with [COST-8054](../jira/COST-8054.md).
+[COST-8095](https://redhat.atlassian.net/browse/COST-8095) makes `spec.profile` a validated sizing tier `small|medium|large|xlarge` (default `small`) replacing `standard|ha`. It drives resources, replicas, ingress upload limits, Envoy ingress timeouts, and the HAProxy route timeout for the Cost workloads; explicit CR fields override it and `status.profile` reports the tier whose sized workloads were applied for the current generation. See [profile-sizing-maps.md](../design/profile-sizing-maps.md). ROS/Kruize rows stay with [COST-8054](../jira/COST-8054.md).
 
-**Beta stance:** ship `profile: standard` only; document that `ha` is reserved until COST-8095.
+**Beta stance:** `small` is the default; `medium|large|xlarge` are available for larger deployments. `ha` no longer exists.
 
 ---
 
@@ -116,7 +116,7 @@ UI already reads `spec.profile` when `spec.ui.*.resources` are unset ([#65](http
 | App ServiceMonitors largely non-functional (ports/Services/NP) | [7692 G2](COST-7692.md) | **P2** unless beta promises in-cluster scrape |
 | Custom operator metrics + ticket alert names | [7692 G1/G3](COST-7692.md) | **P2** |
 | Missing Event reasons (`PhaseChanged`, `DependencyFailed`, …) | [7692 G4](COST-7692.md), [7680 G3](COST-7680.md) | **P2** |
-| Minimal + HA sample CRs | [7679 G1/G2](COST-7679.md) | **P1** for beta docs/demos |
+| Minimal + production (`profile: large`) sample CRs | [7679 G1/G2](COST-7679.md) | **P1** for beta docs/demos |
 | Legacy stale CRD file still in tree | [7679 R1](COST-7679.md), [7678 R2](COST-7678.md) | **Resolved** (file removed; CRC path uses `make install`) |
 | BYOI template keeps `kruize:` block while `ros.enabled: false` | [7679 R3](COST-7679.md) | **P2** (docs clarity) |
 
@@ -168,7 +168,7 @@ Tickets marked ✅ in `tasks.md` that gap audits found incomplete: **7683, 7684,
 ### P2 — After beta / toward GA (Cost core)
 
 21. Shared **profile sizing maps** for Cost workloads + wire — **[COST-8095](../jira/COST-8095.md)** ([7678 G4](COST-7678.md) + former 7686/87/89/90/93 ACs). ROS/Kruize map rows → COST-8054.
-22. HA sample + `profile: ha` behavior ([7679 G2](COST-7679.md)).
+22. Production sample uses `profile: large` ([7679 G2](COST-7679.md)); `profile: ha` was removed by COST-8095.
 23. Monitoring: real **Cost** scrape targets, operator metrics, alert parity ([7692](COST-7692.md)). ROS/Kruize scrapes → COST-8054.
 24. Full NetworkPolicy / dedicated SA matrix for **core** ([7691](COST-7691.md)). ROS/Kruize matrix → COST-8054.
 25. Route admission gating ([7691 G4](COST-7691.md)); UI Route global-domain fallback ([7691 R4](COST-7691.md)); `Available` vs `StorageReady` policy ([7683 R2](COST-7683.md)).
@@ -260,4 +260,4 @@ S3/OBC items stay relevant either way — Ingress/uploads still need object stor
 - RBAC API readiness participates in core Available.
 - Install path documented (and OLM-bundled if that is the channel); samples/docs use `ros.enabled: false` and call ROS/Kruize unsupported in beta (remaining optionality → [COST-8054](../jira/COST-8054.md)).
 - Ideally: Cost-only Validation does not require `ros-*` keys (COST-8054 P1 item above).
-- ROS and Kruize hardening, `profile: ha`, full NetworkPolicy matrix, scrapable metrics, secret rotation, and E2E remain explicitly out of Cost beta scope unless product expands the bar.
+- ROS and Kruize hardening, full NetworkPolicy matrix, scrapable metrics, secret rotation, and E2E remain explicitly out of Cost beta scope unless product expands the bar.

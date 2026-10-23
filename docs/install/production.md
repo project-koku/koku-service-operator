@@ -4,8 +4,9 @@ How to run a lasting BYOI deploy of Cost Management on OpenShift. This is
 **not** a claim that every Jira “HA / monitoring / NetworkPolicy” item is
 implemented. Read the honesty notes in each section.
 
-**Beta.** Keep `spec.ros.enabled: false`. Do not treat `spec.profile: ha` as a
-full-stack HA switch.
+**Beta.** Keep `spec.ros.enabled: false`. `spec.profile` selects a sizing tier
+(`small|medium|large|xlarge`), not an HA switch; HA of Postgres, Kafka, and
+object storage stays with your infrastructure.
 
 Prerequisites and a first CR: [prerequisites.md](prerequisites.md),
 [quickstart.md](quickstart.md).
@@ -17,36 +18,51 @@ Use
 as the template. It demonstrates:
 
 - External DB, cache, Kafka, S3, OIDC (`deploy: false`)
-- `spec.profile: ha` (see [HA profile](#ha-profile) — UI only today)
+- `spec.profile: large` (see [Sizing profile](#sizing-profile))
 - `monitoring.enabled: true`
-- Explicit `spec.*.resources` and replica counts on core workloads
+- A single explicit `resources` override on the listener (no replica counts; replicas come from the profile)
 - SASL_SSL Kafka, cache TLS, S3 CA
 - `ros.enabled: false`
 
 Pin **release** image tags. The sample’s ingress tag `master` is a placeholder
 and is not a production pin.
 
-## HA profile
+## Sizing profile
 
-`spec.profile` is `standard` (default) or `ha`.
+`spec.profile` is one of `small` (default), `medium`, `large`, or `xlarge`.
+It sizes the Cost workloads the operator runs: CPU/memory requests and limits, replica counts,
+ingress upload limits (`spec.ingress.maxUploadSize`, `spec.ingress.maxMemory`),
+Envoy ingress timeouts (`spec.auth.envoy.ingressTimeout`,
+`spec.auth.envoy.ingressPerTryTimeout`), and the HAProxy route timeout. The
+tier whose sized workloads were applied is reported in `status.profile`. BYOI infrastructure, the
+dev-only bundled DB/cache, migration Jobs, and SaaS Celery queues are outside
+profiles; ROS API/poller/housekeeper stay at `small`. The exact set is in
+[design §5](../design/profile-sizing-maps.md).
 
-**Today `ha` only raises default UI CPU/memory** when `spec.ui.*.resources` are
-unset. Koku API, Masu, Listener, RBAC, Celery, Envoy, and Ingress do **not**
-read the profile. Size those with explicit `spec.*.replicas` and
-`spec.*.resources` (as the production sample does).
+The HAProxy route timeout comes from the profile (180s for `small`/`medium`,
+600s for `large`/`xlarge`) and is separate from `spec.auth.envoy.ingressTimeout`.
+If you raise `ingressTimeout` above the route timeout, also set
+`spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"]` to a
+value at least as large, otherwise HAProxy cuts uploads off first.
 
-Shared profile maps for the rest of the stack are not in this operator yet.
-Until they are, copy the production sample’s resource blocks rather than
-expecting `profile: ha` to resize workers.
+Any field you set explicitly in the CR overrides the profile value for that
+field only (for example, an explicit `resources` block replaces the profile's
+resources for that component). Per-tier values and precedence rules are in
+[docs/design/profile-sizing-maps.md](../design/profile-sizing-maps.md); the
+validated numbers behind them are in
+[sizing-guide.md](../performance/sizing-guide.md).
 
 For true HA of Postgres, Kafka, and object storage, use your infrastructure
 operators (AMQ Streams, ODF, and so on). This operator does not manage them.
 
 ## Resource tuning
 
-Set requests/limits on the components you care about. The production sample
-uses replica `2` on API, Masu, Listener, Envoy, RBAC, and UI, and raises Celery
-worker replica counts on the on-prem queues.
+Start from `spec.profile` and override only the components you care about.
+The production sample sets no replica counts: under `large` that gives API,
+Masu, RBAC and UI 1 replica, Listener and the `ocp`/`summary` Celery workers 3,
+and Envoy 2 (full table in [design §5](../design/profile-sizing-maps.md)).
+Set `replicas` or `resources` on a component only when you need to diverge from
+the tier.
 
 SaaS-only Celery queues (`hcs`, `subsExtraction`, `subsTransmission`) default
 to `replicas: 0`. Leave them at zero.
@@ -70,7 +86,8 @@ Prefer CA Secrets over `insecureSkipVerify` / `sslMode: disable`.
 | UI Route | Passthrough (oauth2-proxy terminates TLS) | Service CA on the UI Service |
 
 Gateway Route host defaults to `{name}-gateway-{namespace}.{clusterDomain}`
-with path `/api` and a 180s router timeout.
+with path `/api`. Its router timeout comes from `spec.profile` (180s for
+`small`/`medium`, 600s for `large`/`xlarge`, see [Sizing profile](#sizing-profile)).
 
 ## NetworkPolicies
 

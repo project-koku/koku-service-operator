@@ -209,10 +209,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 	image := spec.Image.Repository + ":" + spec.Image.Tag
 	selLabels := SelectorLabels(cfg, "ros-optimization")
 	allLabels := Labels(cfg, "ros-optimization")
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadKruize, spec.Replicas)
 
 	cfgVol, cfgMount := kruizeConfigVolumeAndMount(cfg)
 	initEnv := kruizeEnv(cfg, true)
@@ -236,7 +233,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 		Args:            []string{"-c", "export DB_CONFIG_FILE=/tmp/cdappconfig.json && /home/autotune/app/target/bin/CreatePartition"},
 		Env:             initEnv,
 		VolumeMounts:    []corev1.VolumeMount{cfgMount},
-		Resources:       spec.Partitions.Resources,
+		Resources:       ProfileResources(cfg, WorkloadKruizePartitions, spec.Partitions.Resources),
 		SecurityContext: restrictedContainerSC(),
 	}
 
@@ -274,7 +271,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/listPerformanceProfiles", Port: intstr.FromInt32(kruizePort)}},
 							InitialDelaySeconds: 30, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 						},
-						Resources:       spec.Resources,
+						Resources:       ProfileResources(cfg, WorkloadKruize, spec.Resources),
 						VolumeMounts:    []corev1.VolumeMount{cfgMount},
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -343,7 +340,7 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 								Command:         []string{"sh"},
 								Args:            []string{"-c", "export DB_CONFIG_FILE=/tmp/cdappconfig.json && /home/autotune/app/target/bin/RetentionPartition"},
 								Env:             env,
-								Resources:       spec.Partitions.Resources,
+								Resources:       ProfileResources(cfg, WorkloadKruizePartitions, spec.Partitions.Resources),
 								VolumeMounts:    []corev1.VolumeMount{cfgMount},
 								SecurityContext: restrictedContainerSC(),
 							}},

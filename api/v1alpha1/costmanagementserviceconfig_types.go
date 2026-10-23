@@ -47,16 +47,21 @@ const (
 // Profile
 // -----------------------------------------------------------------------------
 
-// Profile selects a pre-defined resource sizing tier.
-// Currently applies to UI containers only; other workloads use per-component spec.*.resources fields.
-// +kubebuilder:validation:Enum=standard;ha
+// Profile selects a validated workload sizing tier. Values come from the
+// Cost On-Prem performance testing (see docs/performance/sizing-guide.md).
+// Explicit per-component fields in the spec always override profile values.
+// +kubebuilder:validation:Enum=small;medium;large;xlarge
 type Profile string
 
 const (
-	// ProfileStandard is the default sizing tier (chart-equivalent UI footprint).
-	ProfileStandard Profile = "standard"
-	// ProfileHA raises UI CPU/memory defaults for a redundant footprint.
-	ProfileHA Profile = "ha"
+	// ProfileSmall is the default sizing tier (chart values.yaml).
+	ProfileSmall Profile = "small"
+	// ProfileMedium mirrors the chart values-medium.yaml overlay.
+	ProfileMedium Profile = "medium"
+	// ProfileLarge mirrors the chart values-large.yaml overlay.
+	ProfileLarge Profile = "large"
+	// ProfileXLarge mirrors the chart values-xlarge.yaml overlay.
+	ProfileXLarge Profile = "xlarge"
 )
 
 // -----------------------------------------------------------------------------
@@ -302,9 +307,28 @@ type AuthConfig struct {
 
 type EnvoySpec struct {
 	Image ImageSpec `json:"image,omitempty"`
-	// +kubebuilder:default:=2
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// IngressTimeout overrides the Envoy route timeout for /api/ingress/
+	// (uploads). Go duration format, e.g. "180s" or "10m"; must be positive.
+	// Unset uses the sizing profile value.
+	//
+	// The OpenShift Route (HAProxy) timeout is separate: it comes from the
+	// profile (180s small/medium, 600s large/xlarge). If ingressTimeout exceeds
+	// it, also raise spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"],
+	// otherwise HAProxy cuts the upload first.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be a positive duration"
+	IngressTimeout string `json:"ingressTimeout,omitempty"`
+	// IngressPerTryTimeout overrides the Envoy per-try (retry) timeout for
+	// /api/ingress/. Go duration format; must be positive. Unset uses the sizing
+	// profile value.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be a positive duration"
+	IngressPerTryTimeout string `json:"ingressPerTryTimeout,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.issuerURL) || size(self.issuerURL) == 0 || self.issuerURL.startsWith('https://')",message="issuerURL must use https when set"
@@ -361,8 +385,8 @@ type RBACConfig struct {
 }
 
 type RBACComponentSpec struct {
-	// +kubebuilder:default:=1
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
@@ -388,9 +412,13 @@ type KeycloakSyncSpec struct {
 
 type IngressConfig struct {
 	Image ImageSpec `json:"image,omitempty"`
-	// Maximum upload size in bytes.
-	// +kubebuilder:default:=104857600
-	MaxUploadSize int64 `json:"maxUploadSize,omitempty"`
+	// Maximum upload size in bytes. Unset uses the sizing profile value.
+	// +kubebuilder:validation:Minimum=1
+	MaxUploadSize *int64 `json:"maxUploadSize,omitempty"`
+	// MaxMemory is the in-memory upload buffer in bytes (INGRESS_MAXUPLOADMEM).
+	// Unset uses the sizing profile value.
+	// +kubebuilder:validation:Minimum=1
+	MaxMemory *int64 `json:"maxMemory,omitempty"`
 	// Comma-separated list of valid upload content types.
 	// +kubebuilder:default:="hccm"
 	ValidTypes string                      `json:"validTypes,omitempty"`
@@ -402,8 +430,9 @@ type IngressConfig struct {
 // -----------------------------------------------------------------------------
 
 type KruizeConfig struct {
-	// +kubebuilder:default:=1
-	Replicas   int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	Replicas   *int32                      `json:"replicas,omitempty"`
 	Image      ImageSpec                   `json:"image,omitempty"`
 	Resources  corev1.ResourceRequirements `json:"resources,omitempty"`
 	Partitions KruizePartitionsSpec        `json:"partitions,omitempty"`
@@ -455,8 +484,8 @@ type ROSAPISpec struct {
 }
 
 type ROSProcessorSpec struct {
-	// +kubebuilder:default:=1
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +kubebuilder:default:=INFO
 	LogLevel string `json:"logLevel,omitempty"`
@@ -508,8 +537,8 @@ type KokuAPISpec struct {
 	// +kubebuilder:default:=true
 	Enabled *bool     `json:"enabled,omitempty"`
 	Image   ImageSpec `json:"image,omitempty"`
-	// +kubebuilder:default:=1
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// Environment variable overrides merged over operator-managed defaults.
 	// Must not contain secret values — use Secret references for credentials.
@@ -520,8 +549,8 @@ type MasuSpec struct {
 	// +kubebuilder:default:=true
 	Enabled *bool     `json:"enabled,omitempty"`
 	Image   ImageSpec `json:"image,omitempty"`
-	// +kubebuilder:default:=1
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	Env       map[string]string           `json:"env,omitempty"`
 }
@@ -529,8 +558,8 @@ type MasuSpec struct {
 type ListenerSpec struct {
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
-	// +kubebuilder:default:=2
-	Replicas  int32                       `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas  *int32                      `json:"replicas,omitempty"`
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	Env       map[string]string           `json:"env,omitempty"`
 }
@@ -554,8 +583,8 @@ type CeleryWorkersSpec struct {
 }
 
 type CeleryWorkerSpec struct {
-	// +kubebuilder:default:=1
-	Replicas int32 `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Replicas *int32 `json:"replicas,omitempty"`
 	// +kubebuilder:default:=5
 	Concurrency int32                       `json:"concurrency,omitempty"`
 	Resources   corev1.ResourceRequirements `json:"resources,omitempty"`
@@ -573,7 +602,11 @@ type SaaSCeleryWorkerSpec struct {
 
 // CeleryWorkerSpec returns the shared worker shape used by resource builders.
 func (s SaaSCeleryWorkerSpec) CeleryWorkerSpec() CeleryWorkerSpec {
-	return CeleryWorkerSpec(s)
+	return CeleryWorkerSpec{
+		Replicas:    new(s.Replicas),
+		Concurrency: s.Concurrency,
+		Resources:   s.Resources,
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -581,8 +614,8 @@ func (s SaaSCeleryWorkerSpec) CeleryWorkerSpec() CeleryWorkerSpec {
 // -----------------------------------------------------------------------------
 
 type UIConfig struct {
-	// +kubebuilder:default:=1
-	ReplicaCount int32          `json:"replicaCount,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	ReplicaCount *int32         `json:"replicaCount,omitempty"`
 	OAuthProxy   OAuthProxySpec `json:"oauthProxy,omitempty"`
 	App          UIAppSpec      `json:"app,omitempty"`
 	// OAuthClientSecretRef names a Secret in the CR namespace with keys
@@ -653,9 +686,9 @@ type MonitoringConfig struct {
 // is omitted, so the required-url rule lives here as well.
 // +kubebuilder:validation:XValidation:rule="has(self.auth) && has(self.auth.keycloak) && has(self.auth.keycloak.url) && size(self.auth.keycloak.url) > 0",message="spec.auth.keycloak.url is required (JWKS fetch URL); operator does not auto-detect Keycloak"
 type CostManagementServiceConfigSpec struct {
-	// Profile selects a pre-defined resource sizing tier.
-	// Currently applies to UI containers only; other workloads use per-component spec.*.resources fields.
-	// +kubebuilder:default:=standard
+	// Profile selects a validated workload sizing tier (small, medium, large, xlarge).
+	// Explicit per-component fields in the spec always override profile values.
+	// +kubebuilder:default:=small
 	Profile        Profile              `json:"profile,omitempty"`
 	Global         GlobalConfig         `json:"global,omitempty"`
 	Database       DatabaseConfig       `json:"database,omitempty"`
@@ -741,6 +774,12 @@ type CostManagementServiceConfigStatus struct {
 
 	// ObservedGeneration is the metadata.generation last reconciled.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Profile is the sizing tier whose workloads the operator applied for the
+	// current generation (spec.profile, or small when unset). It is set once the
+	// sized workloads are applied, not when every readiness gate passes.
+	// +optional
+	Profile Profile `json:"profile,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -753,6 +792,7 @@ type CostManagementServiceConfigStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=cmsc
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.status.profile`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type CostManagementServiceConfig struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -131,10 +131,7 @@ func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Contain
 func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
 	image := spec.Image.Repository + ":" + spec.Image.Tag
-	replicas := spec.API.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadRBACAPI, spec.API.Replicas)
 	falseVal := false
 	selLabels := SelectorLabels(cfg, "rbac-api")
 	allLabels := Labels(cfg, "rbac-api")
@@ -187,7 +184,7 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
 							InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 						},
-						Resources:       spec.API.Resources,
+						Resources:       ProfileResources(cfg, WorkloadRBACAPI, spec.API.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: rbacAppContainerSC(),
 					}},
@@ -222,10 +219,7 @@ func RBACAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servi
 func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
 	image := spec.Image.Repository + ":" + spec.Image.Tag
-	replicas := spec.Worker.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadRBACWorker, spec.Worker.Replicas)
 	falseVal := false
 	selLabels := SelectorLabels(cfg, "rbac-worker")
 	allLabels := Labels(cfg, "rbac-worker")
@@ -260,7 +254,7 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 						Command:         []string{"celery"},
 						Args:            []string{"-A", "rbac.celery", "worker", "--pool=solo", "--loglevel=info"},
 						Env:             rbacEnv(cfg),
-						Resources:       spec.Worker.Resources,
+						Resources:       ProfileResources(cfg, WorkloadRBACWorker, spec.Worker.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: rbacAppContainerSC(),
 					}},

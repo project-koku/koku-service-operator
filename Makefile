@@ -122,6 +122,7 @@ test-scripts: ## Run no-cluster script tests (pre-prod demos, deploy-test-operat
 	./scripts/ci/e2e_test.sh
 	./scripts/pytest_markexpr_test.sh
 	./scripts/deploy-rhbk_test.sh
+	./scripts/perf-testing_test.sh
 
 .PHONY: check-rbac-seed
 check-rbac-seed: ## Verify embedded RBAC seed snapshots match project-kessel/rbac-config at the pinned ref.

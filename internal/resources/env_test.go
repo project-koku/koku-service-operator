@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -178,7 +179,7 @@ func TestKokuWorkloadsCarryS3CredentialEnv(t *testing.T) {
 		{"masu", MasuDeployment(cfg).Spec.Template.Spec.Containers},
 		{"listener", ListenerDeployment(cfg).Spec.Template.Spec.Containers},
 		{"celery-beat", CeleryBeatDeployment(cfg).Spec.Template.Spec.Containers},
-		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: 1}).Spec.Template.Spec.Containers},
+		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](1)}).Spec.Template.Spec.Containers},
 		{"migration", MigrationJob(cfg, "latest").Spec.Template.Spec.Containers},
 	}
 	for _, wl := range workloads {
@@ -383,7 +384,7 @@ func TestWorkloadKokuLogLevelOverrides(t *testing.T) {
 		{"masu", MasuDeployment(cfg).Spec.Template.Spec.Containers, "DEBUG"},
 		{"listener", ListenerDeployment(cfg).Spec.Template.Spec.Containers, "INFO"},
 		{"celery-beat", CeleryBeatDeployment(cfg).Spec.Template.Spec.Containers, "INFO"},
-		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: 1}).Spec.Template.Spec.Containers, "INFO"},
+		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](1)}).Spec.Template.Spec.Containers, "INFO"},
 		{"migration", MigrationJob(cfg, "latest").Spec.Template.Spec.Containers, "INFO"},
 	}
 

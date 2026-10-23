@@ -79,6 +79,9 @@ type CostManagementServiceConfigReconciler struct {
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder
+
+	// phasesOverride replaces the production phase pipeline. Tests only.
+	phasesOverride func(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) []PhaseFn
 }
 
 // CostManagementServiceConfig (the owned CR): watched via For(); Update is used
@@ -247,6 +250,37 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 	return ctrl.Result{}, nil
 }
 
+// phases returns the ordered stage pipeline run by reconcile().
+func (r *CostManagementServiceConfigReconciler) phases(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) []PhaseFn {
+	if r.phasesOverride != nil {
+		return r.phasesOverride(ctx, cfg)
+	}
+	return []PhaseFn{
+		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
+		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
+		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
+		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
+		func() (Result, error) { return r.reconcileValidation(ctx, cfg) },
+		func() (Result, error) { return r.reconcileMigration(ctx, cfg) },
+		func() (Result, error) { return r.reconcileCoreServices(ctx, cfg) },
+		func() (Result, error) { return r.reconcileWorkers(ctx, cfg) },
+		func() (Result, error) { return r.reconcileEdge(ctx, cfg) },
+		func() (Result, error) { return r.reconcileMonitoring(ctx, cfg) },
+	}
+}
+
+// markProfileApplied records the tier whose sized workloads were applied for
+// the current generation (design §3.4, D20). It is called once the last phase
+// that unconditionally applies sized Deployments has run (reconcileEdge, right
+// after the Envoy Deployment is applied), so earlier failures and readiness
+// gates (migration, core/worker readiness) leave the previous value untouched.
+// It deliberately does not wait on Envoy/Route readiness or on UI-specific
+// gates (OAuth client Secret, UI Route admission): the UI is user-gated
+// optional configuration and UIReady=False is a normal lab state.
+func (r *CostManagementServiceConfigReconciler) markProfileApplied(cfg *costv1alpha1.CostManagementServiceConfig) {
+	cfg.Status.Profile = resources.EffectiveProfile(cfg)
+}
+
 // reconcile drives the ordered, staged rollout:
 //  0. Workload images (spec.*.image required; no operator catalog default)
 //  1. Discovery (cluster domain, StorageClass, S3)
@@ -265,18 +299,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	cfg.Status.Phase = costv1alpha1.PhaseProgressing
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
-	result, err := runPhases([]PhaseFn{
-		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
-		func() (Result, error) { return r.reconcileDiscovery(ctx, cfg) },
-		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
-		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
-		func() (Result, error) { return r.reconcileValidation(ctx, cfg) },
-		func() (Result, error) { return r.reconcileMigration(ctx, cfg) },
-		func() (Result, error) { return r.reconcileCoreServices(ctx, cfg) },
-		func() (Result, error) { return r.reconcileWorkers(ctx, cfg) },
-		func() (Result, error) { return r.reconcileEdge(ctx, cfg) },
-		func() (Result, error) { return r.reconcileMonitoring(ctx, cfg) },
-	})
+	result, err := runPhases(r.phases(ctx, cfg))
 
 	if err != nil {
 		// applyPhaseError handles structured PhaseError (condition + phase from err).
@@ -878,6 +901,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 			return Result{}, fmt.Errorf("edge %s: %w", obj.GetName(), err)
 		}
 	}
+
+	// Envoy is the last sized Deployment applied unconditionally (D20).
+	r.markProfileApplied(cfg)
 
 	route := resources.GatewayAPIRoute(cfg)
 	if route != nil {
