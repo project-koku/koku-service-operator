@@ -224,16 +224,51 @@ jobs:
             type=raw,value={{sha}},enable=${{ env.PUSH_IMAGE }}
             type=raw,value=ci,enable=${{ env.PUSH_IMAGE != 'true' }}
 
-      - name: Build and push container image
+      - name: Build image for FIPS verification
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
-          push: ${{ env.PUSH_IMAGE }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: true
+          tags: koku-service-operator:fips-check
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify both binaries use native FIPS
+        run: make verify-fips IMG=koku-service-operator:fips-check
+
+      - name: Load native FIPS test builder
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: builder
+          load: true
+          tags: koku-service-operator:fips-test
+          cache-from: type=gha
+
+      - name: Test cryptographic paths with native FIPS enforcement
+        run: |
+          docker run --rm --env GODEBUG=fips140=only \
+            --volume "$PWD/config:/workspace/config:ro" \
+            --volume "$PWD/bundle:/workspace/bundle:ro" \
+            --workdir /workspace --entrypoint /bin/bash \
+            koku-service-operator:fips-test -lc '
+              go test -tags=no_openssl,nativefips ./api/... ./cmd/... ./internal/resources/... ./internal/fips/... &&
+              go test -tags=no_openssl,nativefips ./internal/controller -run "^Test(GeneratedSecrets|S3|OIDC|ReconcileValidation|Kafka|JWKS|CertPool|TCPProbe|Required|TopicMissing)"
+            '
+
+      - name: Push verified container image
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
 
   bundle-publish:
     name: Bundle & Catalog Images

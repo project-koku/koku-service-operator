@@ -52,6 +52,23 @@ assert_contains "$patched" "COPY --from=builder /tmp/wait-for /wait-for" "copy w
 assert_not_contains "$patched" "-o manager cmd/main.go" "no WORKDIR-relative manager output"
 rm -f "$tmp"
 
+# Exercise the shipped Dockerfile too: a stale fixture must not hide changes to
+# build flags, package paths, or commands that inspect the resulting binaries.
+tmp="$(mktemp)"
+cp "${ROOT}/Dockerfile" "$tmp"
+patch_operator_dockerfile "$tmp"
+patched="$(cat "$tmp")"
+assert_contains "$patched" "-tags=no_openssl,nativefips -o /tmp/manager ./cmd" "preserve manager FIPS tags and package build"
+assert_contains "$patched" "-tags=no_openssl,nativefips -o /tmp/wait-for ./cmd/wait-for/" "preserve helper FIPS tags and package build"
+assert_contains "$patched" "RUN go version -m /tmp/manager /tmp/wait-for" "inspect redirected binaries"
+assert_contains "$patched" "COPY --from=builder /tmp/manager /manager" "copy current manager output"
+assert_contains "$patched" "COPY --from=builder /tmp/wait-for /wait-for" "copy current helper output"
+assert_not_contains "$patched" " -o manager " "current manager output is not WORKDIR-relative"
+assert_not_contains "$patched" " -o wait-for " "current helper output is not WORKDIR-relative"
+patch_operator_dockerfile "$tmp"
+assert_eq "$(cat "$tmp")" "$patched" "Dockerfile patch is idempotent"
+rm -f "$tmp"
+
 # --- CR: replace placeholder domain, set public issuer + skip-verify ---
 tmp="$(mktemp)"
 render_preprod_cr \
