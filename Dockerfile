@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26.7-1788409979 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.10-1792592174 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wait-for ./cmd/wait-for/
 
 # Use Red Hat UBI Micro as the minimal supported runtime image.
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1789345812
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1791895366
 
 WORKDIR /
 COPY --from=builder /workspace/manager /manager
