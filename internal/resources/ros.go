@@ -208,7 +208,7 @@ func kafkaTLSVolumeAndMount(cfg *costv1alpha1.CostManagementServiceConfig) (*cor
 
 // ROSAPIDeployment builds the ROS API Deployment.
 func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-api")
 	allLabels := Labels(cfg, "ros-api")
 	replicas := int32(1)
@@ -308,7 +308,7 @@ func ROSAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servic
 
 // ROSProcessorDeployment builds the ROS Processor Deployment.
 func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-processor")
 	allLabels := Labels(cfg, "ros-processor")
 	replicas := cfg.Spec.ROS.Processor.Replicas
@@ -423,7 +423,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 
 // ROSPollerDeployment builds the Recommendation Poller Deployment.
 func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-recommendation-poller")
 	allLabels := Labels(cfg, "ros-recommendation-poller")
 	replicas := int32(1)
@@ -501,7 +501,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 
 // ROSHousekeeperDeployment builds the Housekeeper Deployment.
 func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-housekeeper")
 	allLabels := Labels(cfg, "ros-housekeeper")
 	replicas := int32(1)
@@ -568,7 +568,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 
 // ROSPartitionCleanerCronJob builds the partition cleaner CronJob.
 func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1.CronJob {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	pc := cfg.Spec.ROS.Housekeeper.PartitionCleaner
 	schedule := pc.Schedule
 	if schedule == "" {

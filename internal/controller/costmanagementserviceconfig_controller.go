@@ -327,7 +327,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkloadImages(_ contex
 		return Result{}, nil
 	}
 	return Result{}, &imageNotSetError{
-		msg: fmt.Sprintf("set repository and tag on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", ")),
+		msg: fmt.Sprintf("set repository and a valid tag or digest on %s; the operator does not default workload images (see config/samples)", strings.Join(missing, ", ")),
 	}
 }
 
@@ -484,7 +484,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 // reconcileMigration runs migration Jobs sequentially:
 // Koku → ROS → RBAC migrate+seed.
 // Each Job must complete before the next is created. Previously-succeeded
-// Jobs are not re-created unless the image-tag annotation changed.
+// Jobs are re-created only when their migration execution inputs changed.
 func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	if msg := migrationImageError(cfg); msg != "" {
 		// Config error: Stop without requeue. Clear Available/Progressing so a
@@ -498,35 +498,24 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 		return Result{Stop: true}, nil
 	}
 
-	type migStep struct {
-		name     string
-		imageTag string
-		build    func() *batchv1.Job
+	// Inspect the whole pipeline before replacing an earlier step. A new Koku
+	// target must not overlap an existing ROS/RBAC migration, including one
+	// whose component was just disabled in the CR.
+	if result, err := r.guardMigrationPipeline(ctx, cfg); err != nil || !result.IsZero() {
+		return result, err
 	}
 
-	steps := []migStep{
-		{
-			name:     resources.NameKokuMigration(cfg),
-			imageTag: cfg.Spec.CostManagement.API.Image.Tag,
-			build:    func() *batchv1.Job { return resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag) },
-		},
+	steps := []*batchv1.Job{
+		resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag),
 	}
 	// ROS schema migrate only when ROS is enabled.
 	if costv1alpha1.ROSEnabled(cfg) {
-		steps = append(steps, migStep{
-			name:     resources.NameROSMigration(cfg),
-			imageTag: cfg.Spec.ROS.Image.Tag,
-			build:    func() *batchv1.Job { return resources.ROSMigrationJob(cfg, cfg.Spec.ROS.Image.Tag) },
-		})
+		steps = append(steps, resources.ROSMigrationJob(cfg, cfg.Spec.ROS.Image.Tag))
 	}
-	steps = append(steps, migStep{
-		name:     resources.NameRBACMigration(cfg),
-		imageTag: resources.RBACSeedJobTag(cfg.Spec.RBAC.Image.Tag),
-		build:    func() *batchv1.Job { return resources.RBACMigrationJob(cfg, cfg.Spec.RBAC.Image.Tag) },
-	})
+	steps = append(steps, resources.RBACMigrationJob(cfg, cfg.Spec.RBAC.Image.Tag))
 
 	for i, step := range steps {
-		result, err := r.runMigrationStep(ctx, cfg, step.name, step.imageTag, step.build, i+1, len(steps))
+		result, err := r.runMigrationStep(ctx, cfg, step, i+1, len(steps))
 		if err != nil || !result.IsZero() {
 			return result, err
 		}
@@ -535,6 +524,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	// All steps completed.
 	schemaWasReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
 	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "all schema migrations succeeded")
+	r.setCondition(cfg, costv1alpha1.ConditionUpgradeFailed, metav1.ConditionFalse, "MigrationComplete", "all schema migrations succeeded")
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "MigrationSucceeded", "")
 	if !schemaWasReady && r.Recorder != nil {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationsComplete",
@@ -549,15 +539,15 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 // creating Jobs with ":" or a hardcoded :latest tag.
 func migrationImageError(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if _, ok := resources.KokuImage(cfg); !ok {
-		return "spec.costManagement.api.image.repository and tag are required (Koku migration must use the same image as the API)"
+		return "spec.costManagement.api.image.repository and a valid tag or digest are required (Koku migration must use the same image as the API)"
 	}
 	if costv1alpha1.ROSEnabled(cfg) {
 		if _, ok := resources.ImageRef(cfg.Spec.ROS.Image); !ok {
-			return "spec.ros.image.repository and tag are required when ROS is enabled"
+			return "spec.ros.image.repository and a valid tag or digest are required when ROS is enabled"
 		}
 	}
 	if _, ok := resources.ImageRef(cfg.Spec.RBAC.Image); !ok {
-		return "spec.rbac.image.repository and tag are required"
+		return "spec.rbac.image.repository and a valid tag or digest are required"
 	}
 	return ""
 }
@@ -568,10 +558,10 @@ func migrationImageError(cfg *costv1alpha1.CostManagementServiceConfig) string {
 func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 	ctx context.Context,
 	cfg *costv1alpha1.CostManagementServiceConfig,
-	jobName, imageTag string,
-	build func() *batchv1.Job,
+	desired *batchv1.Job,
 	stepNum, totalSteps int,
 ) (Result, error) {
+	jobName := desired.Name
 	progress := func(msg string) {
 		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse,
 			"MigrationRunning",
@@ -579,18 +569,19 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 	}
 
 	existing := &batchv1.Job{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: cfg.Namespace, Name: jobName}, existing)
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	err := reader.Get(ctx, types.NamespacedName{Namespace: cfg.Namespace, Name: jobName}, existing)
 
 	if errors.IsNotFound(err) {
-		job := build()
-		if job == nil {
-			return Result{}, fmt.Errorf("create %s: image is unset", jobName)
-		}
-		setOwnerRef(cfg, job)
-		if createErr := r.Create(ctx, job); createErr != nil {
+		setOwnerRef(cfg, desired)
+		if createErr := r.Create(ctx, desired); createErr != nil {
 			return Result{}, fmt.Errorf("create %s: %w", jobName, createErr)
 		}
 		progress("job created")
+		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
 		r.Recorder.Eventf(cfg, corev1.EventTypeNormal, "MigrationStarted",
 			"Migration step %d/%d started: %s", stepNum, totalSteps, jobName)
 		return Result{RequeueAfter: requeueFast}, nil
@@ -599,37 +590,35 @@ func (r *CostManagementServiceConfigReconciler) runMigrationStep(
 		return Result{}, err
 	}
 
-	// Upgrade: image tag changed → delete and let next reconcile recreate.
-	if existing.Annotations[resources.MigrationImageTagAnnotation] != imageTag {
-		if delErr := r.Delete(ctx, existing, client.PropagationPolicy(metav1.DeletePropagationBackground)); delErr != nil && !errors.IsNotFound(delErr) {
-			return Result{}, fmt.Errorf("delete stale %s: %w", jobName, delErr)
-		}
-		progress("restarting for new image")
+	// A cached read or a concurrent actor can change the state after the
+	// pipeline guard. Never replace a deleting, failed, or unfinished Job.
+	if !existing.DeletionTimestamp.IsZero() {
+		progress("waiting for previous Job deletion")
+		return Result{RequeueAfter: requeueFast}, nil
+	}
+	if isJobFailed(existing) {
+		return r.migrationFailed(cfg, existing), nil
+	}
+	if !isJobComplete(existing) {
+		progress("waiting for existing Job to finish before accepting target changes")
 		return Result{RequeueAfter: requeueFast}, nil
 	}
 
-	if isJobComplete(existing) {
-		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
-		return Result{}, nil // proceed to next step
+	// Compare the actual execution inputs, including full image reference and
+	// script, rather than trusting either annotation on an existing Job. This
+	// also recognizes matching legacy Jobs without rerunning them on adoption.
+	if resources.MigrationExecutionID(existing) != resources.MigrationExecutionID(desired) {
+		if delErr := r.Delete(ctx, existing,
+			client.PropagationPolicy(metav1.DeletePropagationForeground),
+			client.Preconditions{UID: &existing.UID}); delErr != nil && !errors.IsNotFound(delErr) {
+			return Result{}, fmt.Errorf("delete stale %s: %w", jobName, delErr)
+		}
+		progress("restarting for changed migration inputs")
+		return Result{RequeueAfter: requeueFast}, nil
 	}
-	if isJobFailed(existing) {
-		msg := fmt.Sprintf("%s exhausted retries — check pod logs", jobName)
-		// Failed migrate stops the pipeline; core services are not rolled.
-		// Clear Available/Progressing so a prior Ready pass cannot linger.
-		r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionFalse, "MigrationFailed", msg)
-		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, "MigrationFailed", msg)
-		r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "MigrationFailed", msg)
-		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "MigrationFailed", msg)
-		cfg.Status.Phase = costv1alpha1.PhaseDegraded
-		opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, true)
-		r.Recorder.Eventf(cfg, corev1.EventTypeWarning, "MigrationFailed",
-			"Migration job %s exhausted retries — manual intervention required", jobName)
-		return Result{Stop: true}, nil
-	}
-	opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
 
-	progress("running")
-	return Result{RequeueAfter: requeueFast}, nil
+	opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, jobName, false)
+	return Result{}, nil
 }
 
 // -----------------------------------------------------------------------------

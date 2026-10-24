@@ -57,6 +57,11 @@ spec:
                     properties:
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -65,10 +70,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       replicas:
                         default: 2
@@ -223,6 +229,11 @@ spec:
                     type: string
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -231,10 +242,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   persistence:
                     properties:
@@ -343,6 +355,11 @@ spec:
                         type: object
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -351,10 +368,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       replicas:
                         default: 1
@@ -1248,6 +1266,11 @@ spec:
                         type: object
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -1256,10 +1279,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       replicas:
                         default: 1
@@ -1363,6 +1387,11 @@ spec:
                     type: string
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1371,10 +1400,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   port:
                     default: 5432
@@ -1554,6 +1584,11 @@ spec:
                 properties:
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1562,10 +1597,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   maxUploadSize:
                     default: 104857600
@@ -1678,6 +1714,11 @@ spec:
                 properties:
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1686,10 +1727,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   partitions:
                     properties:
@@ -2006,6 +2048,11 @@ spec:
                     type: object
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -2014,10 +2061,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   keycloakSync:
                     properties:
@@ -2391,6 +2439,11 @@ spec:
                     type: object
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -2399,10 +2452,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   processor:
                     properties:
@@ -2562,6 +2616,11 @@ spec:
                     properties:
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -2570,10 +2629,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2669,6 +2729,11 @@ spec:
                         type: string
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -2677,10 +2742,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       resources:
                         description: ResourceRequirements describes the compute resource
