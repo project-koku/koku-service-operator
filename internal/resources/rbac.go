@@ -130,7 +130,7 @@ func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Contain
 // Koku delegates all permission checks to this service via HTTP.
 func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	replicas := spec.API.Replicas
 	if replicas == 0 {
 		replicas = 1
@@ -221,7 +221,7 @@ func RBACAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servi
 // RBACWorkerDeployment builds the RBAC Celery worker Deployment.
 func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	replicas := spec.Worker.Replicas
 	if replicas == 0 {
 		replicas = 1

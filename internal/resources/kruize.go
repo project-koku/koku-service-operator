@@ -206,7 +206,7 @@ func kruizeConfigVolumeAndMount(cfg *costv1alpha1.CostManagementServiceConfig) (
 // KruizeDeployment builds the Kruize optimization engine Deployment.
 func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.Kruize
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	selLabels := SelectorLabels(cfg, "ros-optimization")
 	allLabels := Labels(cfg, "ros-optimization")
 	replicas := spec.Replicas
@@ -300,7 +300,7 @@ func KruizeService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servic
 // KruizeDeletePartitionsCronJob builds the CronJob that purges old Kruize partitions.
 func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1.CronJob {
 	spec := cfg.Spec.Kruize
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	schedule := spec.Partitions.DeleteSchedule
 	if schedule == "" {
 		schedule = "0 0 * * *"

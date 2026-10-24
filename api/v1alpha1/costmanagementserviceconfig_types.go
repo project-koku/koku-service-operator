@@ -26,6 +26,8 @@ const (
 	ConditionKafkaReady        = "KafkaReady"
 	ConditionAuthReady         = "AuthenticationReady"
 	ConditionSchemaUpToDate    = "SchemaUpToDate"
+	// ConditionUpgradeFailed retains the failing migration until recovery succeeds.
+	ConditionUpgradeFailed = "UpgradeFailed"
 	// ConditionRBACReady reports RBAC API Deployment readiness (not the worker).
 	ConditionRBACReady = "RBACReady"
 	// ConditionRBACWorkerReady reports the RBAC Celery worker Deployment. It
@@ -65,7 +67,11 @@ const (
 
 type ImageSpec struct {
 	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
+	// Tag selects a legacy tag reference when Digest is empty.
+	Tag string `json:"tag,omitempty"`
+	// Digest pins immutable image content. When set, it takes precedence over Tag.
+	// +kubebuilder:validation:Pattern="^sha256:[a-f0-9]{64}$"
+	Digest string `json:"digest,omitempty"`
 	// +kubebuilder:default:=IfNotPresent
 	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
 }
