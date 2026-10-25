@@ -61,12 +61,20 @@ docker run --rm --entrypoint /wait-for koku-service-operator:fips-check --fips-s
 
 They print JSON containing `enabled` and `version`, obtained from the native
 `crypto/fips140` API. `enabled: false` is expected on a non-FIPS host in `auto`
-mode. Before publishing the image, GitHub Actions runs `verify-fips` and unit
-tests in the Red Hat builder with `GODEBUG=fips140=only`, the same native build
-tags, and the pinned snapshot. Those tests exercise API/resource builders,
+mode. GitHub Actions runs `verify-fips` against the runtime image. It also runs
+unit tests in the Red Hat builder with `GODEBUG=fips140=only`, the same native
+build tags, and the pinned snapshot. Those tests exercise API/resource builders,
 credentials, helper behavior, and dependency-validation paths. Controller tests
 that require envtest still run in the normal full Go suite; real cluster
 acceptance remains separate.
+
+Pull-request runs verify a locally loaded image without publishing it. Main-branch
+runs build and push a unique `candidate-<run-id>-<attempt>` tag with provenance,
+then pull and verify the registry artifact by its immutable digest. After both
+image verification and native-FIPS tests pass, CI promotes that same digest to
+`latest`, `main`, and the commit tag using `buildx imagetools create`, preserving
+the index and its provenance without rebuilding. A failed run can leave a
+candidate in Quay, but does not promote it to the normal deployment tags.
 
 ## Run check-payload before cluster verification
 
