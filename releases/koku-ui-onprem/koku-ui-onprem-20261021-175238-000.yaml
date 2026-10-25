@@ -1,0 +1,136 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  labels:
+    release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
+  namespace: cost-mgmt-dev-tenant
+  name: koku-ui-onprem-20261021-175238-000-prod-1
+spec:
+  releasePlan: koku-ui-onprem-prod
+  snapshot: koku-ui-onprem-20261021-175238-000
+  data:
+    releaseNotes:
+      type: RHSA
+      topic: "Cost Management Frontend Image version koku-ui-onprem-20261021-175238-000 release."
+      cves:
+        - key: CVE-2026-19553
+          component: koku-ui-onprem
+          packages:
+            - python3
+            - python3-libs
+        - key: CVE-2026-19445
+          component: koku-ui-onprem
+          packages:
+            - python3
+            - python3-libs
+        - key: CVE-2026-89161
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+        - key: CVE-2026-103111
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+        - key: CVE-2026-10536
+          component: koku-ui-onprem
+          packages:
+            - curl
+            - libcurl-minimal
+        - key: CVE-2026-6429
+          component: koku-ui-onprem
+          packages:
+            - curl
+            - libcurl-minimal
+        - key: CVE-2026-7168
+          component: koku-ui-onprem
+          packages:
+            - curl
+            - libcurl-minimal
+        - key: CVE-2026-6253
+          component: koku-ui-onprem
+          packages:
+            - curl
+            - libcurl-minimal
+        - key: CVE-2026-5545
+          component: koku-ui-onprem
+          packages:
+            - curl
+            - libcurl-minimal
+        - key: CVE-2026-89157
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+        - key: CVE-2026-89158
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+        - key: CVE-2026-19953
+          component: koku-ui-onprem
+          packages:
+            - perl-URI
+        - key: CVE-2026-8674
+          component: koku-ui-onprem
+          packages:
+            - glibc-langpack-en
+            - glibc
+            - glibc-common
+            - glibc-minimal-langpack
+        - key: CVE-2026-80489
+          component: koku-ui-onprem
+          packages:
+            - glibc-langpack-en
+            - glibc
+            - glibc-common
+            - glibc-minimal-langpack
+        - key: CVE-2026-18374
+          component: koku-ui-onprem
+          packages:
+            - glibc-langpack-en
+            - glibc
+            - glibc-common
+            - glibc-minimal-langpack
+        - key: CVE-2026-77117
+          component: koku-ui-onprem
+          packages:
+            - glibc-langpack-en
+            - glibc
+            - glibc-common
+            - glibc-minimal-langpack
+        - key: CVE-2026-89156
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+        - key: CVE-2026-89160
+          component: koku-ui-onprem
+          packages:
+            - pcre2-syntax
+            - pcre2
+
+      references:
+        - https://access.redhat.com/security/updates/classification
+        - https://access.redhat.com/security/cve/CVE-2026-19553
+        - https://access.redhat.com/security/cve/CVE-2026-19445
+        - https://access.redhat.com/security/cve/CVE-2026-89161
+        - https://access.redhat.com/security/cve/CVE-2026-103111
+        - https://access.redhat.com/security/cve/CVE-2026-10536
+        - https://access.redhat.com/security/cve/CVE-2026-6429
+        - https://access.redhat.com/security/cve/CVE-2026-7168
+        - https://access.redhat.com/security/cve/CVE-2026-6253
+        - https://access.redhat.com/security/cve/CVE-2026-5545
+        - https://access.redhat.com/security/cve/CVE-2026-89157
+        - https://access.redhat.com/security/cve/CVE-2026-89158
+        - https://access.redhat.com/security/cve/CVE-2026-19953
+        - https://access.redhat.com/security/cve/CVE-2026-8674
+        - https://access.redhat.com/security/cve/CVE-2026-80489
+        - https://access.redhat.com/security/cve/CVE-2026-18374
+        - https://access.redhat.com/security/cve/CVE-2026-77117
+        - https://access.redhat.com/security/cve/CVE-2026-89156
+        - https://access.redhat.com/security/cve/CVE-2026-89160
+        - https://access.redhat.com/articles/7148128
+        - https://docs.redhat.com/en/documentation/cost_management_service/1-latest/html/getting_started_with_cost_management/steps-to-cost-management
