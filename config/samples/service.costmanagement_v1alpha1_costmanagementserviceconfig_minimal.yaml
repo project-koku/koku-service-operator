@@ -1,5 +1,11 @@
 # Minimal BYOI sample (COST-7679)
 #
+# DEV / quickstart starting point — not a full production crypto profile.
+# Enables database.sslMode=require and objectStorage.useSSL; does not enable
+# cache TLS or Kafka SASL_SSL. For required vs recommended TLS and at-rest
+# guidance, copy config/samples/…_production.yaml and read
+# docs/install/production.md.
+#
 # Smallest operationally useful CostManagementServiceConfig for production-style
 # (external DB, cache, Kafka, S3, OIDC). Omits optional tuning: no celery worker
 # overrides (CRD defaults apply, including SaaS queues at replicas: 0),

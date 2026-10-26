@@ -1,8 +1,11 @@
+# DEV ONLY — bundled Postgres + Valkey; not a production TLS/at-rest profile.
+# Not for production. See docs/install/production.md and the _production sample.
+#
 # Community / turnkey dev/ci/lab sample — bundled Postgres + Valkey, public
 # images (oauth2-proxy, Envoy, Postgres, Valkey). Unlike the BYOI default, this
 # CR is ready to apply: the operator provisions DB/cache in-cluster and object
-# storage is resolved by discovery. Not for production — bundled DB/cache have
-# no HA/backup story; use the BYOI default or _production sample there.
+# storage is resolved by discovery. Bundled DB/cache have no HA/backup story;
+# use the BYOI default or _production sample for lasting deploys.
 #
 # Bundled Postgres/Valkey must be SCL images: DatabaseStatefulSet expects
 # POSTGRESQL_ADMIN_PASSWORD and /var/lib/pgsql/data.

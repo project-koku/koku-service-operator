@@ -1,3 +1,6 @@
+# DEV ONLY — bundled DB/cache, not a production TLS/at-rest profile.
+# Not for production. See docs/install/production.md and the _production sample.
+#
 # CRC minimal sample — bundled DB/cache + koku API/celery only.
 #
 # Use this for koku/operator dev on OpenShift Local (Apple Silicon). Skips ROS

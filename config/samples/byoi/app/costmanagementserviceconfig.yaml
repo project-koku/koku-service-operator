@@ -1,3 +1,6 @@
+# DEV ONLY — no TLS. sslMode=disable, Kafka PLAINTEXT, useSSL=false.
+# Not for production. See docs/install/production.md and the _production sample.
+#
 # Separate BYOI CostManagementServiceConfig — deploy:false for DB/cache.
 # Point clusterDomain at your cluster's apps domain before relying on Routes.
 apiVersion: service.costmanagement.openshift.io/v1alpha1

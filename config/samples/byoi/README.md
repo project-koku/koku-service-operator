@@ -1,5 +1,10 @@
 # BYOI test fixture
 
+> **Dev/CI only — no TLS, not for production.** The sample CRs use
+> `sslMode: disable`, Kafka `PLAINTEXT`, and `useSSL: false`. For production
+> crypto controls, see [docs/install/production.md](../../docs/install/production.md)
+> and the `_production` sample.
+
 Dev-only manifests that stand up external infrastructure in one namespace and a
 separate `CostManagementServiceConfig` (BYOI mode) in another. The operator
 does **not** provision DB/cache; it only connects.
