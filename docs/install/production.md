@@ -82,6 +82,26 @@ Route. See [cmmo.md](cmmo.md).
 Gateway Route host defaults to `{name}-gateway-{namespace}.{clusterDomain}`
 with path `/api` and a 180s router timeout.
 
+## Encryption at rest
+
+At-rest encryption is **customer-owned (BYOI)**. This operator does not
+provision encrypted volumes, buckets, or etcd. It connects to infrastructure
+you already hardened. Enable encryption on each store **before** you apply the
+CR; the TLS settings above only protect data in transit.
+
+| Store | Recommendation | Who owns it |
+|-------|----------------|-------------|
+| PostgreSQL volumes | OpenShift ODF encrypted StorageClass, or LUKS-backed block storage under the database | Your DBA / storage operator |
+| Object storage buckets | Provider bucket encryption (for example AWS SSE-S3/KMS, NooBaa, Ceph RGW) | Your S3 / ODF admin — this operator does not create buckets |
+| Kafka topics | Broker / disk encryption via AMQ Streams (or equivalent) | Your Kafka operator |
+| Kubernetes Secrets | [OpenShift etcd encryption](https://docs.openshift.com/container-platform/latest/security/encrypting-etcd.html) so credential Secrets are not plaintext in etcd | Cluster admin |
+| Operator-generated Secrets | Same etcd encryption; also export `{cr}-django-secret` and `{cr}-ui-cookie-secret` outside the cluster (see [Backup and restore](#backup-and-restore)) | You |
+
+Do not put database, cache, Kafka, or S3 passwords in the CR spec — use
+`credentialsSecretRef` / Secret references only. Bundled `database.deploy` /
+`cache.deploy` volumes are for lab and CI; they are not a production at-rest
+story.
+
 ## NetworkPolicies
 
 The operator applies **ingress** NetworkPolicies for:
