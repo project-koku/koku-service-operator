@@ -1,0 +1,43 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  labels:
+    release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
+  namespace: hcc-integrations-tenant
+  name: ingress-costmgmt-onprem-20261027-175322-000-prod-1
+spec:
+  releasePlan: ingress-costmgmt-onprem-prod
+  snapshot: ingress-costmgmt-onprem-20261027-175322-000
+  data:
+    releaseNotes:
+      type: RHSA
+      topic: "Cost Management Ingress Image version ingress-costmgmt-onprem-20261027-175322-000 release."
+      issues:
+        fixed:
+          - id: COST-8433
+            source: redhat.atlassian.net
+          - id: COST-8210
+            source: redhat.atlassian.net
+          - id: COST-8251
+            source: redhat.atlassian.net
+      cves:
+        - key: CVE-2026-56860
+          component: ingress-costmgmt-onprem
+          packages:
+            - pkg:golang/stdlib@1.27.3
+        - key: CVE-2026-56859
+          component: ingress-costmgmt-onprem
+          packages:
+            - pkg:golang/stdlib@1.27.3
+        - key: CVE-2026-84445
+          component: ingress-costmgmt-onprem
+          packages:
+            - pkg:golang/google.golang.org/grpc@v1.83.2
+      references:
+        - https://access.redhat.com/security/updates/classification
+        - https://access.redhat.com/security/cve/CVE-2026-56860
+        - https://access.redhat.com/security/cve/CVE-2026-56859
+        - https://access.redhat.com/security/cve/CVE-2026-84445
+        - https://access.redhat.com/articles/7148128
+        - https://docs.redhat.com/en/documentation/cost_management_service/1-latest/html/getting_started_with_cost_management/steps-to-cost-management
