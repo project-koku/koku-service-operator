@@ -8,14 +8,14 @@ CMMO is a **separate** product. This operator does not install or manage it.
 **Beta.** Disable Resource Optimization collection on CMMO. Do not enable
 `spec.ros.enabled` on the Cost Management CR.
 
-### Upload URL status (COST-7858 / COST-8125)
+### Upload URL status
 
 | Item | Status |
 |------|--------|
 | `api_url` must be **HTTPS** against this instance's gateway Route | **Required** for production (in transit). Never use `http://`. |
 | `upload.validate_cert: true` | **Required** for production; trust the gateway (and token URL) certs |
 | `api_url` + `ingress_path` values below | **Lab-validated** against this operator's Envoy gateway (`scripts/setup-cost-mgmt-tls.sh`). Working path for beta/lab. |
-| Certified CMMO support contract for GA | **Open** — confirm with CMMO owners before GA; tracked with install-guide GA work ([COST-8125](https://redhat.atlassian.net/browse/COST-8125)) under the security/GA prep epic ([COST-7548](https://redhat.atlassian.net/browse/COST-7548)). |
+| Certified CMMO support contract for GA | **Open** — confirm with CMMO owners before a GA install |
 
 Until that confirmation lands, treat the path as the supported **operator-side**
 upload target, not a CMMO product commitment.
