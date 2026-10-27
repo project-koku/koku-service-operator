@@ -295,6 +295,10 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
 	priorPhase := cfg.Status.Phase
+	priorProgressing := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionProgressing)
+	if priorProgressing != nil {
+		priorProgressing = priorProgressing.DeepCopy()
+	}
 	cfg.Status.ObservedGeneration = cfg.Generation
 	cfg.Status.Phase = costv1alpha1.PhaseProgressing
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
@@ -331,7 +335,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, c
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
-	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
+	r.completeProgressing(cfg, priorProgressing)
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	cfg.Status.Phase = costv1alpha1.PhaseReady
 	r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
@@ -366,6 +370,21 @@ func degradedReason(err error) string {
 		return reasonImageNotSet
 	}
 	return reasonReconcileError
+}
+
+// completeProgressing sets Progressing=False at the end of a successful pass.
+// Every pass flips Progressing to True while it runs; when the pass started
+// from Progressing=False (steady state) that flip is not a transition, so the
+// prior LastTransitionTime is kept. Otherwise every pass would write status,
+// and the status update would re-enqueue the CR immediately (COST-8517).
+func (r *CostManagementServiceConfigReconciler) completeProgressing(cfg *costv1alpha1.CostManagementServiceConfig, prior *metav1.Condition) {
+	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse, "ReconcileComplete", "")
+	if prior == nil || prior.Status != metav1.ConditionFalse {
+		return
+	}
+	if cur := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionProgressing); cur != nil {
+		cur.LastTransitionTime = prior.LastTransitionTime
+	}
 }
 
 // -----------------------------------------------------------------------------

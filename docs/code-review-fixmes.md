@@ -17,12 +17,15 @@ RBAC worker, Kruize, Ingress, UI — is still applied without readiness checks.
 A bad image on any of those leaves the CR reporting `Available=True` with zero
 running replicas.
 
-#### 2. Progressing status causes a continuous reconcile loop [D2]
+#### 2. Progressing status causes a continuous reconcile loop [D2] — **closed**
 
-Every successful pass transitions `Progressing` True → False. Each transition
-refreshes `LastTransitionTime`, so the status patch differs from what was read.
+Every successful pass transitioned `Progressing` True → False. Each transition
+refreshed `LastTransitionTime`, so the status patch differed from what was read.
 No generation-change predicate on the primary watch, so the status update
-re-enqueues immediately. The 5-minute drift interval is effectively bypassed.
+re-enqueued immediately (measured: ~46 passes/min on an idle CR). Fixed in
+[COST-8517](https://redhat.atlassian.net/browse/COST-8517): a pass that starts
+and ends at `Progressing=False` keeps the prior `LastTransitionTime`, so the
+steady-state status patch is empty.
 
 #### 3. Failed OIDC check overwritten with success [D3] — **closed**
 
