@@ -72,7 +72,7 @@ production.
 | Cache | `cache.tls.enabled: true` | `caCertSecretName` so the client verifies the cache cert | `ca.crt` |
 | Kafka | `securityProtocol: SASL_SSL` (or `SSL`) | `kafka.tls.caCertSecret` for broker CA verification | `ca.crt` |
 | S3 | `objectStorage.useSSL: true` | `caCertSecretName` when the endpoint uses a custom CA | `ca.crt` |
-| Keycloak / issuer | HTTPS issuer URL | `auth.keycloak.tls.caCertSecretName` (skip CA only in lab) | `ca.crt` |
+| Keycloak / issuer | `auth.keycloak.url` must use HTTPS; `issuerURL` must use HTTPS when set | `auth.keycloak.tls.caCertSecretName` (skip CA only in lab) | `ca.crt` |
 | API Route | Edge TLS + `insecureEdgeTerminationPolicy: Redirect` (CRD allows `edge` only) | Custom router cert via OpenShift Route / ingress controller | OpenShift router |
 | UI Route | Passthrough so oauth2-proxy terminates TLS | Leave as-is; Service CA on the UI Service | Service CA |
 
@@ -97,10 +97,11 @@ CR; the TLS settings above only protect data in transit.
 | Kubernetes Secrets | [OpenShift etcd encryption](https://docs.openshift.com/container-platform/latest/security/encrypting-etcd.html) so credential Secrets are not plaintext in etcd | Cluster admin |
 | Operator-generated Secrets | Same etcd encryption; also export `{cr}-django-secret` and `{cr}-ui-cookie-secret` outside the cluster (see [Backup and restore](#backup-and-restore)) | You |
 
-Do not put database, cache, Kafka, or S3 passwords in the CR spec — use
-`credentialsSecretRef` / Secret references only. Bundled `database.deploy` /
-`cache.deploy` volumes are for lab and CI; they are not a production at-rest
-story.
+Do not put database, cache, Kafka, or S3 passwords in the CR spec. Use
+`database.secretName`, `cache.auth.secretName`, `kafka.sasl.existingSecret`,
+and `objectStorage.secretName` to reference Kubernetes Secrets. Bundled
+`database.deploy` / `cache.deploy` volumes are for lab and CI; they are not a
+production at-rest story.
 
 ## NetworkPolicies
 
