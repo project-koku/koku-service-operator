@@ -82,8 +82,8 @@ func StorageCredentialsSecret(cfg *costv1alpha1.CostManagementServiceConfig) *co
 }
 
 // djangoSecretKey generates an n-character key using djangoKeyCharset.
-// The modulo bias is < 0.5% across the 50-char charset and is acceptable
-// for a non-cryptographic Django secret key.
+// Django uses this key for security-sensitive signing. crypto/rand supplies
+// the random bytes; mapping them to this alphabet introduces modulo bias.
 func djangoSecretKey(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

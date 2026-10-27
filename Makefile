@@ -219,6 +219,10 @@ run: manifests generate fmt vet ## Run a controller from your host (pins cache v
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
+.PHONY: verify-fips
+verify-fips: ## Verify native FIPS activation and strict startup in an already-built IMG.
+	CONTAINER_TOOL=$(CONTAINER_TOOL) bash ./scripts/verify-fips.sh $(IMG)
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}

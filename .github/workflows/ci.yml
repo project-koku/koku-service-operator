@@ -200,6 +200,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUSH_IMAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      OPERATOR_IMAGE: quay.io/project-koku/koku-service-operator
     steps:
       - uses: actions/checkout@v7
 
@@ -217,23 +218,82 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: quay.io/project-koku/koku-service-operator
+          images: ${{ env.OPERATOR_IMAGE }}
           tags: |
             type=raw,value=latest,enable=${{ env.PUSH_IMAGE }}
             type=raw,value=main,enable=${{ env.PUSH_IMAGE }}
             type=raw,value={{sha}},enable=${{ env.PUSH_IMAGE }}
             type=raw,value=ci,enable=${{ env.PUSH_IMAGE != 'true' }}
 
-      - name: Build and push container image
+      - name: Build operator image (candidate on main)
+        id: operator-build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
-          push: ${{ env.PUSH_IMAGE }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: ${{ env.PUSH_IMAGE != 'true' }}
+          push: ${{ env.PUSH_IMAGE == 'true' }}
+          provenance: ${{ env.PUSH_IMAGE == 'true' && 'mode=max' || 'false' }}
+          # Candidates are unique to a workflow attempt. Release tags move only
+          # after the registry artifact and native-FIPS tests pass verification.
+          tags: ${{ env.PUSH_IMAGE == 'true' && format('{0}:candidate-{1}-{2}', env.OPERATOR_IMAGE, github.run_id, github.run_attempt) || 'koku-service-operator:fips-check' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify both binaries use native FIPS
+        id: verify-fips
+        env:
+          CANDIDATE_DIGEST: ${{ steps.operator-build.outputs.digest }}
+        run: |
+          image=koku-service-operator:fips-check
+          if [[ "$PUSH_IMAGE" == 'true' ]]; then
+            image="${OPERATOR_IMAGE}@${CANDIDATE_DIGEST}"
+            docker pull "$image"
+          fi
+          make verify-fips IMG="$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Load native FIPS test builder
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: builder
+          load: true
+          tags: koku-service-operator:fips-test
+          cache-from: type=gha
+
+      - name: Test cryptographic paths with native FIPS enforcement
+        run: |
+          docker run --rm --env GODEBUG=fips140=only \
+            --volume "$PWD/config:/workspace/config:ro" \
+            --volume "$PWD/bundle:/workspace/bundle:ro" \
+            --workdir /workspace --entrypoint /bin/bash \
+            koku-service-operator:fips-test -lc '
+              go test -tags=no_openssl,nativefips ./api/... ./cmd/... ./internal/resources/... ./internal/fips/... &&
+              go test -tags=no_openssl,nativefips ./internal/controller -run "^Test(GeneratedSecrets|S3|OIDC|ReconcileValidation|Kafka|JWKS|CertPool|TCPProbe|Required|TopicMissing)"
+            '
+
+      - name: Promote verified candidate to release tags
+        if: env.PUSH_IMAGE == 'true'
+        env:
+          SOURCE_IMAGE: ${{ steps.verify-fips.outputs.image }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          tag_args=()
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            tag_args+=(--tag "$tag")
+          done <<< "$TAGS"
+          if [[ ${#tag_args[@]} -eq 0 ]]; then
+            echo '::error::No release tags were generated.'
+            exit 1
+          fi
+          # Copy the verified index, including its provenance, without rebuilding
+          # or wrapping a single-platform manifest in a different index.
+          docker buildx imagetools create --prefer-index=false \
+            "${tag_args[@]}" "$SOURCE_IMAGE"
 
   bundle-publish:
     name: Bundle & Catalog Images
