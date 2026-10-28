@@ -26,6 +26,8 @@ const (
 	ConditionKafkaReady        = "KafkaReady"
 	ConditionAuthReady         = "AuthenticationReady"
 	ConditionSchemaUpToDate    = "SchemaUpToDate"
+	// ConditionUpgradeFailed retains the failing migration until recovery succeeds.
+	ConditionUpgradeFailed = "UpgradeFailed"
 	// ConditionRBACReady reports RBAC API Deployment readiness (not the worker).
 	ConditionRBACReady = "RBACReady"
 	// ConditionRBACWorkerReady reports the RBAC Celery worker Deployment. It
@@ -70,7 +72,11 @@ const (
 
 type ImageSpec struct {
 	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
+	// Tag selects a legacy tag reference when Digest is empty.
+	Tag string `json:"tag,omitempty"`
+	// Digest pins immutable image content. When set, it takes precedence over Tag.
+	// +kubebuilder:validation:Pattern="^sha256:[a-f0-9]{64}$"
+	Digest string `json:"digest,omitempty"`
 	// +kubebuilder:default:=IfNotPresent
 	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
 }
@@ -686,6 +692,7 @@ type MonitoringConfig struct {
 // is omitted, so the required-url rule lives here as well.
 // +kubebuilder:validation:XValidation:rule="has(self.auth) && has(self.auth.keycloak) && has(self.auth.keycloak.url) && size(self.auth.keycloak.url) > 0",message="spec.auth.keycloak.url is required (JWKS fetch URL); operator does not auto-detect Keycloak"
 type CostManagementServiceConfigSpec struct {
+	Upgrade UpgradePolicy `json:"upgrade,omitempty"`
 	// Profile selects a validated workload sizing tier (small, medium, large, xlarge).
 	// Explicit per-component fields in the spec always override profile values.
 	// +kubebuilder:default:=small
@@ -754,6 +761,8 @@ type DiscoveredS3 struct {
 }
 
 type CostManagementServiceConfigStatus struct {
+	// Upgrade records the installed revision and restart-safe upgrade operation.
+	Upgrade UpgradeStatus `json:"upgrade,omitempty"`
 	// Phase is a human-readable summary of overall operator state.
 	// Conditions are the authoritative machine-readable status.
 	// +kubebuilder:default=Pending

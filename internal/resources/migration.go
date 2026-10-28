@@ -20,8 +20,8 @@ const (
 	// MigrationDeadlineSeconds is the hard timeout per migration Job.
 	MigrationDeadlineSeconds = int64(600)
 
-	// MigrationImageTagAnnotation is the annotation key used to track the
-	// image tag for upgrade detection.
+	// MigrationImageTagAnnotation retains the tag/seed revision for lifecycle
+	// tooling. Upgrade detection also compares the migration execution identity.
 	MigrationImageTagAnnotation = "koku.costmanagement.io/image-tag"
 )
 
@@ -36,7 +36,7 @@ func NameRBACMigration(cfg *costv1alpha1.CostManagementServiceConfig) string {
 }
 
 // rbacSeedRevision bumps when the migrate/seed script changes so completed
-// Jobs are recreated (runMigrationStep keys off the image-tag annotation).
+// Jobs are recreated (the seed revision participates in the execution identity).
 const rbacSeedRevision = "cmseed2"
 
 // RBACSeedJobTag returns the annotation value used for RBAC migrate/bootstrap
@@ -218,7 +218,7 @@ func migrationJob(
 ) *batchv1.Job {
 	backoff := MigrationBackoffLimit
 	deadline := MigrationDeadlineSeconds
-	return &batchv1.Job{
+	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -234,7 +234,7 @@ func migrationJob(
 			// TTLSecondsAfterFinished intentionally absent: runMigrationStep uses
 			// Job existence to determine whether a migration has already completed.
 			// Setting a TTL causes GC to delete the Job, making the controller
-			// re-run migrations on every subsequent reconcile (~every hour).
+			// re-run migrations on every subsequent reconcile (every 5 minutes).
 			// Failed Jobs must also persist so the operator holds in Degraded state
 			// rather than silently retrying.
 			Template: corev1.PodTemplateSpec{
@@ -270,6 +270,11 @@ func migrationJob(
 			},
 		},
 	}
+	if component == "rbac-migration" {
+		job.Annotations[MigrationInputRevisionAnnotation] = rbacSeedRevision
+	}
+	job.Annotations[MigrationExecutionAnnotation] = MigrationExecutionID(job)
+	return job
 }
 
 // migrationServiceAccountName selects the family SA for a migration/bootstrap Job.

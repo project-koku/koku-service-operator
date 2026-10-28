@@ -99,7 +99,8 @@ func TestReconcile_EmitsPhaseChangedOnValidationDegraded(t *testing.T) {
 		Recorder: rec,
 	}
 
-	_, err := r.reconcile(context.Background(), cfg)
+	// Exercise the dependency phase independently of legacy-upgrade adoption.
+	_, err := r.reconcileStack(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

@@ -47,7 +47,7 @@ func KokuAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		{Name: "http", ContainerPort: 8000, Protocol: corev1.ProtocolTCP},
 		{Name: "metrics", ContainerPort: 9000, Protocol: corev1.ProtocolTCP},
 	}
-	return d
+	return ApplicationRollout(d)
 }
 
 // KokuAPIService exposes the Koku API (http) and Prometheus metrics.
@@ -106,7 +106,7 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 		{Name: "http", ContainerPort: 8000, Protocol: corev1.ProtocolTCP},
 		{Name: "metrics", ContainerPort: 9000, Protocol: corev1.ProtocolTCP},
 	}
-	return d
+	return ApplicationRollout(d)
 }
 
 // MasuService exposes Masu internally with HTTP (8000) and metrics (9000) ports.
@@ -148,8 +148,11 @@ func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.D
 	env = MergeEnv(env, spec.Env)
 
 	return deployment(cfg, NameListener(cfg), "listener", image, replicas, ProfileResources(cfg, WorkloadListener, spec.Resources),
-		nil, nil, env,
-		[]string{"/bin/bash", "-c", "cd $APP_HOME && exec python manage.py listener"},
+		nil, kokuAPIProbe("/readyz"), env,
+		[]string{"/bin/bash", "-c", "cd \"$APP_HOME\" && exec python -c \"" +
+			"import runpy, signal, sys; " +
+			"signal.signal(signal.SIGTERM, signal.default_int_handler); " +
+			"sys.argv=['manage.py','listener']; runpy.run_path('manage.py',run_name='__main__')\""},
 	)
 }
 
@@ -171,8 +174,8 @@ func CeleryBeatDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 	resources := ProfileResources(cfg, WorkloadCeleryBeat, corev1.ResourceRequirements{})
 
 	return deployment(cfg, NameCeleryBeat(cfg), "cost-scheduler", image, replicas,
-		resources, nil, nil, env,
-		[]string{"/bin/sh", "-c", "cd $APP_HOME && PYTHONPATH=$APP_HOME celery -A koku beat -l info"},
+		resources, nil, BeatReadiness(), env,
+		[]string{"/bin/sh", "-c", "cd $APP_HOME && rm -f /tmp/celerybeat.pid && PYTHONPATH=$APP_HOME exec celery -A koku beat -l info --pidfile=/tmp/celerybeat.pid"},
 	)
 }
 
@@ -206,10 +209,10 @@ func CeleryWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig, queue
 	)
 
 	d := deployment(cfg, NameCeleryWorker(cfg, queue), component, image, replicas, ProfileResources(cfg, CeleryWorkload(queue), spec.Resources),
-		nil, nil, env,
+		nil, kokuAPIProbe("/readyz"), env,
 		[]string{
 			"/bin/sh", "-c",
-			"cd $APP_HOME && PYTHONPATH=$APP_HOME celery -A koku worker --without-gossip -E -l ${CELERY_LOG_LEVEL:-info} -Q ${WORKER_QUEUES}",
+			"cd $APP_HOME && PYTHONPATH=$APP_HOME exec celery -A koku worker --without-gossip -E -l ${CELERY_LOG_LEVEL:-info} -Q ${WORKER_QUEUES}",
 		},
 	)
 	if replicas > 0 {
@@ -219,7 +222,7 @@ func CeleryWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig, queue
 			{Name: "metrics", ContainerPort: celeryWorkerMetricsPort, Protocol: corev1.ProtocolTCP},
 		}
 	}
-	return d
+	return ApplicationRollout(d)
 }
 
 // CeleryWorkersService selects Cost Management Celery worker pods that expose
@@ -296,7 +299,7 @@ func deploymentWithContainerName(
 	selLabels := SelectorLabels(cfg, component)
 	allLabels := Labels(cfg, component)
 	falseVal := false
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -330,6 +333,7 @@ func deploymentWithContainerName(
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 func deployment(
@@ -345,7 +349,7 @@ func deployment(
 	allLabels := Labels(cfg, component)
 
 	falseVal := false
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -385,6 +389,7 @@ func deployment(
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 func kokuAPIProbe(path string) *corev1.Probe {

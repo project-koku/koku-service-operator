@@ -165,7 +165,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 
 	falseVal := false
 	init := CACombineInitContainer(cfg)
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -239,6 +239,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // envoyVolumes builds the volume list for the Envoy Deployment.

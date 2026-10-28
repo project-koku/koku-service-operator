@@ -107,6 +107,31 @@ func TestManagerRoleBinding_IsClusterRoleBinding(t *testing.T) {
 	}
 }
 
+func TestRolloutReplicaSetAccessIsReadOnlyInManifestsAndBundle(t *testing.T) {
+	var role rbacv1.ClusterRole
+	decodeYAMLFile(t, rbacManifestPath(t, "role.yaml"), &role)
+	var csv olmCSVInstallPermissions
+	decodeYAMLFile(t, bundleCSVPath(t), &csv)
+	for source, rules := range map[string][]rbacv1.PolicyRule{
+		"manager-role": role.Rules,
+		"bundle":       csvPolicyRules(csv.Spec.Install.Spec.ClusterPermissions),
+	} {
+		found := false
+		for _, rule := range rules {
+			if !slices.Contains(rule.APIGroups, "apps") || !slices.Contains(rule.Resources, "replicasets") {
+				continue
+			}
+			found = true
+			if len(rule.Verbs) != 1 || rule.Verbs[0] != "get" {
+				t.Errorf("%s must grant only get on ReplicaSets: %+v", source, rule)
+			}
+		}
+		if !found {
+			t.Errorf("%s is missing ReplicaSet reads required by rollout completion", source)
+		}
+	}
+}
+
 func TestClusterAccessRole_NarrowNooBaaSecretGet(t *testing.T) {
 	var cr rbacv1.ClusterRole
 	decodeYAMLFile(t, rbacManifestPath(t, "cluster_access_role.yaml"), &cr)
