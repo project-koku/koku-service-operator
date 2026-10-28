@@ -22,6 +22,9 @@ import (
 const (
 	reasonWaitingForApplicationRollout = "WaitingForApplicationRollout"
 	replicaSetKind                     = "ReplicaSet"
+	// Bundled infrastructure components (dev/CI) are never application writers.
+	componentCache    = "cache"
+	componentDatabase = "database"
 )
 
 func applicationSelector(cfg *cost.CostManagementServiceConfig) client.ListOption {
@@ -47,7 +50,7 @@ func (r *CostManagementServiceConfigReconciler) quiesceApplications(ctx context.
 	quiet := true
 	for i := range deployments.Items {
 		d := &deployments.Items[i]
-		if !ownedByConfig(d, cfg) || d.Labels["app.kubernetes.io/component"] == "cache" {
+		if !ownedByConfig(d, cfg) || d.Labels["app.kubernetes.io/component"] == componentCache {
 			continue
 		}
 		if d.Spec.Replicas == nil || *d.Spec.Replicas != 0 {
@@ -113,7 +116,7 @@ func (r *CostManagementServiceConfigReconciler) applicationPodsStopped(ctx conte
 	}
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		if podTerminal(p) || p.Labels["app.kubernetes.io/component"] == "cache" {
+		if component := p.Labels["app.kubernetes.io/component"]; podTerminal(p) || component == componentCache || component == componentDatabase {
 			continue
 		}
 		owner := metav1.GetControllerOf(p)

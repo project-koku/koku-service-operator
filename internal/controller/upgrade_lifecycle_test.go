@@ -486,6 +486,45 @@ func TestUpgradeAutomaticallyResumesSourceBeforeSchemaMutation(t *testing.T) {
 	if !restored {
 		t.Fatal("previous UI image was not restored")
 	}
+
+	// The rollback hold must stay quiet across drift passes: no Ready/PhaseChanged
+	// Events and no Degraded transition reset while the target remains failed.
+	degraded := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionDegraded)
+	if degraded == nil || degraded.Status != metav1.ConditionTrue {
+		t.Fatalf("rollback hold must report Degraded=True: %+v", degraded)
+	}
+	since := degraded.LastTransitionTime
+	drainEvents(r)
+	for range 3 {
+		if _, err := r.reconcile(context.Background(), cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events := drainEvents(r)
+	if n := countEvents(events, "Ready") + countEvents(events, "PhaseChanged"); n != 0 {
+		t.Fatalf("rollback hold emitted %d Ready/PhaseChanged events: %v", n, events)
+	}
+	degraded = apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionDegraded)
+	if degraded == nil || degraded.Status != metav1.ConditionTrue || !degraded.LastTransitionTime.Equal(&since) {
+		t.Fatalf("rollback hold reset Degraded: %+v (was %v)", degraded, since)
+	}
+}
+
+func TestQuiescenceIgnoresBundledDatabaseAndCachePods(t *testing.T) {
+	r, cfg, c := upgradeFixture(t)
+	for _, component := range []string{"database", "cache"} {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "bundled-" + component, Namespace: cfg.Namespace, Labels: resources.Labels(cfg, component)}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		if err := c.Create(context.Background(), pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := r.applicationPodsStopped(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stopped {
+		t.Fatal("bundled database/cache infrastructure must not block quiescence")
+	}
 }
 func TestUpgradeExplicitResumePrevious(t *testing.T) {
 	r, cfg, c := lifecyclePlatform(t)

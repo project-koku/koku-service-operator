@@ -313,6 +313,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
 	priorPhase := cfg.Status.Phase
+	// A rollback hold restores the source but the requested target stays failed:
+	// rollbackUpgrade owns Degraded/Phase, so this pass must not announce Ready.
+	op := cfg.Status.Upgrade.Operation
+	rollbackHold := op != nil && (op.Stage == costv1alpha1.UpgradeStageRollingBack || op.Stage == costv1alpha1.UpgradeStageRolledBack)
 	priorProgressing := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionProgressing)
 	if priorProgressing != nil {
 		priorProgressing = priorProgressing.DeepCopy()
@@ -349,14 +353,18 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 	// Emit Ready event only on the first transition to Ready.
 	// Use priorPhase (captured before this pass reset it to Progressing)
 	// to detect a genuine non-Ready → Ready transition.
-	if priorPhase != costv1alpha1.PhaseReady && (cfg.Status.Upgrade.Operation == nil || cfg.Status.Upgrade.Operation.Stage != costv1alpha1.UpgradeStageRollingBack) {
+	if priorPhase != costv1alpha1.PhaseReady && !rollbackHold {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
 	r.completeProgressing(cfg, priorProgressing)
-	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
+	if !rollbackHold {
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
+	}
 	cfg.Status.Phase = costv1alpha1.PhaseReady
-	r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
+	if !rollbackHold {
+		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
+	}
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
