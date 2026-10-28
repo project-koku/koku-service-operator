@@ -9,7 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cost "github.com/project-koku/koku-service-operator/api/v1alpha1"
-	"github.com/project-koku/koku-service-operator/internal/release"
 )
 
 var _ = Describe("Upgrade journal storage", func() {
@@ -29,8 +28,9 @@ var _ = Describe("Upgrade journal storage", func() {
 		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, cfg)).To(Succeed()) })
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cfg), cfg)).To(Succeed())
 		effective := cfg.DeepCopy()
-		Expect(release.Current().Resolve(effective)).To(Succeed())
-		revision := applicationRevision(effective, release.Current())
+		bundle := mustCurrentReleaseBundle()
+		Expect(bundle.Resolve(effective)).To(Succeed())
+		revision := applicationRevision(effective, bundle)
 		cfg.Status.Upgrade = cost.UpgradeStatus{
 			Installed: revision.DeepCopy(),
 			Operation: &cost.UpgradeOperation{

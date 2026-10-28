@@ -35,7 +35,11 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 	defer func() { requested.Status = cfg.Status }()
 	bundle := release.Bundle(r.ReleaseImages)
 	if bundle == nil {
-		bundle = release.Current()
+		var err error
+		bundle, err = release.Current()
+		if err != nil {
+			return r.upgradeConfigError(cfg, err)
+		}
 	}
 	resolveErr := bundle.Resolve(cfg)
 	op := cfg.Status.Upgrade.Operation

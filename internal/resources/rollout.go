@@ -47,6 +47,6 @@ func ApplicationDeployments(cfg *costv1alpha1.CostManagementServiceConfig) []*ap
 
 func BeatReadiness() *corev1.Probe {
 	return &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{
-		Command: []string{"/bin/sh", "-c", "test \"$(cat /tmp/celerybeat.pid)\" = 1 && kill -0 1"},
+		Command: []string{"/bin/sh", "-c", "read -r pid < /tmp/celerybeat.pid && case \"$pid\" in ''|*[!0-9]*) exit 1;; esac && kill -0 \"$pid\""},
 	}}, InitialDelaySeconds: 5, PeriodSeconds: 10, TimeoutSeconds: 3, FailureThreshold: 3}
 }

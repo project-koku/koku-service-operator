@@ -39,20 +39,30 @@ func upgradeFixture(t *testing.T) (*CostManagementServiceConfigReconciler, *cost
 	cfg.Spec.Upgrade.ImagePolicy = "FollowOperator"
 	cfg.Spec.Database.Image = cost.ImageSpec{Repository: "postgres", Tag: "16"}
 	cfg.Spec.Cache.Image = cost.ImageSpec{Repository: "valkey", Tag: "8"}
-	if err := release.Current().Resolve(cfg); err != nil {
+	bundle := mustCurrentReleaseBundle()
+	if err := bundle.Resolve(cfg); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Status.Upgrade.Installed = applicationRevision(cfg, release.Current())
+	cfg.Status.Upgrade.Installed = applicationRevision(cfg, bundle)
 	c := fake.NewClientBuilder().WithScheme(r.Scheme).WithStatusSubresource(cfg, &batchv1.Job{}, &appsv1.Deployment{}).WithInterceptorFuncs(ssaCreateOrUpdate()).Build()
 	r.Client = c
 	r.APIReader = c
 	r.Recorder = record.NewFakeRecorder(100)
 	return r, cfg, c
 }
+
+func mustCurrentReleaseBundle() release.Bundle {
+	bundle, err := release.Current()
+	if err != nil {
+		panic(err)
+	}
+	return bundle
+}
+
 func attachUpgrade(cfg *cost.CostManagementServiceConfig, stage string, mutating bool) {
 	target := cfg.DeepCopy()
 	target.Spec.CostManagement.API.Image.Tag = "v2"
-	cfg.Status.Upgrade.Operation = &cost.UpgradeOperation{ID: "operation-1", TargetGeneration: 2, Source: cfg.Status.Upgrade.Installed.DeepCopy(), Target: *applicationRevision(target, release.Current()), Stage: stage, SchemaMutationPossible: mutating, StartedAt: metav1.Now(), StageStartedAt: metav1.Now()}
+	cfg.Status.Upgrade.Operation = &cost.UpgradeOperation{ID: "operation-1", TargetGeneration: 2, Source: cfg.Status.Upgrade.Installed.DeepCopy(), Target: *applicationRevision(target, mustCurrentReleaseBundle()), Stage: stage, SchemaMutationPossible: mutating, StartedAt: metav1.Now(), StageStartedAt: metav1.Now()}
 }
 
 func TestUpgradePlanPersistsBeforeMutation(t *testing.T) {
@@ -201,7 +211,7 @@ func TestUpgradeRecoveryRejectsUnboundOrConsumedRequests(t *testing.T) {
 			targetID := op.Target.ID
 			cfg.Spec.Upgrade.Recovery = request
 			cfg.Spec.CostManagement.API.Image.Tag = "unaccepted-target"
-			handled, err := r.acceptUpgradeRecovery(cfg, cfg, release.Current(), nil)
+			handled, err := r.acceptUpgradeRecovery(cfg, cfg, mustCurrentReleaseBundle(), nil)
 			if err != nil || handled || op.Stage != cost.UpgradeStageRecoveryRequired || op.Target.ID != targetID {
 				t.Fatal("unbound/consumed recovery request changed the operation")
 			}
@@ -293,10 +303,11 @@ func TestUpgradeFollowsOperatorWithoutChangingGeneration(t *testing.T) {
 		*image = cost.ImageSpec{}
 	}
 	cfg.Spec.CostManagement.Masu.Image = cost.ImageSpec{}
-	if err := release.Current().Resolve(cfg); err != nil {
+	bundle := mustCurrentReleaseBundle()
+	if err := bundle.Resolve(cfg); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Status.Upgrade.Installed = applicationRevision(cfg, release.Current())
+	cfg.Status.Upgrade.Installed = applicationRevision(cfg, bundle)
 	for _, job := range migrationJobs(cfg) {
 		if err := c.Create(context.Background(), job); err != nil {
 			t.Fatal(err)
@@ -308,7 +319,7 @@ func TestUpgradeFollowsOperatorWithoutChangingGeneration(t *testing.T) {
 	for _, image := range release.ImageFields(cfg) {
 		*image = cost.ImageSpec{}
 	}
-	next := release.Current()
+	next := mustCurrentReleaseBundle()
 	next["koku"] = "quay.io/project-koku/koku:v2"
 	r.ReleaseImages = next
 	generation := cfg.Generation

@@ -23,6 +23,7 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/controller"
 	"github.com/project-koku/koku-service-operator/internal/fips"
+	"github.com/project-koku/koku-service-operator/internal/release"
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
@@ -154,6 +155,11 @@ func main() {
 	resources.OperatorImage = operatorImage
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	releaseImages, err := release.Current()
+	if err != nil {
+		setupLog.Error(err, "invalid embedded application release bundle")
+		os.Exit(1)
+	}
 
 	ns, err := resolveWatchNamespace()
 	if err != nil {
@@ -189,10 +195,11 @@ func main() {
 	}
 
 	if err = (&controller.CostManagementServiceConfigReconciler{
-		Client:    mgr.GetClient(),
-		APIReader: mgr.GetAPIReader(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("koku-service-operator"),
+		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorderFor("koku-service-operator"),
+		ReleaseImages: map[string]string(releaseImages),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CostManagementServiceConfig")
 		os.Exit(1)

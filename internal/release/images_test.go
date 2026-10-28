@@ -11,6 +11,15 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+func mustCurrentBundle(t *testing.T) Bundle {
+	t.Helper()
+	bundle, err := Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
+}
+
 func TestBundleRelatedImagesMatchRelease(t *testing.T) {
 	data, err := os.ReadFile("../../bundle/manifests/koku-service-operator.clusterserviceversion.yaml")
 	if err != nil {
@@ -30,7 +39,7 @@ func TestBundleRelatedImagesMatchRelease(t *testing.T) {
 			actual[image.Name] = image.Image
 		}
 	}
-	if !maps.Equal(actual, map[string]string(Current())) {
+	if !maps.Equal(actual, map[string]string(mustCurrentBundle(t))) {
 		t.Fatal("bundle operands differ from the operator's shipped release manifest; regenerate the bundle")
 	}
 }
@@ -40,7 +49,7 @@ func TestResolveImageOwnership(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			cfg := &cost.CostManagementServiceConfig{}
 			cfg.Spec.Upgrade.ImagePolicy = policy
-			if err := Current().Resolve(cfg); err != nil {
+			if err := mustCurrentBundle(t).Resolve(cfg); err != nil {
 				t.Fatal(err)
 			}
 			_, present := resources.KokuImage(cfg)
@@ -52,7 +61,7 @@ func TestResolveImageOwnership(t *testing.T) {
 	cfg := &cost.CostManagementServiceConfig{}
 	cfg.Spec.Upgrade.ImagePolicy = "FollowOperator"
 	cfg.Spec.CostManagement.API.Image = cost.ImageSpec{Repository: "quay.io/custom/koku", Digest: "sha256:" + strings.Repeat("a", 64)}
-	if err := Current().Resolve(cfg); err != nil {
+	if err := mustCurrentBundle(t).Resolve(cfg); err != nil {
 		t.Fatal(err)
 	}
 	image, _ := resources.KokuImage(cfg)
@@ -63,16 +72,16 @@ func TestResolveImageOwnership(t *testing.T) {
 		t.Fatal("omitted Masu must inherit the effective API image")
 	}
 	cfg.Spec.RBAC.Image = cost.ImageSpec{Repository: "partial"}
-	if err := Current().Resolve(cfg); err == nil {
+	if err := mustCurrentBundle(t).Resolve(cfg); err == nil {
 		t.Fatal("partial override accepted")
 	}
 	cfg.Spec.Upgrade.ImagePolicy = "invalid"
-	if err := Current().Resolve(cfg); err == nil {
+	if err := mustCurrentBundle(t).Resolve(cfg); err == nil {
 		t.Fatal("invalid policy accepted")
 	}
 }
 func TestReleaseBundleChanges(t *testing.T) {
-	a, b := Current(), Current()
+	a, b := mustCurrentBundle(t), mustCurrentBundle(t)
 	b["koku"] = "quay.io/custom/koku:v2"
 	if a.ID() == b.ID() {
 		t.Fatal("release change did not change identity")
@@ -82,7 +91,7 @@ func TestReleaseBundleChanges(t *testing.T) {
 	if err := (Bundle{}).Resolve(cfg); err == nil {
 		t.Fatal("missing release metadata must fail closed")
 	}
-	for _, ref := range Current() {
+	for _, ref := range mustCurrentBundle(t) {
 		image, err := ParseImage(ref)
 		if err != nil {
 			t.Fatal(err)
@@ -101,11 +110,26 @@ func TestReleaseBundleChanges(t *testing.T) {
 	}
 }
 
+func TestParseBundleReturnsContextualErrors(t *testing.T) {
+	if _, err := parseBundle([]byte("{")); err == nil || !strings.Contains(err.Error(), "decode embedded images.json") {
+		t.Fatalf("malformed embedded JSON error = %v", err)
+	}
+	_, err := parseBundle([]byte(`{"koku":"quay.io/project-koku/koku:v1"}`))
+	if err == nil || !strings.Contains(err.Error(), `missing required image "gateway"`) {
+		t.Fatalf("incomplete embedded image map error = %v", err)
+	}
+	data := []byte(`{"gateway":"invalid","ingress":"x","koku":"x","kruize":"x","oauthProxy":"x","rbac":"x","ros":"x","ui":"x"}`)
+	_, err = parseBundle(data)
+	if err == nil || !strings.Contains(err.Error(), `image "gateway"`) {
+		t.Fatalf("invalid embedded image reference error = %v", err)
+	}
+}
+
 func TestAutomaticReleaseEdges(t *testing.T) {
 	original := &cost.CostManagementServiceConfig{}
 	original.Spec.Upgrade.ImagePolicy = "FollowOperator"
 	effective := original.DeepCopy()
-	old := Current()
+	old := mustCurrentBundle(t)
 	if err := old.Resolve(effective); err != nil {
 		t.Fatal(err)
 	}
@@ -119,11 +143,18 @@ func TestAutomaticReleaseEdges(t *testing.T) {
 	source.Images["masu"] = source.Images["koku"]
 	target := map[string]string{}
 	maps.Copy(target, source.Images)
-	next := Current()
+	next := mustCurrentBundle(t)
 	next["koku"] = "quay.io/project-koku/koku:v2"
 	target["koku"], target["masu"] = next["koku"], next["koku"]
 	if err := next.ValidateTransition(original, source, target); err != nil {
 		t.Fatal(err)
+	}
+	missingImage := Bundle{}
+	maps.Copy(missingImage, next)
+	delete(missingImage, "ui")
+	err := missingImage.ValidateTransition(original, source, target)
+	if err == nil || !strings.Contains(err.Error(), `missing required image "ui"`) {
+		t.Fatalf("missing target image diagnostic = %v", err)
 	}
 	source.ReleaseManaged = false
 	if err := next.ValidateTransition(original, source, target); err == nil {
@@ -145,7 +176,7 @@ func TestDisablingROSDoesNotSelectNewImages(t *testing.T) {
 	requested := &cost.CostManagementServiceConfig{}
 	requested.Spec.Upgrade.ImagePolicy = cost.ImagePolicyFollowOperator
 	effective := requested.DeepCopy()
-	if err := Current().Resolve(effective); err != nil {
+	if err := mustCurrentBundle(t).Resolve(effective); err != nil {
 		t.Fatal(err)
 	}
 	target := map[string]string{}
@@ -158,7 +189,7 @@ func TestDisablingROSDoesNotSelectNewImages(t *testing.T) {
 	source := &cost.ApplicationRevision{ReleaseID: "custom-release", Images: map[string]string{}}
 	maps.Copy(source.Images, target)
 	source.Images["ros"], source.Images["kruize"] = "custom/ros:v1", "custom/kruize:v1"
-	if err := Current().ValidateTransition(requested, source, target); err != nil {
+	if err := mustCurrentBundle(t).ValidateTransition(requested, source, target); err != nil {
 		t.Fatalf("removing ROS does not automatically select any new application version: %v", err)
 	}
 }

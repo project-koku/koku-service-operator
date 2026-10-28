@@ -64,4 +64,15 @@ func TestApplicationRolloutPolicies(t *testing.T) {
 		!strings.Contains(listener.Command[2], "exec python") {
 		t.Fatal("Python PID 1 must handle SIGTERM through the listener's normal interrupt shutdown path")
 	}
+	if listener.ReadinessProbe == nil || listener.ReadinessProbe.HTTPGet == nil ||
+		listener.ReadinessProbe.HTTPGet.Path != "/readyz" || listener.ReadinessProbe.HTTPGet.Port.IntValue() != 9000 {
+		t.Fatal("listener readiness must use Koku's probe server on port 9000")
+	}
+	if beat.ReadinessProbe == nil || beat.ReadinessProbe.Exec == nil {
+		t.Fatal("Beat must have an exec readiness probe")
+	}
+	beatProbe := strings.Join(beat.ReadinessProbe.Exec.Command, " ")
+	if !strings.Contains(beatProbe, "kill -0 \"$pid\"") || strings.Contains(beatProbe, "= 1") {
+		t.Fatal("Beat readiness must verify the pidfile process without assuming it is PID 1")
+	}
 }

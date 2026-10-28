@@ -546,7 +546,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 					},
 					Containers: []corev1.Container{{
 						Name:            "ros-housekeeper",
-						ReadinessProbe:  &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "test \"$(cat /proc/1/comm)\" = rosocp"}}}, InitialDelaySeconds: 10, PeriodSeconds: 15, TimeoutSeconds: 3, FailureThreshold: 3},
+						ReadinessProbe:  &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "test \"$(cat /proc/1/comm)\" = rosocp"}}}, InitialDelaySeconds: 70, PeriodSeconds: 15, TimeoutSeconds: 3, FailureThreshold: 3},
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
 						Command:         []string{"sh", "-c"},

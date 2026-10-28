@@ -24,12 +24,28 @@ const (
 
 type Bundle map[string]string
 
-func Current() Bundle {
+func Current() (Bundle, error) {
+	return parseBundle(shipped)
+}
+
+func parseBundle(data []byte) (Bundle, error) {
 	var bundle Bundle
-	if err := json.Unmarshal(shipped, &bundle); err != nil {
-		panic(err)
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		return nil, fmt.Errorf("decode embedded images.json: %w", err)
 	}
-	return bundle
+	if bundle == nil {
+		return nil, fmt.Errorf("decode embedded images.json: expected an image map")
+	}
+	for _, key := range []string{"gateway", "ingress", "koku", kruizeImage, "oauthProxy", "rbac", rosImage, "ui"} {
+		ref, ok := bundle[key]
+		if !ok {
+			return nil, fmt.Errorf("embedded images.json is missing required image %q", key)
+		}
+		if _, err := ParseImage(ref); err != nil {
+			return nil, fmt.Errorf("embedded images.json image %q: %w", key, err)
+		}
+	}
+	return bundle, nil
 }
 
 func (b Bundle) ID() string {
@@ -142,9 +158,12 @@ func (b Bundle) ValidateTransition(
 		return nil
 	}
 	for key, ref := range target {
-		expected := b[key]
+		expected, exists := b[key]
 		if key == "masu" {
-			expected = b["koku"]
+			expected, exists = b["koku"]
+		}
+		if !exists {
+			return fmt.Errorf("release bundle is missing required image %q", key)
 		}
 		if ref != expected {
 			return fmt.Errorf("operator-managed upgrade would mix custom pins with a different release bundle; " +
