@@ -113,3 +113,51 @@ func TestMigrationJobs_RecordExecutionIdentity(t *testing.T) {
 		}
 	}
 }
+
+// Day-2 runtime settings must not rerun `manage.py migrate`: a changed ID makes
+// the upgrade planner stop every application writer for a no-op migration.
+func TestMigrationExecutionID_IgnoresRuntimeOnlySettings(t *testing.T) {
+	t.Parallel()
+	base := minimalCRForResources("cm", "ns")
+	want := MigrationExecutionID(MigrationJob(base, "v1"))
+	for _, test := range []struct {
+		name   string
+		change func(*costv1alpha1.CostManagementServiceConfig)
+	}{
+		{"data retention", func(c *costv1alpha1.CostManagementServiceConfig) { c.Spec.CostManagement.DataRetentionMonths = 9 }},
+		{"report download schedule", func(c *costv1alpha1.CostManagementServiceConfig) {
+			c.Spec.CostManagement.ReportDownloadSchedule = "*/30 * * * *"
+		}},
+		{"report checks toggle", func(c *costv1alpha1.CostManagementServiceConfig) {
+			c.Spec.CostManagement.ScheduleReportChecks = new(false)
+		}},
+		{"S3 endpoint", func(c *costv1alpha1.CostManagementServiceConfig) { c.Spec.ObjectStorage.Endpoint = "s3.example.com" }},
+		{"S3 bucket", func(c *costv1alpha1.CostManagementServiceConfig) { c.Spec.ObjectStorage.Buckets.Koku = "other-bucket" }},
+		{"discovered S3 lost", func(c *costv1alpha1.CostManagementServiceConfig) {
+			c.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{S3: &costv1alpha1.DiscoveredS3{Endpoint: "https://s3.odf.svc", Bucket: "obc-bucket"}}
+		}},
+		{"cache host", func(c *costv1alpha1.CostManagementServiceConfig) { c.Spec.Cache.Host = "valkey.other.svc" }},
+		{"kafka bootstrap", func(c *costv1alpha1.CostManagementServiceConfig) {
+			c.Spec.Kafka.BootstrapServers = "kafka.other.svc:9092"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := base.DeepCopy()
+			test.change(cfg)
+			if got := MigrationExecutionID(MigrationJob(cfg, "v1")); got != want {
+				t.Fatalf("runtime-only %s change altered the migration execution identity", test.name)
+			}
+		})
+	}
+}
+
+func TestMigrationExecutionID_UnknownEnvStillCounts(t *testing.T) {
+	t.Parallel()
+	job := MigrationJob(minimalCRForResources("cm", "ns"), "v1")
+	before := MigrationExecutionID(job)
+	job.Spec.Template.Spec.Containers[0].Env = append(job.Spec.Template.Spec.Containers[0].Env, EnvVal("KOKU_NEW_MIGRATION_TOGGLE", "true"))
+	if MigrationExecutionID(job) == before {
+		t.Fatal("unknown environment inputs must conservatively change the execution identity")
+	}
+}

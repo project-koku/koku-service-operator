@@ -18,6 +18,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -494,6 +495,11 @@ func retryableUpgradeError(err error) bool {
 	}
 	var networkErr net.Error
 	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return true
+	}
+	// API server restarts (routine during OpenShift upgrades) surface as dial,
+	// reset or EOF errors rather than timeouts; none of them is a verdict.
+	if utilnet.IsConnectionRefused(err) || utilnet.IsConnectionReset(err) || utilnet.IsProbableEOF(err) {
 		return true
 	}
 	return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) ||

@@ -86,6 +86,8 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 			Labels:    Labels(cfg, "rbac-keycloak-sync"),
 		},
 		Spec: batchv1.CronJobSpec{
+			// Explicit so SSA resumes schedules suspended during upgrade quiescence.
+			Suspend:                    new(false),
 			Schedule:                   schedule,
 			StartingDeadlineSeconds:    &CronJobStartingDeadlineSeconds,
 			ConcurrencyPolicy:          CronJobConcurrencyForbid,

@@ -324,6 +324,8 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 			Labels:    Labels(cfg, "ros-optimization-maintenance"),
 		},
 		Spec: batchv1.CronJobSpec{
+			// Explicit so SSA resumes schedules suspended during upgrade quiescence.
+			Suspend:           new(false),
 			Schedule:          schedule,
 			ConcurrencyPolicy: CronJobConcurrencyForbid,
 			JobTemplate: batchv1.JobTemplateSpec{

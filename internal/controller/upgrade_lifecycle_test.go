@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -783,6 +787,14 @@ func TestApplicationCompletionIncludesAllTargetsAndOldPods(t *testing.T) {
 	if err != nil || result.IsZero() {
 		t.Fatal("old ReplicaSet Pod incorrectly ignored")
 	}
+	// A pruned old ReplicaSet whose Pod still terminates is a wait, not a failure.
+	if err := c.Delete(context.Background(), rs); err != nil {
+		t.Fatal(err)
+	}
+	result, err = r.waitForApplicationRollout(context.Background(), cfg)
+	if err != nil || result.IsZero() {
+		t.Fatalf("pruned ReplicaSet must keep the rollout waiting without error: %+v %v", result, err)
+	}
 	if err := c.Delete(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
@@ -937,19 +949,52 @@ func TestRetryableUpgradeError(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"nil":               {nil, false},
-		"deadline":          {fmt.Errorf("wrapped: %w", context.DeadlineExceeded), true},
-		"network timeout":   {&net.OpError{Op: "dial", Err: timeoutError{}}, true},
-		"conflict":          {apierrors.NewConflict(resource, "job", errors.New("stale")), true},
-		"too many requests": {apierrors.NewTooManyRequests("slow down", 1), true},
-		"service down":      {apierrors.NewServiceUnavailable("unavailable"), true},
-		"forbidden":         {apierrors.NewForbidden(resource, "job", errors.New("denied")), false},
-		"invalid":           {errors.New("invalid migration image"), false},
+		"nil":                {nil, false},
+		"deadline":           {fmt.Errorf("wrapped: %w", context.DeadlineExceeded), true},
+		"network timeout":    {&net.OpError{Op: "dial", Err: timeoutError{}}, true},
+		"conflict":           {apierrors.NewConflict(resource, "job", errors.New("stale")), true},
+		"too many requests":  {apierrors.NewTooManyRequests("slow down", 1), true},
+		"service down":       {apierrors.NewServiceUnavailable("unavailable"), true},
+		"connection refused": {&url.Error{Op: "Patch", URL: "https://api:6443", Err: &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}}, true},
+		"connection reset":   {&url.Error{Op: "Get", URL: "https://api:6443", Err: &net.OpError{Op: "read", Err: os.NewSyscallError("read", syscall.ECONNRESET)}}, true},
+		"unexpected EOF":     {&url.Error{Op: "Get", URL: "https://api:6443", Err: io.ErrUnexpectedEOF}, true},
+		"forbidden":          {apierrors.NewForbidden(resource, "job", errors.New("denied")), false},
+		"invalid":            {errors.New("invalid migration image"), false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := retryableUpgradeError(tc.err); got != tc.want {
 				t.Fatalf("retryableUpgradeError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRuntimeConfigEditRollsWithoutMaintenance(t *testing.T) {
+	r, cfg, c := lifecyclePlatform(t)
+	driveLifecycle(t, r, cfg, c, "", func() bool { return cfg.Status.Phase == cost.PhaseReady && cfg.Status.Upgrade.Installed != nil })
+	receipt := getMigrationJob(t, c, cfg.Namespace, resources.NameKokuMigration(cfg)).UID
+	cfg.Spec.CostManagement.DataRetentionMonths = 9
+	cfg.Spec.CostManagement.ReportDownloadSchedule = "*/30 * * * *"
+	cfg.Generation++
+	if _, err := r.reconcile(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Status.Upgrade.Operation != nil {
+		t.Fatalf("runtime-only edit planned a %s operation", cfg.Status.Upgrade.Operation.Stage)
+	}
+	driveLifecycle(t, r, cfg, c, "", func() bool { return cfg.Status.Phase == cost.PhaseReady })
+	if getMigrationJob(t, c, cfg.Namespace, resources.NameKokuMigration(cfg)).UID != receipt {
+		t.Fatal("runtime-only edit reran the Koku migration")
+	}
+	api := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: cfg.Namespace, Name: resources.NameKokuAPI(cfg)}, api); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range api.Spec.Template.Spec.Containers[0].Env {
+		found = found || (e.Name == "RETAIN_NUM_MONTHS" && e.Value == "9")
+	}
+	if !found {
+		t.Fatal("runtime-only edit was not rolled out to application workloads")
 	}
 }

@@ -590,6 +590,8 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 			Labels:    Labels(cfg, "ros-database-maintenance"),
 		},
 		Spec: batchv1.CronJobSpec{
+			// Explicit so SSA resumes schedules suspended during upgrade quiescence.
+			Suspend:  new(false),
 			Schedule: schedule,
 			JobTemplate: batchv1.JobTemplateSpec{
 				Spec: batchv1.JobSpec{

@@ -261,6 +261,11 @@ func (r *CostManagementServiceConfigReconciler) oldApplicationPodsStopped(ctx co
 		}
 		rs := &appsv1.ReplicaSet{}
 		if err := r.safetyReader().Get(ctx, client.ObjectKey{Namespace: cfg.Namespace, Name: owner.Name}, rs); err != nil {
+			if apierrors.IsNotFound(err) {
+				// An old ReplicaSet pruned mid-rollout leaves its Pod for garbage
+				// collection; keep waiting instead of failing the upgrade.
+				return false, nil
+			}
 			return false, fmt.Errorf("inspect rollout ReplicaSet: %w", err)
 		}
 		if rs.Annotations["deployment.kubernetes.io/revision"] != live.Annotations["deployment.kubernetes.io/revision"] {

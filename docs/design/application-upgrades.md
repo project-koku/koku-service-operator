@@ -59,15 +59,17 @@ Plan -> [Quiesce -> Migrate] -> Rollout -> Ready
 
 UI-only changes and other updates with matching migration receipts use rolling
 rollout directly. Migration-bearing changes use maintenance: suspend managed
-CronJobs, scale application Deployments to zero, and wait for application Pods
+CronJobs (resumed by the target rollout), scale application Deployments to zero, and wait for application Pods
 and earlier migration writers to stop. Database/cache infrastructure remains up.
 Target shared configuration is applied after quiescence.
 
 Koku, optional ROS and RBAC migrate/seed Jobs run sequentially. The controller
 uses uncached safety reads, retains unfinished/failed Jobs, waits for surviving
 Pods, and foreground-deletes completed mismatched receipts with UID preconditions.
-Migration identity includes image, command, environment/input references and seed
-revision. Runtime helper-image changes do not invalidate successful migrations.
+Migration identity includes image, command, database/input references and seed
+revision. Runtime-only settings (object storage, cache, Kafka, schedules, retention,
+logging) and helper-image changes do not invalidate successful migrations; they roll
+out without maintenance. Unknown environment inputs still count.
 Mounted migration input changes require a script/seed revision.
 If a replacement operator changes those execution inputs during a saved
 operation, execution stops before target ConfigMaps or Jobs are changed. The
