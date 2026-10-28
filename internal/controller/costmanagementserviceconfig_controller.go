@@ -1510,6 +1510,13 @@ func (r *CostManagementServiceConfigReconciler) isDeploymentReady(ctx context.Co
 	if d.Status.UpdatedReplicas < want {
 		return false, nil
 	}
+	// Old pods still running means the rollout is not finished, and
+	// AvailableReplicas may be counting them: a crash-looping new pod plus a
+	// serving old pod meets both counts above (kubectl rollout status waits
+	// for status.replicas == updatedReplicas for the same reason).
+	if d.Status.Replicas > d.Status.UpdatedReplicas {
+		return false, nil
+	}
 	return d.Status.AvailableReplicas >= want, nil
 }
 

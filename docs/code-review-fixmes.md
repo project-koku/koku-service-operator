@@ -7,15 +7,20 @@ gap-analysis notes (for example D11, D18, D20, F3, F4).
 
 ### P1 — Status / lifecycle
 
-#### 1. Ready ignores most workload health [D1]
+#### 1. Ready ignores Celery workload health [D1, partial]
 
-Only 4 resources were readiness-gated at the 2026-08-15 audit: Database
-StatefulSet, Cache Deployment, Koku API Deployment, and Envoy Deployment.
-**RBAC API is now gated** (`RBACReady` / `WaitingForRBAC` before `Available`;
-COST-7689 G2). Everything else — Masu, Listener, Celery, all ROS deployments,
-RBAC worker, Kruize, Ingress, UI — is still applied without readiness checks.
-A bad image on any of those leaves the CR reporting `Available=True` with zero
-running replicas.
+Most workloads are now readiness-gated before `Available=True` /
+`AllComponentsReady`: bundled Database StatefulSet and Cache, RBAC API (`RBACReady`,
+COST-7689 G2), Koku API, Masu, Listener, Kruize and ROS API/Processor
+(`notReadyWait`, COST-7686 G3, `727ae04`), Ingress (`IngressReady`,
+`81e9240`) and Envoy (`GatewayReady`). The RBAC worker is reported separately
+(`RBACWorkerReady`) and intentionally does not gate `Available`. The UI
+Deployment will be gated by COST-8103 (PR #198, in review).
+
+**Still open:** Celery beat and the Celery worker Deployments are applied
+without readiness checks — a bad image there leaves the CR reporting
+`Available=True`. Gating them should follow the Available / Progressing /
+Degraded semantics follow-up rather than add more `Available=False` waits.
 
 #### 2. Progressing status causes a continuous reconcile loop [D2] — **closed**
 
@@ -32,11 +37,13 @@ steady-state status patch is empty.
 Edge writes `GatewayReady`. Validation keeps `AuthenticationReady` for the
 JWKS probe. See [COST-7688](gap_analysis/COST-7688.md).
 
-#### 4. Rollout readiness accepts stale replicas [D14]
+#### 4. Rollout readiness accepts stale replicas [D14] — **closed**
 
-`isDeploymentReady` only checks `AvailableReplicas >= spec.replicas`.
-No `ObservedGeneration`, `UpdatedReplicas`, or revision check. After an image
-change, old replicas satisfy the gate before any new pod exists.
+`isDeploymentReady` now requires `ObservedGeneration >= Generation`,
+`UpdatedReplicas >= spec.replicas` (#176) and no old pods left
+(`status.replicas <= updatedReplicas`, COST-8518) before
+`AvailableReplicas >= spec.replicas` counts. Previously a crash-looping new
+pod plus a serving old pod passed the gate.
 
 ### P1 — Resources
 
@@ -66,25 +73,29 @@ discovery with `DiscoveryComplete=False`.
 
 ### P2 — API contract
 
-#### 8. Accepted Route TLS modes cannot reach plaintext Envoy [D19]
+#### 8. Accepted Route TLS modes cannot reach plaintext Envoy [D19] — **closed**
 
-The CRD accepts `edge`, `passthrough`, and `reencrypt`, but Envoy has only a
-plaintext HTTP listener. `passthrough` and `reencrypt` produce unusable Routes.
+`RouteTLSSpec.Termination` is now `+kubebuilder:validation:Enum=edge` (default
+`edge`), so the CRD rejects `passthrough` / `reencrypt` that a plaintext Envoy
+listener cannot serve.
 
-#### 9. Zero replicas are silently overridden to 1 [D13, partial]
+#### 9. Zero replicas are silently overridden to 1 [D13] — **closed**
 
-Koku API, Masu, and Listener convert `replicas: 0` back to 1 (or 2). Users
-cannot disable a component via replicas. The `profile` field is a documented
-no-op (tracked separately). The `enabled` fields on Koku sub-components were
-removed.
+`ProfileReplicas` returns an explicit `replicas` value as-is, including 0;
+only an unset field falls back to the profile / default (COST-8095, #195).
+Covered by `TestKokuAPIDeployment_ExplicitZeroReplicas`. `spec.profile` is no
+longer a no-op (#195).
 
 ### P2 — Monitoring
 
-#### 10. ServiceMonitors cannot scrape most targets [D17]
+#### 10. ServiceMonitors cannot scrape most targets [D17] — **closed**
 
-ServiceMonitors select port `"metrics"`, but Koku, Masu, and Kruize Services
-expose port `"http"`. Listener has no Service. No dedicated metrics ports are
-defined. Prometheus cannot discover scrape targets for most components.
+Koku API, Masu and Ingress Services expose a dedicated `metrics` port scraped
+by the app ServiceMonitor (`df053d8`, `72ba854`); Celery workers have their
+own `metrics` port and ServiceMonitor; RBAC API is scraped on `http`
+(#144). The Kruize ServiceMonitor (`http`, `/q/metrics`) is defined but only
+used for cleanup until ROS scrape lands (COST-8054). The Listener exposes no
+ports and has no metrics endpoint, so it has nothing to scrape.
 
 ### P3 — Operational
 
