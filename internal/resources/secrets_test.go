@@ -49,6 +49,46 @@ func TestGeneratedCredentialFormats(t *testing.T) {
 	})
 }
 
+func TestMasuAdminSecret(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+	}
+
+	sec := MasuAdminSecret(cfg)
+	if sec.Name != NameMasuAdminSecret(cfg) {
+		t.Errorf("secret name: got %q, want %q", sec.Name, NameMasuAdminSecret(cfg))
+	}
+	if sec.Namespace != cfg.Namespace {
+		t.Errorf("namespace: got %q, want %q", sec.Namespace, cfg.Namespace)
+	}
+	token, ok := sec.StringData["token"]
+	if !ok || token == "" {
+		t.Errorf("MasuAdminSecret missing non-empty key %q", "token")
+	}
+
+	dep := MasuDeployment(cfg)
+	var found bool
+	for _, e := range dep.Spec.Template.Spec.Containers[0].Env {
+		if e.Name != "MASU_ADMIN_TOKEN" {
+			continue
+		}
+		found = true
+		if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("MASU_ADMIN_TOKEN expected secretKeyRef, got %#v", e)
+		}
+		ref := e.ValueFrom.SecretKeyRef
+		if ref.Name != NameMasuAdminSecret(cfg) {
+			t.Errorf("MASU_ADMIN_TOKEN secret name = %q, want %q", ref.Name, NameMasuAdminSecret(cfg))
+		}
+		if ref.Key != "token" {
+			t.Errorf("MASU_ADMIN_TOKEN secret key = %q, want token", ref.Key)
+		}
+	}
+	if !found {
+		t.Error("MasuDeployment missing MASU_ADMIN_TOKEN env var")
+	}
+}
+
 func TestStorageCredentialsSecretKeys(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},

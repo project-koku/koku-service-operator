@@ -46,6 +46,11 @@ func NameDjangoSecret(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-django-secret"
 }
 
+// NameMasuAdminSecret returns the Secret that holds MASU_ADMIN_TOKEN for on-prem Masu.
+func NameMasuAdminSecret(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-masu-admin-token"
+}
+
 func NameStorageSecret(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if cfg.Spec.ObjectStorage.SecretName != "" {
 		return cfg.Spec.ObjectStorage.SecretName

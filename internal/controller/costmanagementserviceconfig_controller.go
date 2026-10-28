@@ -403,6 +403,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 	if err := r.ensureSecret(ctx, cfg, resources.DjangoSecret(cfg)); err != nil {
 		return Result{}, fmt.Errorf("django secret: %w", err)
 	}
+	if err := r.ensureSecret(ctx, cfg, resources.MasuAdminSecret(cfg)); err != nil {
+		return Result{}, fmt.Errorf("masu admin token secret: %w", err)
+	}
 	if cfg.Spec.ObjectStorage.SecretName == "" {
 		if err := r.ensureSecret(ctx, cfg, resources.StorageCredentialsSecret(cfg)); err != nil {
 			return Result{}, fmt.Errorf("storage credentials secret: %w", err)

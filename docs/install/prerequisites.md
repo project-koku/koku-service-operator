@@ -256,10 +256,12 @@ overwrites them on later reconciles.
 | Secret | Keys | Purpose |
 |--------|------|---------|
 | `{cr}-django-secret` | `secret-key` | Django `SECRET_KEY` |
+| `{cr}-masu-admin-token` | `token` | Bearer token for on-prem Masu admin APIs (`MASU_ADMIN_TOKEN`) |
 | `{cr}-ui-cookie-secret` | `session-secret` | oauth2-proxy cookie encryption |
 
 Rotate them yourself if needed; there is no operator annotation to roll them
-yet.
+yet. To call Masu admin endpoints (e.g. via `oc port-forward`), read the
+`token` key and send `Authorization: Bearer <token>`.
 
 ## Versions tested in the lab fixture (not a support matrix)
 
