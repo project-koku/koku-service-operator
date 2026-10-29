@@ -282,28 +282,34 @@ oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token
 oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list | grep MASU_ADMIN_TOKEN
 ```
 
-**2. Read the token into a shell variable**
-
-```bash
-TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
-```
-
-**3. Port-forward Masu HTTP and call an admin path**
+**2. Port-forward Masu HTTP**
 
 ```bash
 oc -n "$NAMESPACE" port-forward "svc/${CR}-koku-masu" 8000:8000
-# other terminal:
+```
+
+**3. In another terminal, read the token and call an admin path**
+
+Read `TOKEN` in the **same** shell that runs `curl` (a second terminal does not
+inherit variables from the port-forward shell). The default Masu
+`API_PATH_PREFIX` is `/api/cost-management`. If your CR overrides it via
+`spec.costManagement.masu.env`, use that prefix in the URLs below instead.
+
+```bash
+TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
+BASE="http://127.0.0.1:8000/api/cost-management/v1"
+
 curl -s -o /dev/null -w '%{http_code}\n' \
-  "http://127.0.0.1:8000/api/cost-management/v1/status/"
+  "${BASE}/status/"
 # expect 200 — /status/ does not require the token
 
 curl -s -o /dev/null -w '%{http_code}\n' \
-  "http://127.0.0.1:8000/api/cost-management/v1/report_data/"
+  "${BASE}/report_data/"
 # expect 401 without Authorization
 
 curl -s -o /dev/null -w '%{http_code}\n' \
   -H "Authorization: Bearer ${TOKEN}" \
-  "http://127.0.0.1:8000/api/cost-management/v1/report_data/"
+  "${BASE}/report_data/"
 # expect not 401 (often 400 if required query params are missing)
 ```
 
