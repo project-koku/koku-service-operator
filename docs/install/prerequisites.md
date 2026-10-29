@@ -256,10 +256,74 @@ overwrites them on later reconciles.
 | Secret | Keys | Purpose |
 |--------|------|---------|
 | `{cr}-django-secret` | `secret-key` | Django `SECRET_KEY` |
+| `{cr}-masu-admin-token` | `token` | Bearer token for on-prem Masu admin APIs (`MASU_ADMIN_TOKEN`) |
 | `{cr}-ui-cookie-secret` | `session-secret` | oauth2-proxy cookie encryption |
 
 Rotate them yourself if needed; there is no operator annotation to roll them
 yet.
+
+### Runbook: call Masu admin APIs with the shared secret (COST-8059)
+
+On-prem Masu allow-listed admin paths (`/report_data/`, Celery queue helpers,
+`/db-performance/…`, etc.) require `Authorization: Bearer <token>`. The operator
+creates the token automatically; end users never set a username/password. This
+runbook is for **cluster operators / support / QE** (for example after
+`oc port-forward`).
+
+Assume:
+
+- `NAMESPACE` — CR namespace  
+- `CR` — `CostManagementServiceConfig` `metadata.name` (Secret/Service names are `{CR}-…`)
+
+**1. Confirm the Secret and that Masu mounts it**
+
+```bash
+oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d; echo
+oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list | grep MASU_ADMIN_TOKEN
+```
+
+**2. Port-forward Masu HTTP**
+
+```bash
+oc -n "$NAMESPACE" port-forward "svc/${CR}-koku-masu" 8000:8000
+```
+
+**3. In another terminal, read the token and call an admin path**
+
+Read `TOKEN` in the **same** shell that runs `curl` (a second terminal does not
+inherit variables from the port-forward shell). The default Masu
+`API_PATH_PREFIX` is `/api/cost-management`. If your CR overrides it via
+`spec.costManagement.masu.env`, use that prefix in the URLs below instead.
+
+```bash
+TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
+BASE="http://127.0.0.1:8000/api/cost-management/v1"
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "${BASE}/status/"
+# expect 200 — /status/ does not require the token
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "${BASE}/report_data/"
+# expect 401 without Authorization
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE}/report_data/"
+# expect not 401 (often 400 if required query params are missing)
+```
+
+**4. Rotate (optional)**
+
+Delete the Secret and restart Masu so the operator recreate-only path issues a
+new token (pods must remount the new value):
+
+```bash
+oc -n "$NAMESPACE" delete secret "${CR}-masu-admin-token"
+oc -n "$NAMESPACE" rollout restart deployment/"${CR}-koku-masu"
+```
+
+Do **not** commit the token to git, tickets, or public PR text.
 
 ## Versions tested in the lab fixture (not a support matrix)
 
