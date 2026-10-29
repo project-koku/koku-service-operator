@@ -260,8 +260,64 @@ overwrites them on later reconciles.
 | `{cr}-ui-cookie-secret` | `session-secret` | oauth2-proxy cookie encryption |
 
 Rotate them yourself if needed; there is no operator annotation to roll them
-yet. To call Masu admin endpoints (e.g. via `oc port-forward`), read the
-`token` key and send `Authorization: Bearer <token>`.
+yet.
+
+### Runbook: call Masu admin APIs with the shared secret (COST-8059)
+
+On-prem Masu allow-listed admin paths (`/report_data/`, Celery queue helpers,
+`/db-performance/…`, etc.) require `Authorization: Bearer <token>`. The operator
+creates the token automatically; end users never set a username/password. This
+runbook is for **cluster operators / support / QE** (for example after
+`oc port-forward`).
+
+Assume:
+
+- `NAMESPACE` — CR namespace  
+- `CR` — `CostManagementServiceConfig` `metadata.name` (Secret/Service names are `{CR}-…`)
+
+**1. Confirm the Secret and that Masu mounts it**
+
+```bash
+oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d; echo
+oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list | grep MASU_ADMIN_TOKEN
+```
+
+**2. Read the token into a shell variable**
+
+```bash
+TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
+```
+
+**3. Port-forward Masu HTTP and call an admin path**
+
+```bash
+oc -n "$NAMESPACE" port-forward "svc/${CR}-koku-masu" 8000:8000
+# other terminal:
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "http://127.0.0.1:8000/api/cost-management/v1/status/"
+# expect 200 — /status/ does not require the token
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "http://127.0.0.1:8000/api/cost-management/v1/report_data/"
+# expect 401 without Authorization
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/api/cost-management/v1/report_data/"
+# expect not 401 (often 400 if required query params are missing)
+```
+
+**4. Rotate (optional)**
+
+Delete the Secret and restart Masu so the operator recreate-only path issues a
+new token (pods must remount the new value):
+
+```bash
+oc -n "$NAMESPACE" delete secret "${CR}-masu-admin-token"
+oc -n "$NAMESPACE" rollout restart deployment/"${CR}-koku-masu"
+```
+
+Do **not** commit the token to git, tickets, or public PR text.
 
 ## Versions tested in the lab fixture (not a support matrix)
 
