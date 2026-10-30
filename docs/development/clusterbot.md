@@ -87,12 +87,15 @@ If you already have AMQ Streams Kafka, point
 
 ## Stage checklist
 
-**Day-one success (no Keycloak):** `SchemaUpToDate=True`, `Available=True`
-(reason `KokuAvailable`), and core Deployments healthy. Expect
-`status.phase` to stay **`Progressing`** — `reconcileEdge` requeues while
-`UIReady=False` (`OAuthClientSecretMissing`), so you will **not** reach
-`Phase=Ready` / `AllComponentsReady` until Keycloak +
-`mirror-ui-oauth-secret.sh` ([pre-prod-install.md](pre-prod-install.md)).
+**Checkpoint (before Keycloak):** `SchemaUpToDate=True` and
+`CoreServicesReady=True` (RBAC API, Koku API, Masu, Listener; Kruize with ROS ready). This is an
+intermediate signal only: `Available` stays `False`
+(`WaitingForComponents`) and `status.phase` stays **`Progressing`** —
+`reconcileEdge` requeues while `UIReady=False` (`OAuthClientSecretMissing`).
+
+**Success:** `Available=True` (`AllComponentsReady`) and `Phase=Ready`.
+Keycloak is required: deploy it and run `mirror-ui-oauth-secret.sh`
+([pre-prod-install.md](pre-prod-install.md)).
 
 | Stage | How to verify | OK if still False? |
 |-------|---------------|--------------------|
@@ -102,8 +105,9 @@ If you already have AMQ Streams Kafka, point
 | **Discovery / storage** | `DiscoveryComplete`, `StorageReady` True | Rarely OK False — fix S3 secret / endpoint |
 | **DB / cache / kafka** | `DatabaseReady`, `CacheReady`, `KafkaReady` True | Must be True for migrations |
 | **Schema** | `SchemaUpToDate` True | Must become True for app Deployments |
-| **Available (day-one goal)** | `Available=True` (`KokuAvailable`) + core Deployments Ready | Goal without Keycloak |
-| **Auth / UI** | `AuthenticationReady`, `UIReady` | **Yes** False without Keycloak + OAuth mirror — needed for `Phase=Ready` / UI login |
+| **Core services** | `CoreServicesReady=True` (`CoreServicesAvailable`) + core Deployments Ready | Checkpoint only — not product-available |
+| **Auth / UI** | `AuthenticationReady`, `UIReady` | Only until Keycloak + OAuth mirror are set up — required for `Available` |
+| **Available** | `Available=True` (`AllComponentsReady`), `Phase=Ready` | No — this is success |
 | **ROS** | `ROSEnabled=False` (CRD default / sample `ros.enabled: false`) | Expected for beta — no ROS/Kruize objects |
 
 The BYOI MinIO init Job creates the default Cost bucket (`koku-bucket`); a customer S3 must already have the bucket named in `spec.objectStorage.buckets.koku` or uploads return 500.

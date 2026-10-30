@@ -128,12 +128,14 @@ func TestReconcileCoreServices_ROSOff_APIReady(t *testing.T) {
 	if !result.IsZero() {
 		t.Fatalf("expected zero Result when API is ready, got %+v", result)
 	}
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
-		t.Fatal("expected Available=True")
-	}
+	// Workers and Edge have not run yet: Available must not flip True here.
 	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
-	if cond == nil || cond.Reason != reasonKokuAvailable {
-		t.Fatalf("expected Available reason %s, got %+v", reasonKokuAvailable, cond)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonWaitingForComponents {
+		t.Fatalf("expected Available=False %s, got %+v", reasonWaitingForComponents, cond)
+	}
+	core := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady)
+	if core == nil || core.Status != metav1.ConditionTrue || core.Reason != reasonCoreServicesAvailable {
+		t.Fatalf("expected CoreServicesReady=True %s, got %+v", reasonCoreServicesAvailable, core)
 	}
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionRBACReady) {
 		t.Fatal("expected RBACReady=True")
@@ -398,8 +400,12 @@ func TestReconcileCoreThenWorkers_MasuTimeout_ClearsDegradedWhenIngressWaits(t *
 	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
 		t.Fatalf("core ready pass: %v", err)
 	}
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
-		t.Fatal("expected Available=True once core Deployments are ready")
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady) {
+		t.Fatal("expected CoreServicesReady=True once core Deployments are ready")
+	}
+	if avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable); avail == nil ||
+		avail.Status != metav1.ConditionFalse || avail.Reason != reasonWaitingForComponents {
+		t.Fatalf("expected Available=False %s before workers/edge, got %+v", reasonWaitingForComponents, avail)
 	}
 	assertDegradedNotDeploymentNotReady(t, cfg)
 
@@ -445,6 +451,10 @@ func TestReconcileCoreServices_RBACNotReady_BlocksAvailable(t *testing.T) {
 	if rbac == nil || rbac.Status != metav1.ConditionFalse || rbac.Reason != reasonWaitingForRBAC {
 		t.Fatalf("expected RBACReady=False %s, got %+v", reasonWaitingForRBAC, rbac)
 	}
+	core := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady)
+	if core == nil || core.Status != metav1.ConditionFalse || core.Reason != reasonWaitingForRBAC {
+		t.Fatalf("expected CoreServicesReady=False %s, got %+v", reasonWaitingForRBAC, core)
+	}
 }
 
 func TestReconcileCoreServices_RBACReady_KokuNotReady(t *testing.T) {
@@ -480,6 +490,10 @@ func TestReconcileCoreServices_RBACReady_KokuNotReady(t *testing.T) {
 	if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != reasonWaitingForAPI {
 		t.Fatalf("expected Available=False %s, got %+v", reasonWaitingForAPI, avail)
 	}
+	core := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady)
+	if core == nil || core.Status != metav1.ConditionFalse || core.Reason != reasonWaitingForAPI {
+		t.Fatalf("expected CoreServicesReady=False %s, got %+v", reasonWaitingForAPI, core)
+	}
 }
 
 func TestReconcileCoreServices_WorkerNotReady_DoesNotBlock(t *testing.T) {
@@ -507,8 +521,9 @@ func TestReconcileCoreServices_WorkerNotReady_DoesNotBlock(t *testing.T) {
 	if !result.IsZero() {
 		t.Fatalf("expected zero Result when RBAC API and Koku API are ready, got %+v", result)
 	}
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
-		t.Fatal("expected Available=True without waiting on RBAC worker")
+	avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if avail == nil || avail.Reason != reasonWaitingForComponents {
+		t.Fatalf("expected Available reason %s (gate passed without RBAC worker), got %+v", reasonWaitingForComponents, avail)
 	}
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionRBACReady) {
 		t.Fatal("expected RBACReady=True without waiting on RBAC worker")
@@ -516,6 +531,80 @@ func TestReconcileCoreServices_WorkerNotReady_DoesNotBlock(t *testing.T) {
 	worker := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionRBACWorkerReady)
 	if worker == nil || worker.Status != metav1.ConditionFalse || worker.Reason != reasonWaitingForRBACWorker {
 		t.Fatalf("expected RBACWorkerReady=False %s, got %+v", reasonWaitingForRBACWorker, worker)
+	}
+}
+
+// Drift pass: once reconcile() has published Available=True (AllComponentsReady),
+// a later core-services pass must not downgrade or re-reason it.
+func TestReconcileCoreServices_DriftPass_KeepsAvailable(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameRBACAPI(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameRBACWorker(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameMasu(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameListener(cfg))
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("drift pass: %v", err)
+	}
+	if !result.IsZero() {
+		t.Fatalf("expected zero Result on drift pass, got %+v", result)
+	}
+	avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if avail == nil || avail.Status != metav1.ConditionTrue || avail.Reason != "AllComponentsReady" {
+		t.Fatalf("expected Available=True AllComponentsReady preserved, got %+v", avail)
+	}
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady) {
+		t.Fatal("expected CoreServicesReady=True on drift pass")
+	}
+}
+
+// Drift pass where Koku API has gone down: CoreServicesReady must flip back
+// to False rather than staying latched True.
+func TestReconcileCoreServices_DriftPass_KokuDown(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameRBACAPI(cfg))
+	r.setCondition(cfg, costv1alpha1.ConditionCoreServicesReady, metav1.ConditionTrue, reasonCoreServicesAvailable, msgCoreServicesAvailable)
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("drift pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while Koku API is down")
+	}
+	core := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionCoreServicesReady)
+	if core == nil || core.Status != metav1.ConditionFalse || core.Reason != reasonWaitingForAPI {
+		t.Fatalf("expected CoreServicesReady=False %s, got %+v", reasonWaitingForAPI, core)
+	}
+	avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != reasonWaitingForAPI {
+		t.Fatalf("expected Available=False %s, got %+v", reasonWaitingForAPI, avail)
 	}
 }
 

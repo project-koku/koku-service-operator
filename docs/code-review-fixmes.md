@@ -7,20 +7,16 @@ gap-analysis notes (for example D11, D18, D20, F3, F4).
 
 ### P1 — Status / lifecycle
 
-#### 1. Ready ignores Celery workload health [D1, partial]
+#### 1. Ready ignores most workload health [D1] — **closed**
 
-Most workloads are now readiness-gated before `Available=True` /
-`AllComponentsReady`: bundled Database StatefulSet and Cache, RBAC API (`RBACReady`,
-COST-7689 G2), Koku API, Masu, Listener, Kruize and ROS API/Processor
-(`notReadyWait`, COST-7686 G3, `727ae04`), Ingress (`IngressReady`,
-`81e9240`) and Envoy (`GatewayReady`). The RBAC worker is reported separately
-(`RBACWorkerReady`) and intentionally does not gate `Available`. The UI
-Deployment will be gated by COST-8103 (PR #198, in review).
-
-**Still open:** Celery beat and the Celery worker Deployments are applied
-without readiness checks — a bad image there leaves the CR reporting
-`Available=True`. Gating them should follow the Available / Progressing /
-Degraded semantics follow-up rather than add more `Available=False` waits.
+Every application Deployment now gates `Available=True` /
+`AllComponentsReady`. Core and worker waits use `notReadyWait` (RBAC API,
+Koku API, Masu, Listener, Kruize, ROS API/Processor — COST-7689 G2,
+COST-7686 G3), Ingress and Envoy have `IngressReady` / `GatewayReady`, the UI
+is gated on its Deployment (`UIReady`, COST-8103), and the final
+`waitForApplicationRollout` phase (COST-7693) checks every application
+Deployment — including Celery beat/workers and the RBAC worker — for target
+images, replicas and terminated old Pods.
 
 #### 2. Progressing status causes a continuous reconcile loop [D2] — **closed**
 

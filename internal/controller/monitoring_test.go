@@ -265,23 +265,3 @@ func TestEmitDependencyFailed_OnlyOnTransition(t *testing.T) {
 	r.emitDependencyFailed(cfg, costv1alpha1.ConditionDatabaseReady, "unreachable again")
 	assertNoEvent(t, rec, "DependencyFailed")
 }
-
-func TestMigrationsCompleteEvent_Reason(t *testing.T) {
-	rec := record.NewFakeRecorder(2)
-	r := &CostManagementServiceConfigReconciler{Recorder: rec}
-	cfg := &costv1alpha1.CostManagementServiceConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
-	}
-
-	// Simulate completion path: SchemaUpToDate not yet True.
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate) {
-		r.Recorder.Event(cfg, "Normal", "MigrationsComplete", "All schema migrations succeeded")
-	}
-	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "ok")
-	assertEvent(t, rec, "MigrationsComplete")
-
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate) {
-		r.Recorder.Event(cfg, "Normal", "MigrationsComplete", "should not fire")
-	}
-	assertNoEvent(t, rec, "MigrationsComplete")
-}

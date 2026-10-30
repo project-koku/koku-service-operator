@@ -88,8 +88,11 @@ PostgreSQL and Valkey** in `cost-onprem` (lab/CI — not production BYOI).
 
 **Day-one success (enough for most pytest):**
 
-- `SchemaUpToDate=True`, `Available=True` (`KokuAvailable`)
+- `SchemaUpToDate=True`, `CoreServicesReady=True` (`CoreServicesAvailable`)
 - Core Deployments healthy
+
+`Available=True` (`AllComponentsReady`) and `Phase=Ready` are set only when
+the whole pipeline succeeds, which requires Keycloak and the UI OAuth Secret.
 
 **Expected to stay False without extra UI work:**
 
@@ -339,6 +342,14 @@ KEYCLOAK_HOST="$(oc get route keycloak -n keycloak -o jsonpath='{.spec.host}')"
 test -n "$KEYCLOAK_HOST"
 KEYCLOAK_URL="https://${KEYCLOAK_HOST}"
 
+# oauth2-proxy verifies the Keycloak Route (issuerURL) TLS chain with this CA.
+# Without it the UI pod crash-loops (x509: unknown authority) and the CR stays
+# UIReady=False / Available=False reason WaitingForUI.
+oc -n openshift-config-managed get configmap default-ingress-cert \
+  -o jsonpath='{.data.ca-bundle\.crt}' > /tmp/ingress-ca.crt
+oc -n cost-onprem create secret generic keycloak-ingress-ca \
+  --from-file=ca.crt=/tmp/ingress-ca.crt --dry-run=client -o yaml | oc apply -f -
+
 DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .metadata.namespace = "cost-onprem" |
   .metadata.name = "cost-onprem" |
@@ -350,7 +361,8 @@ DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .spec.objectStorage.buckets.koku = "koku-bucket" |
   .spec.objectStorage.s3.region = "us-east-1" |
   .spec.auth.keycloak.url = "http://keycloak-service.keycloak.svc.cluster.local:8080" |
-  .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL)
+  .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL) |
+  .spec.auth.keycloak.tls.caCertSecretName = "keycloak-ingress-ca"
 ' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml \
   | oc apply -f -
 ```
@@ -366,6 +378,7 @@ Why these patches (sample defaults are ODF/CRC, not cluster-bot S4):
 | `objectStorage.s3.region` | unset | `us-east-1` (SigV4 with S4) |
 | `auth.keycloak.url` | empty (`""`) | JWKS on in-cluster HTTP `:8080` (`http://keycloak-service.keycloak.svc.cluster.local:8080`) |
 | `auth.keycloak.issuerURL` | commented | public Route HTTPS (tokens use this `iss`) |
+| `auth.keycloak.tls.caCertSecretName` | unset (service-CA) | `keycloak-ingress-ca` — ingress CA so oauth2-proxy trusts the Keycloak Route |
 
 Watch reconcile (~10–20 min):
 
@@ -378,7 +391,8 @@ Example good end state:
 
 ```text
 SchemaUpToDate=True (MigrationComplete)
-Available=True (KokuAvailable)
+CoreServicesReady=True (CoreServicesAvailable)
+Available=False (WaitingForComponents)
 GatewayReady=True (GatewayReady)
 IngressReady=True (IngressReady)
 StorageReady=True (StorageReady)

@@ -3,63 +3,57 @@ package controller
 import (
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
+
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// TestReadyEventEmittedOnlyOnTransition verifies that the "Ready" event is
-// emitted exactly once — on the first transition to Ready — and NOT on
-// subsequent successful reconcile passes when the phase is already Ready.
-//
-// Bug (F6): cfg.Status.Phase is reset to Progressing at the top of reconcile(),
-// so the `!= PhaseReady` guard always fires. The fix must compare against the
-// phase captured BEFORE reconcile() overwrites it (the `original` snapshot).
-func TestReadyEventEmittedOnlyOnTransition(t *testing.T) {
-	// Simulate the guard logic for both the buggy and fixed versions.
-
-	// --- BUGGY behaviour ---
-	// At the end of a successful reconcile, cfg.Status.Phase has been set to
-	// Progressing (line 135) and then the guard checks it. It always fires.
-	buggyEventCount := 0
-	for _, priorPhase := range []costv1alpha1.Phase{
-		costv1alpha1.PhasePending,
-		costv1alpha1.PhaseProgressing,
-		costv1alpha1.PhaseReady, // second pass — phase was already Ready
-	} {
-		cfg := &costv1alpha1.CostManagementServiceConfig{}
-		cfg.Status.Phase = priorPhase
-
-		// Buggy: overwrite phase at start of reconcile
-		cfg.Status.Phase = costv1alpha1.PhaseProgressing
-
-		// Buggy guard (always fires because phase == Progressing)
-		if cfg.Status.Phase != costv1alpha1.PhaseReady {
-			buggyEventCount++
-		}
+// The Ready event fires only on a genuine non-Ready → Ready transition.
+// reconcile() resets Phase to Progressing before running phases, so markReady
+// must decide on the phase read at the start of the pass (priorPhase). That
+// read is uncached (see TestTransitionEvent_NotReemittedOnStaleCache), so a
+// pass that follows a Ready pass sees PhaseReady and stays quiet.
+func TestMarkReady_EmitsReadyOnlyOnTransition(t *testing.T) {
+	cases := []struct {
+		name         string
+		priorPhase   costv1alpha1.Phase
+		rollbackHold bool
+		wantEvent    bool
+	}{
+		{name: "first install", priorPhase: costv1alpha1.PhasePending, wantEvent: true},
+		{name: "rollout completes", priorPhase: costv1alpha1.PhaseProgressing, wantEvent: true},
+		{name: "recovered from degraded", priorPhase: costv1alpha1.PhaseDegraded, wantEvent: true},
+		{name: "drift pass", priorPhase: costv1alpha1.PhaseReady, wantEvent: false},
+		// rollbackUpgrade owns Degraded/PhaseChanged while the source is restored.
+		{name: "rollback hold", priorPhase: costv1alpha1.PhaseDegraded, rollbackHold: true, wantEvent: false},
 	}
-	if buggyEventCount != 3 {
-		t.Errorf("expected buggy path to emit 3 events (one per pass), got %d", buggyEventCount)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := record.NewFakeRecorder(10)
+			r := &CostManagementServiceConfigReconciler{Recorder: rec}
+			cfg := minimalCR(testCRName, testNamespace)
+			cfg.Status.Phase = costv1alpha1.PhaseProgressing // reconcileStack reset
+			r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "UpgradeRolledBack", "rolled back")
 
-	// --- FIXED behaviour ---
-	// Capture the original phase BEFORE overwriting it, then check that.
-	fixedEventCount := 0
-	for _, priorPhase := range []costv1alpha1.Phase{
-		costv1alpha1.PhasePending,     // first pass → transition → emit
-		costv1alpha1.PhaseProgressing, // still transitioning → emit
-		costv1alpha1.PhaseReady,       // already Ready → NO event
-	} {
-		originalPhase := priorPhase // captured before reconcile overwrites
+			r.markReady(cfg, tc.priorPhase, tc.rollbackHold)
 
-		cfg := &costv1alpha1.CostManagementServiceConfig{}
-		cfg.Status.Phase = priorPhase
-		cfg.Status.Phase = costv1alpha1.PhaseProgressing // overwritten at start
-
-		// Fixed guard: compare against the original (pre-overwrite) phase.
-		if originalPhase != costv1alpha1.PhaseReady {
-			fixedEventCount++
-		}
-	}
-	if fixedEventCount != 2 {
-		t.Errorf("expected fixed path to emit 2 events (only on non-Ready→Ready transitions), got %d", fixedEventCount)
+			if tc.wantEvent {
+				assertEvent(t, rec, "Ready")
+			} else {
+				assertNoEvent(t, rec, "Ready")
+			}
+			if cfg.Status.Phase != costv1alpha1.PhaseReady {
+				t.Errorf("Phase = %q, want Ready", cfg.Status.Phase)
+			}
+			avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+			if avail == nil || avail.Status != metav1.ConditionTrue || avail.Reason != "AllComponentsReady" {
+				t.Errorf("expected Available=True AllComponentsReady, got %+v", avail)
+			}
+			deg := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+			if wantDegraded := tc.rollbackHold; (deg.Status == metav1.ConditionTrue) != wantDegraded {
+				t.Errorf("Degraded = %s/%s, want True only during a rollback hold", deg.Status, deg.Reason)
+			}
+		})
 	}
 }

@@ -112,21 +112,23 @@ only (`IngressReady` / `GatewayReady` / `UIReady`) and never start that
 clock.
 
 Kruize is **not** in this gap — it is on the core wait list and uses
-`notReadyWait`. UI is worse than Ingress/Envoy: `UIReady=True` is set
-when the OAuth client Secret exists; the UI Deployment is never
-readiness-gated.
+`notReadyWait`. **UI is resolved** (COST-8103): `reconcileUI` gates
+`UIReady` on the UI Deployment through `notReadyWait` (`WaitingForUI`),
+so a crash-looping oauth2-proxy flips `Available` to False and degrades
+after 5 minutes. Ingress and Envoy remain.
 
-**Impact:** A stuck Ingress/Envoy/UI Deployment leaves `Progressing=True`
-and requeues every 30s indefinitely. `Available` may stay `True`
-`KokuAvailable` (Ingress/Envoy wait after core has already promoted it)
-or keep a stale core wait reason if a later change stops promoting
-`Available`. Operators never get `Degraded=True` `DeploymentNotReady`
-for those components.
+**Impact:** A stuck Ingress/Envoy Deployment leaves `Progressing=True`
+and requeues every 30s indefinitely. On first install `Available` stays
+`False` `WaitingForComponents` (core no longer promotes it — COST-8103);
+on a drift pass after `Ready` it stays `True` `AllComponentsReady`
+because these waits do not touch `Available`. Operators never get
+`Degraded=True` `DeploymentNotReady` for those components.
 
-**Suggested fix:** Route Ingress (and optionally Envoy/UI) through
-`notReadyWait` with dedicated wait reasons, same as ROS API. Add tests
-that a 6-minute Ingress wait degrades and names the component. Gate UI
-on Deployment readiness, not only the OAuth Secret.
+**Suggested fix:** Route Ingress (and optionally Envoy) through
+`notReadyWait` with dedicated wait reasons, same as ROS API and UI, and add
+the reasons to `holdingWorkerReadinessWait`. Add tests that a 6-minute
+Ingress wait degrades and names the component (see
+`ui_readiness_test.go` for the UI equivalent).
 
 **Out of scope for PR #105** — COST-7686 G2/G3 cover the ticket-owned
 app Deployments (Koku API, Masu, Listener, optional Kruize/ROS). Ingress

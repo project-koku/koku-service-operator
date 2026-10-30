@@ -31,9 +31,16 @@ const (
 	// ConditionRBACReady reports RBAC API Deployment readiness (not the worker).
 	ConditionRBACReady = "RBACReady"
 	// ConditionRBACWorkerReady reports the RBAC Celery worker Deployment. It
-	// does not gate Available — Koku/Envoy call the API, not the worker.
+	// does not gate core services (Koku/Envoy call the API, not the worker);
+	// the worker Deployment still gates Available through the final
+	// application rollout wait.
 	ConditionRBACWorkerReady = "RBACWorkerReady"
-	ConditionUIReady         = "UIReady"
+	// ConditionCoreServicesReady reports that the RBAC API, Koku API, Masu,
+	// Listener (and Kruize when ROS is enabled) Deployments are ready. It does
+	// not mean the product is serving: workers and Edge may still be rolling
+	// out. Use Available for that.
+	ConditionCoreServicesReady = "CoreServicesReady"
+	ConditionUIReady           = "UIReady"
 	// ConditionGatewayReady reports Envoy Deployment + API Route readiness.
 	// Distinct from AuthenticationReady, which is the OIDC JWKS probe.
 	ConditionGatewayReady = "GatewayReady"

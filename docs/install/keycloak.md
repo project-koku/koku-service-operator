@@ -277,9 +277,15 @@ That is a **different** URL than the JWKS probe the operator uses for
 
 ### `UIReady` vs a working UI
 
-`UIReady=True` means the UI OAuth client Secret exists (and the UI Route is
-admitted when a cluster domain is known). It does **not** check that UI pods
-are Ready. Always confirm the Deployment after conditions look good:
+`UIReady=True` means the UI OAuth client Secret is valid, the UI Route is
+admitted (when a cluster domain is known), **and** the UI Deployment
+(oauth2-proxy + app) is Ready. A crash-looping oauth2-proxy — for example one
+that cannot verify the Keycloak TLS chain — shows as `UIReady=False` reason
+`WaitingForUI` and `Available=False` `WaitingForUI`; after 5 minutes the
+operator also sets `Degraded=True` `DeploymentNotReady` ("UI is not ready").
+
+Ready pods still do not prove an end-to-end login (redirect URI, realm
+settings). When login fails, inspect the Deployment and proxy logs:
 
 ```bash
 export NAMESPACE=cost-onprem
@@ -330,6 +336,7 @@ spec:
 | Symptom | Check |
 |---------|-------|
 | `UIReady=False`, reason `OAuthClientSecretMissing` | Create `{cr-name}-ui-oauth-client` with `client-id` / `client-secret` |
+| `UIReady=False`, reason `WaitingForUI` (UI pod CrashLoopBackOff) | `oc logs deploy/{cr}-ui -c oauth-proxy` — usually OIDC discovery failing on TLS (see the `x509` row) |
 | `UIReady=True`, Route shows "Application is not available" | `oc logs deploy/{cr}-ui -c oauth-proxy` for TLS or OIDC errors |
 | oauth-proxy `x509: unknown authority` on issuer host | Set `tls.caCertSecretName` to ingress CA when `issuerURL` is a Route |
 | Login redirect fails after UI loads | Redirect URI in Keycloak must match `https://{cr}-ui-{ns}.{domain}/oauth2/callback` |

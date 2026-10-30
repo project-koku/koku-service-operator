@@ -56,7 +56,10 @@ const (
 	reasonWaitingForKruize       = "WaitingForKruize"
 	reasonWaitingForROSAPI       = "WaitingForROSAPI"
 	reasonWaitingForROSProcessor = "WaitingForROSProcessor"
-	reasonKokuAvailable          = "KokuAvailable"
+	reasonCoreServicesAvailable  = "CoreServicesAvailable"
+	reasonWaitingForComponents   = "WaitingForComponents"
+	reasonWaitingForUI           = "WaitingForUI"
+	reasonUIAvailable            = "UIAvailable"
 	reasonDeploymentNotReady     = "DeploymentNotReady"
 	reasonDeploymentReady        = "DeploymentReady"
 	reasonReconcileError         = "ReconcileError"
@@ -69,6 +72,10 @@ const (
 	msgWaitingForKruize          = "waiting for Kruize"
 	msgWaitingForROSAPI          = "waiting for ROS API"
 	msgWaitingForROSProcessor    = "waiting for ROS Processor"
+	msgCoreServicesAvailable     = "core services are ready"
+	msgWaitingForComponents      = "core services ready; waiting for workers and edge"
+	msgWaitingForUI              = "waiting for UI Deployment"
+	msgUIAvailable               = "UI Deployment is ready"
 )
 
 type CostManagementServiceConfigReconciler struct {
@@ -128,8 +135,16 @@ type CostManagementServiceConfigReconciler struct {
 func (r *CostManagementServiceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Read the CR uncached. Transition Events (Ready, MigrationsComplete,
+	// Paused, ...) are guarded on the previous status, and the informer cache
+	// can lag the status patch of the pass that just finished. A stale read
+	// passes the guard again and emits a duplicate Event.
+	reader := client.Reader(r.Client)
+	if r.APIReader != nil {
+		reader = r.APIReader
+	}
 	cfg := &costv1alpha1.CostManagementServiceConfig{}
-	if err := r.Get(ctx, req.NamespacedName, cfg); err != nil {
+	if err := reader.Get(ctx, req.NamespacedName, cfg); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -186,14 +201,16 @@ func (r *CostManagementServiceConfigReconciler) Reconcile(ctx context.Context, r
 	return result, reconcileErr
 }
 
-// markPaused sets Paused/Progressing conditions and emits a Paused event.
+// markPaused sets Paused/Progressing conditions. The Paused event is emitted
+// only on the transition into Paused, not on every paused reconcile.
 func (r *CostManagementServiceConfigReconciler) markPaused(cfg *costv1alpha1.CostManagementServiceConfig) {
+	wasPaused := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionPaused)
 	r.setCondition(cfg, costv1alpha1.ConditionPaused, metav1.ConditionTrue,
 		"AnnotationSet", fmt.Sprintf("reconciliation paused (%s=%s)", pauseAnnotation, annotationTrue))
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionFalse,
 		"Paused", "reconciliation paused via annotation")
 	cfg.Status.ObservedGeneration = cfg.Generation
-	if r.Recorder != nil {
+	if r.Recorder != nil && !wasPaused {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Paused",
 			"Reconciliation paused; remove the pause annotation to resume")
 	}
@@ -350,14 +367,24 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 		return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 	}
 
-	// Emit Ready event only on the first transition to Ready.
-	// Use priorPhase (captured before this pass reset it to Progressing)
-	// to detect a genuine non-Ready → Ready transition.
+	r.markReady(cfg, priorPhase, rollbackHold)
+	r.completeProgressing(cfg, priorProgressing)
+	// Periodic drift correction: re-apply all desired state every 5 minutes so
+	// manual edits to managed resources are reverted without waiting for an event.
+	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// markReady publishes the success state at the end of a full pipeline pass.
+// priorPhase is the phase read at the start of the pass (before reconcileStack
+// reset it to Progressing); the Ready event fires only on a genuine
+// non-Ready → Ready transition. During a rollback hold rollbackUpgrade owns
+// Degraded and the phase-change announcement, so neither Ready nor
+// PhaseChanged is emitted and Degraded is left as is.
+func (r *CostManagementServiceConfigReconciler) markReady(cfg *costv1alpha1.CostManagementServiceConfig, priorPhase costv1alpha1.Phase, rollbackHold bool) {
 	if priorPhase != costv1alpha1.PhaseReady && !rollbackHold {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
-	r.completeProgressing(cfg, priorProgressing)
 	if !rollbackHold {
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	}
@@ -365,9 +392,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 	if !rollbackHold {
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
 	}
-	// Periodic drift correction: re-apply all desired state every 5 minutes so
-	// manual edits to managed resources are reverted without waiting for an event.
-	return ctrl.Result{RequeueAfter: requeueDrift}, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -585,7 +609,12 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	schemaWasReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
 	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "all schema migrations succeeded")
 	r.setCondition(cfg, costv1alpha1.ConditionUpgradeFailed, metav1.ConditionFalse, "MigrationComplete", "all schema migrations succeeded")
-	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "MigrationSucceeded", "")
+	// DeploymentNotReady belongs to a later readiness wait, which clears it
+	// when its Deployment recovers. Clearing it here would have that wait set
+	// it again in the same pass and reset Degraded's LastTransitionTime.
+	if deg := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded); deg == nil || deg.Reason != reasonDeploymentNotReady {
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "MigrationSucceeded", "")
+	}
 	if !schemaWasReady && r.Recorder != nil {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "MigrationsComplete",
 			"All schema migrations succeeded (Koku → ROS → RBAC)")
@@ -763,6 +792,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 	}
 	if !rbacReady {
 		r.setCondition(cfg, costv1alpha1.ConditionRBACReady, metav1.ConditionFalse, reasonWaitingForRBAC, msgWaitingForRBACAPI)
+		r.setCondition(cfg, costv1alpha1.ConditionCoreServicesReady, metav1.ConditionFalse, reasonWaitingForRBAC, msgWaitingForRBACAPI)
 		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, reasonWaitingForRBAC, msgWaitingForRBACAPI)
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
@@ -780,23 +810,30 @@ func (r *CostManagementServiceConfigReconciler) waitForCoreServiceReadiness(ctx 
 	if costv1alpha1.ROSEnabled(cfg) {
 		waits = append(waits, deploymentWait{resources.NameKruize(cfg), reasonWaitingForKruize, msgWaitingForKruize, "Kruize"})
 	}
-	if result, err := r.waitForDeployments(ctx, cfg, waits); err != nil || !result.IsZero() {
+	result, err := r.waitForDeployments(ctx, cfg, waits)
+	if err != nil {
 		return result, err
 	}
+	if !result.IsZero() {
+		// notReadyWait recorded the blocking Deployment on Available; mirror it.
+		if avail := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable); avail != nil {
+			r.setCondition(cfg, costv1alpha1.ConditionCoreServicesReady, metav1.ConditionFalse, avail.Reason, avail.Message)
+		}
+		return result, nil
+	}
+	r.setCondition(cfg, costv1alpha1.ConditionCoreServicesReady, metav1.ConditionTrue, reasonCoreServicesAvailable, msgCoreServicesAvailable)
 
-	// A later phase (ROS API/Processor) may already own Available=False.
-	// Promoting to KokuAvailable here would stamp a new LastTransitionTime
-	// and reset the 5-minute DeploymentNotReady clock on every pass.
-	// CoreServicesAvailable is skipped on this path; reconcile() emits
-	// AllComponentsReady when the wait clears.
-	if holdingWorkerReadinessWait(cfg) {
+	// Workers and Edge have not run yet in this pass. Only reconcile() publishes
+	// Available=True (with the Ready event) once the whole pipeline succeeds.
+	// Leave Available alone when a later phase (ROS API/Processor) owns the
+	// readiness-wait clock, or on a drift pass where it is already True.
+	if holdingWorkerReadinessWait(cfg) ||
+		apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
 		return Result{}, nil
 	}
-
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
-		r.Recorder.Event(cfg, corev1.EventTypeNormal, "CoreServicesAvailable", "Koku API is ready")
-	}
-	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, reasonKokuAvailable, "")
+	// Status stays False, so a stale core wait reason is replaced without
+	// resetting LastTransitionTime.
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, reasonWaitingForComponents, msgWaitingForComponents)
 	return Result{}, nil
 }
 
@@ -975,8 +1012,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 	r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionTrue,
 		"GatewayReady", "Envoy JWT gateway and API Route are ready")
 
-	if err := r.reconcileUI(ctx, cfg); err != nil {
-		return Result{}, err
+	if result, err := r.reconcileUI(ctx, cfg); err != nil || !result.IsZero() {
+		return result, err
 	}
 
 	if apimeta.IsStatusConditionFalse(cfg.Status.Conditions, costv1alpha1.ConditionUIReady) {
@@ -1028,9 +1065,9 @@ func (r *CostManagementServiceConfigReconciler) applyUICookieAndNginx(ctx contex
 
 // reconcileUI ensures cookie/nginx config, validates the user-provided OAuth
 // client Secret, and applies UI Deploy/Service/Route/ConsoleLink when ready.
-func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
+func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	if err := r.applyUICookieAndNginx(ctx, cfg); err != nil {
-		return err
+		return Result{}, err
 	}
 
 	// OAuth client Secret is user-provided (same-namespace SecretRef). Gate UI
@@ -1043,14 +1080,14 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 		r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
 			"OAuthClientSecretMissing",
 			fmt.Sprintf("Secret %q with keys client-id and client-secret is required for the UI", oauthSecretName))
-		return nil
+		return Result{}, nil
 	case err != nil:
-		return fmt.Errorf("get ui oauth client secret %s: %w", oauthSecretName, err)
+		return Result{}, fmt.Errorf("get ui oauth client secret %s: %w", oauthSecretName, err)
 	case resources.ValidateUIOAuthClientSecret(&oauthSecret) != nil:
 		r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
 			"OAuthClientSecretInvalid",
 			fmt.Sprintf("Secret %q must contain non-empty keys client-id and client-secret", oauthSecretName))
-		return nil
+		return Result{}, nil
 	}
 
 	for _, obj := range []client.Object{
@@ -1058,32 +1095,44 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 		resources.UIService(cfg),
 	} {
 		if err := r.apply(ctx, cfg, obj); err != nil {
-			return fmt.Errorf("ui %s: %w", obj.GetName(), err)
+			return Result{}, fmt.Errorf("ui %s: %w", obj.GetName(), err)
 		}
 	}
 
 	if uiRoute := resources.UIRoute(cfg); uiRoute != nil {
 		if err := r.apply(ctx, cfg, uiRoute); err != nil {
-			return fmt.Errorf("ui route: %w", err)
+			return Result{}, fmt.Errorf("ui route: %w", err)
 		}
 		live, err := r.getRoute(ctx, cfg.Namespace, uiRoute.GetName())
 		if err != nil {
-			return fmt.Errorf("get ui route %s: %w", uiRoute.GetName(), err)
+			return Result{}, fmt.Errorf("get ui route %s: %w", uiRoute.GetName(), err)
 		}
 		if !routeAdmitted(live) {
 			r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
 				"RouteNotAdmitted", "waiting for UI Route admission")
-			return nil
+			return Result{}, nil
 		}
 	}
 
-	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionTrue,
-		"OAuthClientSecretReady", "UI OAuth client Secret is present")
-
 	if err := r.applyClusterScoped(ctx, resources.ConsoleLink(cfg)); err != nil {
-		return fmt.Errorf("consolelink: %w", err)
+		return Result{}, fmt.Errorf("consolelink: %w", err)
 	}
-	return nil
+
+	// The OAuth Secret and Route do not prove the UI is serving: oauth2-proxy
+	// can crash-loop (e.g. it cannot verify the Keycloak TLS chain). Gate
+	// UIReady on the Deployment, using the same Available=False wait clock
+	// and DeploymentNotReady timeout as the other workloads.
+	waits := []deploymentWait{{resources.NameUI(cfg), reasonWaitingForUI, msgWaitingForUI, "UI"}}
+	result, err := r.waitForDeployments(ctx, cfg, waits)
+	if err != nil {
+		return Result{}, err
+	}
+	if !result.IsZero() {
+		r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse, reasonWaitingForUI, msgWaitingForUI)
+		return result, nil
+	}
+	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionTrue, reasonUIAvailable, msgUIAvailable)
+	return Result{}, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -1530,17 +1579,18 @@ type deploymentWait struct {
 	name, reason, message, component string
 }
 
-// holdingWorkerReadinessWait is true when a later phase already set
-// Available=False for a worker Deployment. Core must not overwrite that
-// wait clock. Keep this reason list in sync with waitForWorkerReadiness
-// (docs/review-follow-ups.md #12 if Ingress is routed through notReadyWait).
+// holdingWorkerReadinessWait is true when a later phase (ROS workers, UI)
+// already set Available=False for one of its Deployments. Core must not
+// overwrite that wait clock. Keep this reason list in sync with
+// waitForWorkerReadiness and reconcileUI (docs/review-follow-ups.md #12 if
+// Ingress/Envoy are routed through notReadyWait).
 func holdingWorkerReadinessWait(cfg *costv1alpha1.CostManagementServiceConfig) bool {
 	existing := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
 	if existing == nil || existing.Status != metav1.ConditionFalse {
 		return false
 	}
 	switch existing.Reason {
-	case reasonWaitingForROSAPI, reasonWaitingForROSProcessor, reasonWaitingForApplicationRollout:
+	case reasonWaitingForROSAPI, reasonWaitingForROSProcessor, reasonWaitingForApplicationRollout, reasonWaitingForUI:
 		return true
 	default:
 		return false
@@ -1561,8 +1611,29 @@ func (r *CostManagementServiceConfigReconciler) waitForDeployments(
 			return r.notReadyWait(cfg, w.reason, w.message, w.component), nil
 		}
 	}
-	r.clearDeploymentNotReady(cfg)
+	// A later phase's wait (ROS workers, UI) owns Available and the
+	// DeploymentNotReady it raised. Clearing it here would only have that
+	// phase set it again in the same pass, resetting Degraded's
+	// LastTransitionTime (and patching status) on every reconcile.
+	if !heldByOtherWait(cfg, waits) {
+		r.clearDeploymentNotReady(cfg)
+	}
 	return Result{}, nil
+}
+
+// heldByOtherWait reports whether Available is held by a later-phase wait
+// that is not one of waits.
+func heldByOtherWait(cfg *costv1alpha1.CostManagementServiceConfig, waits []deploymentWait) bool {
+	if !holdingWorkerReadinessWait(cfg) {
+		return false
+	}
+	reason := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable).Reason
+	for _, w := range waits {
+		if w.reason == reason {
+			return false
+		}
+	}
+	return true
 }
 
 // notReadyWait records Available=False for a named Deployment. After

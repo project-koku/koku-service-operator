@@ -237,6 +237,21 @@ func markDeploymentReady(t *testing.T, c client.Client, ns, name string) {
 	}
 }
 
+// markDeploymentNotReady simulates a crash-looping rollout: pods exist but
+// none are available.
+func markDeploymentNotReady(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	d := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, d); err != nil {
+		t.Fatalf("get deployment %s: %v", name, err)
+	}
+	d.Status.AvailableReplicas = 0
+	d.Status.ReadyReplicas = 0
+	if err := c.Status().Update(context.Background(), d); err != nil {
+		t.Fatalf("mark deployment %s not ready: %v", name, err)
+	}
+}
+
 // markStatefulSetReady sets status so isStatefulSetReady returns true: the
 // observed generation matches, replicas are ready, and current==update revision.
 // Requires a client built with WithStatusSubresource(&appsv1.StatefulSet{}).
