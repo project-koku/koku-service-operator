@@ -51,13 +51,11 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 
 	falseVal := false
 
+	// Sync requires Keycloak credentials (non-optional secret). API/worker use
+	// rbacRuntimeEnv with an optional secret so enrichment can no-op instead.
 	env := rbacEnv(cfg)
+	env = append(env, keycloakAdminEnv(cfg, false)...)
 	env = append(env,
-		EnvVal("KEYCLOAK_URL", KeycloakURL(cfg)),
-		EnvVal("KEYCLOAK_REALM", KeycloakRealm(cfg)),
-		EnvVal("KEYCLOAK_CLIENT_ID", spec.ClientID),
-		EnvFromSecret("KEYCLOAK_CLIENT_SECRET", spec.ClientSecretRef.Name, clientSecretKey(spec.ClientSecretRef.Key)),
-		EnvVal("KEYCLOAK_TLS_VERIFY", keycloakTLSVerifyStr(cfg)),
 		EnvVal("SYNC_ORG_GROUP_PREFIX", orgGroupPrefix),
 		EnvVal("SYNC_ORG_ADMIN_SUBGROUP", orgAdminSubgroup),
 		EnvVal("SYNC_PRUNE_ORPHANS", boolEnvStr(costv1alpha1.BoolVal(spec.PruneOrphans, true))),

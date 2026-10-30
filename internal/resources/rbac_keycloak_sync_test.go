@@ -163,6 +163,9 @@ func TestKeycloakSyncCronJobSecretRef(t *testing.T) {
 			if e.ValueFrom.SecretKeyRef.Key != "CLIENT_SECRET" {
 				t.Errorf("secret key = %q", e.ValueFrom.SecretKeyRef.Key)
 			}
+			if e.ValueFrom.SecretKeyRef.Optional != nil && *e.ValueFrom.SecretKeyRef.Optional {
+				t.Error("sync CronJob KEYCLOAK_CLIENT_SECRET must be required")
+			}
 			return
 		}
 	}
