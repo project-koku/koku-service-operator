@@ -50,8 +50,10 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 
 	falseVal := false
 
-	// rbacEnv already includes KEYCLOAK_* when keycloakSync.enabled (COST-8167).
+	// Sync requires Keycloak credentials (non-optional secret). API/worker use
+	// rbacRuntimeEnv with an optional secret so enrichment can no-op instead.
 	env := rbacEnv(cfg)
+	env = append(env, keycloakAdminEnv(cfg, false)...)
 	env = append(env,
 		EnvVal("SYNC_ORG_GROUP_PREFIX", orgGroupPrefix),
 		EnvVal("SYNC_ORG_ADMIN_SUBGROUP", orgAdminSubgroup),

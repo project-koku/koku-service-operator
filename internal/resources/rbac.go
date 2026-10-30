@@ -73,24 +73,38 @@ func rbacEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
 			env = append(env, EnvVal("REDIS_SSL_CA_CERTS", "/etc/redis-tls/ca.crt"))
 		}
 	}
-	// When Keycloak sync is enabled, also expose Admin API credentials on the
-	// RBAC API (and worker) pods so BYPASS_BOP_VERIFICATION principals can
-	// enrich is_org_admin / email / name from Keycloak (COST-8167).
+	return env
+}
+
+// rbacRuntimeEnv is rbacEnv plus optional Keycloak Admin API credentials when
+// keycloakSync.enabled. Used by the long-running API/worker pods so principals
+// enrichment (COST-8167) can run. KEYCLOAK_CLIENT_SECRET is optional: missing
+// credentials fall back to bypass defaults instead of blocking the Pod. The
+// sync CronJob uses keycloakAdminEnv with a required secret; migration Jobs
+// keep plain rbacEnv and must not reference Keycloak at all.
+func rbacRuntimeEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
+	env := rbacEnv(cfg)
 	if cfg.Spec.RBAC.KeycloakSync.Enabled {
-		env = append(env, keycloakAdminEnv(cfg)...)
+		env = append(env, keycloakAdminEnv(cfg, true)...)
 	}
 	return env
 }
 
-// keycloakAdminEnv returns KEYCLOAK_* vars shared by the sync CronJob and the
-// RBAC API Deployment when keycloakSync.enabled is true.
-func keycloakAdminEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
+// keycloakAdminEnv returns KEYCLOAK_* vars for the sync CronJob and RBAC
+// API/worker when keycloakSync.enabled is true. When secretOptional is true,
+// a missing Secret does not prevent the Pod from starting (enrichment no-ops).
+func keycloakAdminEnv(cfg *costv1alpha1.CostManagementServiceConfig, secretOptional bool) []corev1.EnvVar {
 	spec := cfg.Spec.RBAC.KeycloakSync
+	secretKey := clientSecretKey(spec.ClientSecretRef.Key)
+	secretEnv := EnvFromSecret("KEYCLOAK_CLIENT_SECRET", spec.ClientSecretRef.Name, secretKey)
+	if secretOptional {
+		secretEnv = EnvFromSecretOptional("KEYCLOAK_CLIENT_SECRET", spec.ClientSecretRef.Name, secretKey)
+	}
 	return []corev1.EnvVar{
 		EnvVal("KEYCLOAK_URL", KeycloakURL(cfg)),
 		EnvVal("KEYCLOAK_REALM", KeycloakRealm(cfg)),
 		EnvVal("KEYCLOAK_CLIENT_ID", spec.ClientID),
-		EnvFromSecret("KEYCLOAK_CLIENT_SECRET", spec.ClientSecretRef.Name, clientSecretKey(spec.ClientSecretRef.Key)),
+		secretEnv,
 		EnvVal("KEYCLOAK_TLS_VERIFY", keycloakTLSVerifyStr(cfg)),
 	}
 }
@@ -197,7 +211,7 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: rbacAPIPort, Protocol: corev1.ProtocolTCP},
 						},
-						Env: rbacEnv(cfg),
+						Env: rbacRuntimeEnv(cfg),
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
 							InitialDelaySeconds: 30, PeriodSeconds: 20, TimeoutSeconds: 5, FailureThreshold: 5,
@@ -278,7 +292,7 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 						WorkingDir:      "/opt/rbac/rbac",
 						Command:         []string{"celery"},
 						Args:            []string{"-A", "rbac.celery", "worker", "--pool=solo", "--loglevel=info"},
-						Env:             rbacEnv(cfg),
+						Env:             rbacRuntimeEnv(cfg),
 						Resources:       spec.Worker.Resources,
 						VolumeMounts:    mounts,
 						SecurityContext: rbacAppContainerSC(),

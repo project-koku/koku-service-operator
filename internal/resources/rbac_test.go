@@ -70,14 +70,17 @@ func TestRBACEnvRoleCreateAllowList(t *testing.T) {
 
 // TestRBACEnvKeycloakAdminWhenSyncEnabled verifies COST-8167: RBAC API pods
 // get KEYCLOAK_* so BYPASS_BOP_VERIFICATION can enrich is_org_admin/profile.
+// The client secret ref is optional so a missing Secret does not block the Pod.
 func TestRBACEnvKeycloakAdminWhenSyncEnabled(t *testing.T) {
 	cfg := keycloakSyncCfg()
 	envMap := map[string]string{}
 	var secretRef string
-	for _, e := range rbacEnv(cfg) {
+	var secretOptional *bool
+	for _, e := range rbacRuntimeEnv(cfg) {
 		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
 			if e.Name == "KEYCLOAK_CLIENT_SECRET" {
 				secretRef = e.ValueFrom.SecretKeyRef.Name
+				secretOptional = e.ValueFrom.SecretKeyRef.Optional
 			}
 			continue
 		}
@@ -98,11 +101,25 @@ func TestRBACEnvKeycloakAdminWhenSyncEnabled(t *testing.T) {
 	if secretRef != "kc-secret" {
 		t.Fatalf("KEYCLOAK_CLIENT_SECRET secret = %q, want kc-secret", secretRef)
 	}
+	if secretOptional == nil || !*secretOptional {
+		t.Fatal("API/worker KEYCLOAK_CLIENT_SECRET must be optional")
+	}
 
 	cfg.Spec.RBAC.KeycloakSync.Enabled = false
-	for _, e := range rbacEnv(cfg) {
+	for _, e := range rbacRuntimeEnv(cfg) {
 		if strings.HasPrefix(e.Name, "KEYCLOAK_") {
 			t.Fatalf("unexpected %s when keycloakSync.disabled", e.Name)
+		}
+	}
+}
+
+// TestRBACMigrationEnvOmitsKeycloak ensures migration Jobs never require the
+// Keycloak sync Secret (a missing secret must not block schema/seeds).
+func TestRBACMigrationEnvOmitsKeycloak(t *testing.T) {
+	cfg := keycloakSyncCfg()
+	for _, e := range rbacMigrationEnv(cfg) {
+		if strings.HasPrefix(e.Name, "KEYCLOAK_") {
+			t.Fatalf("migration env must not include %s", e.Name)
 		}
 	}
 }
