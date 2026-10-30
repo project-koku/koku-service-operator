@@ -12,7 +12,6 @@ import (
 
 const (
 	gatewayRouteTimeoutAnnotation = "haproxy.router.openshift.io/timeout"
-	gatewayRouteTimeoutDefault    = "180s"
 )
 
 var routeGVK = schema.GroupVersionKind{
@@ -68,10 +67,11 @@ func GatewayAPIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 	route.SetNamespace(cfg.Namespace)
 	route.SetLabels(Labels(cfg, envoyComponent))
 
-	// Default timeout matches Helm and the longest Envoy route (/api/ingress/).
-	// CR annotations overlay this map; omitting the timeout key keeps 180s.
+	// Default timeout comes from the sizing profile and matches the Envoy
+	// ingress route. CR annotations overlay this map; omitting the timeout
+	// key keeps the profile value.
 	annotations := map[string]string{
-		gatewayRouteTimeoutAnnotation: gatewayRouteTimeoutDefault,
+		gatewayRouteTimeoutAnnotation: ProfileKnobsFor(cfg).RouteTimeout,
 	}
 	maps.Copy(annotations, cfg.Spec.GatewayRoute.Annotations)
 	route.SetAnnotations(annotations)

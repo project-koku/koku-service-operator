@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/project-koku/koku-service-operator/internal/fips"
+
 	httpchecker "wait4x.dev/v3/checker/http"
 	tcpchecker "wait4x.dev/v3/checker/tcp"
 	"wait4x.dev/v3/waiter"
@@ -25,7 +27,14 @@ import (
 func main() {
 	timeout := flag.Duration("timeout", 10*time.Minute, "total wait deadline")
 	interval := flag.Duration("interval", 2*time.Second, "poll interval")
+	fipsStatus := flag.Bool("fips-status", false, "Print runtime FIPS mode and module version as JSON, then exit.")
 	flag.Parse()
+	if *fipsStatus {
+		if err := fips.WriteStatus(os.Stdout); err != nil {
+			log.Fatal("error writing FIPS status: ", err)
+		}
+		return
+	}
 
 	if err := run(flag.Args(), *timeout, *interval); err != nil {
 		log.Fatal(err)

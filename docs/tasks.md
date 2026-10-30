@@ -14,8 +14,8 @@ Last audited: 2026-08-19.
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | ✅ | CRD types ✅, CEL + admission webhooks ([#50](https://github.com/project-koku/koku-service-operator/pull/50)/[#51](https://github.com/project-koku/koku-service-operator/pull/51)/[#52](https://github.com/project-koku/koku-service-operator/pull/52)) ✅, `dataRetentionMonths` wired ([#59](https://github.com/project-koku/koku-service-operator/pull/59)) ✅. **G4 partial:** enum `standard`/`ha` + UI profile defaults ([#65](https://github.com/project-koku/koku-service-operator/pull/65)) ✅; shared sizing maps for remaining workloads → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). See [gap analysis](gap_analysis/COST-7678.md). |
-| [COST-7679](https://redhat.atlassian.net/browse/COST-7679) | Create sample CRs and generate manifests | 🔄 | Bundled CR ✅, BYOI CR ✅, BYOI kustomize fixture ✅, CRD installs on CRC ✅. Missing: HA profile sample, CEL validation verified. |
+| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | ✅ | CRD types ✅, CEL + admission webhooks ([#50](https://github.com/project-koku/koku-service-operator/pull/50)/[#51](https://github.com/project-koku/koku-service-operator/pull/51)/[#52](https://github.com/project-koku/koku-service-operator/pull/52)) ✅, `dataRetentionMonths` wired ([#59](https://github.com/project-koku/koku-service-operator/pull/59)) ✅. **G4 partial:** UI profile defaults ([#65](https://github.com/project-koku/koku-service-operator/pull/65)) ✅; enum replaced by sizing tiers `small|medium|large|xlarge` with shared maps for all Cost workloads → [COST-8095](https://redhat.atlassian.net/browse/COST-8095) ✅ Done (COST-8095, see [design](design/profile-sizing-maps.md)). See [gap analysis](gap_analysis/COST-7678.md). |
+| [COST-7679](https://redhat.atlassian.net/browse/COST-7679) | Create sample CRs and generate manifests | 🔄 | Bundled CR ✅, BYOI CR ✅, BYOI kustomize fixture ✅, CRD installs on CRC ✅. Production sample uses `profile: large`. Missing: CEL validation verified. |
 
 ## Reconciler Core
 
@@ -95,9 +95,9 @@ Short version: bundled infra is dev-only (intentional), profile-based sizing for
 
 | Ticket | Summary | Notes |
 |--------|---------|-------|
-| [COST-8095](https://redhat.atlassian.net/browse/COST-8095) | `spec.profile` sizing maps | Shared `standard`/`ha` maps for remaining Cost workloads. UI already wired. ROS/Kruize rows stay with COST-8054. See [jira snapshot](jira/COST-8095.md). |
+| [COST-8095](https://redhat.atlassian.net/browse/COST-8095) | `spec.profile` sizing maps | ✅ Done. Validated `small|medium|large|xlarge` sizing tiers for Cost workloads (resources, replicas, ingress limits, Envoy/HAProxy timeouts); explicit CR fields override; `status.profile` reports the tier whose sized workloads were applied for the current generation. ROS/Kruize rows stay with COST-8054. See [design](design/profile-sizing-maps.md). See [jira snapshot](jira/COST-8095.md). |
 | [COST-8103](https://redhat.atlassian.net/browse/COST-8103) | `CoreServicesAvailable` / mid-pipeline `Available` | Sparse success Events (`Ready`); stop treating Koku-API-up as product-available. See [jira snapshot](jira/COST-8103.md). |
-| [COST-8125](https://redhat.atlassian.net/browse/COST-8125) | GA install/config guide remainder | Certified versions, full-stack `profile: ha` docs, backup, complete NP/monitoring, OperatorHub, confirmed CMMO contract. Parent [COST-7700](jira/COST-7700.md). See [jira snapshot](jira/COST-8125.md). |
+| [COST-8125](https://redhat.atlassian.net/browse/COST-8125) | GA install/config guide remainder | Certified versions, full-stack sizing-profile docs, backup, complete NP/monitoring, OperatorHub, confirmed CMMO contract. Parent [COST-7700](jira/COST-7700.md). See [jira snapshot](jira/COST-8125.md). |
 
 ---
 

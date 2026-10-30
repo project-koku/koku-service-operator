@@ -122,6 +122,7 @@ test-scripts: ## Run no-cluster script tests (pre-prod demos, deploy-test-operat
 	./scripts/ci/e2e_test.sh
 	./scripts/pytest_markexpr_test.sh
 	./scripts/deploy-rhbk_test.sh
+	./scripts/perf-testing_test.sh
 
 .PHONY: check-rbac-seed
 check-rbac-seed: ## Verify embedded RBAC seed snapshots match project-kessel/rbac-config at the pinned ref.
@@ -218,6 +219,10 @@ run: manifests generate fmt vet ## Run a controller from your host (pins cache v
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: verify-fips
+verify-fips: ## Verify native FIPS activation and strict startup in an already-built IMG.
+	CONTAINER_TOOL=$(CONTAINER_TOOL) bash ./scripts/verify-fips.sh $(IMG)
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -401,7 +406,7 @@ bundle: manifests kustomize operator-sdk yq ## Generate bundle manifests and met
 	$(YQ) -i '.metadata.labels["operatorframework.io/os.linux"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
-	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.relatedImages = ([{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}] + (load("internal/release/images.json") | to_entries | map({"name": .key, "image": .value})))' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.

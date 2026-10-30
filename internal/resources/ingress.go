@@ -59,16 +59,21 @@ func ingressS3UseSSL(cfg *costv1alpha1.CostManagementServiceConfig) string {
 // binary trusts the X-Rh-Identity header injected by Envoy.
 func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.Ingress
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	selLabels := SelectorLabels(cfg, "ingress")
 	allLabels := Labels(cfg, "ingress")
 	replicas := int32(1)
 	falseVal := false
 
 	storageSecret := NameStorageSecret(cfg)
-	maxUpload := spec.MaxUploadSize
-	if maxUpload == 0 {
-		maxUpload = 104857600 // 100 MiB
+	knobs := ProfileKnobsFor(cfg)
+	maxUpload := knobs.MaxUploadSize
+	if spec.MaxUploadSize != nil {
+		maxUpload = *spec.MaxUploadSize
+	}
+	maxMem := knobs.MaxMemory
+	if spec.MaxMemory != nil {
+		maxMem = *spec.MaxMemory
 	}
 	validTypes := spec.ValidTypes
 	if validTypes == "" {
@@ -81,7 +86,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		EnvVal("INGRESS_METRICSPORT", int32String(ingressMetricsPort)),
 		EnvVal("INGRESS_DEBUG", "false"),
 		EnvVal("INGRESS_DEFAULTMAXSIZE", fmt.Sprintf("%d", maxUpload)),
-		EnvVal("INGRESS_MAXUPLOADMEM", "33554432"), // 32 MiB
+		EnvVal("INGRESS_MAXUPLOADMEM", fmt.Sprintf("%d", maxMem)),
 		EnvVal("INGRESS_VALID_UPLOAD_TYPES", validTypes),
 		// S3-compatible storage (insights-ingress-go uses MINIO env names)
 		EnvVal("INGRESS_MINIOENDPOINT", ingressS3Endpoint(cfg)),
@@ -120,7 +125,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	livenessProbe := ingressProbe("/healthz")
 	readinessProbe := ingressProbe("/status/")
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameIngress(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -145,7 +150,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 						Env:             env,
 						LivenessProbe:   livenessProbe,
 						ReadinessProbe:  readinessProbe,
-						Resources:       spec.Resources,
+						Resources:       ProfileResources(cfg, WorkloadIngress, spec.Resources),
 						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -154,6 +159,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // ingressProbe configures the timings used by the upstream ingress deployment.

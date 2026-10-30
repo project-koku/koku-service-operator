@@ -5,7 +5,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -144,32 +143,12 @@ location = /logout {
 	}
 }
 
-func uiProfileResources(profile costv1alpha1.Profile) corev1.ResourceRequirements {
-	switch profile {
-	case costv1alpha1.ProfileHA:
-		return corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
-		}
-	case costv1alpha1.ProfileStandard:
-		fallthrough
-	default: // unset
-		return corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
-		}
-	}
-}
-
 // UIDeployment builds the UI Deployment with the oauth2-proxy sidecar and nginx app.
 func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.UI
 	selLabels := SelectorLabels(cfg, "ui")
 	allLabels := Labels(cfg, "ui")
-	replicas := spec.ReplicaCount
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadUIOAuthProxy, spec.ReplicaCount)
 
 	issuerURL := KeycloakIssuerURL(cfg)
 	domain := clusterDomain(cfg)
@@ -180,14 +159,8 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 	proxyImage, _ := ImageRef(spec.OAuthProxy.Image)
 	appImage, _ := ImageRef(spec.App.Image)
 
-	proxyResources := spec.OAuthProxy.Resources
-	if len(proxyResources.Requests) == 0 && len(proxyResources.Limits) == 0 {
-		proxyResources = uiProfileResources(cfg.Spec.Profile)
-	}
-	appResources := spec.App.Resources
-	if len(appResources.Requests) == 0 && len(appResources.Limits) == 0 {
-		appResources = uiProfileResources(cfg.Spec.Profile)
-	}
+	proxyResources := ProfileResources(cfg, WorkloadUIOAuthProxy, spec.OAuthProxy.Resources)
+	appResources := ProfileResources(cfg, WorkloadUIApp, spec.App.Resources)
 
 	proxyArgs := []string{
 		fmt.Sprintf("--https-address=:%d", uiProxyPort),
@@ -255,7 +228,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 		InitialDelaySeconds: 30, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 	}
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameUI(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -321,6 +294,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // UIService exposes the UI oauth-proxy on HTTPS.

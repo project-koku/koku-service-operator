@@ -20,6 +20,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.profile
+      name: Profile
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -57,6 +60,11 @@ spec:
                     properties:
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -65,14 +73,42 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
+                      ingressPerTryTimeout:
+                        description: |-
+                          IngressPerTryTimeout overrides the Envoy per-try (retry) timeout for
+                          /api/ingress/. Go duration format; must be positive. Unset uses the sizing
+                          profile value.
+                        maxLength: 64
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a positive duration
+                          rule: duration(self) > duration('0s')
+                      ingressTimeout:
+                        description: |-
+                          IngressTimeout overrides the Envoy route timeout for /api/ingress/
+                          (uploads). Go duration format, e.g. "180s" or "10m"; must be positive.
+                          Unset uses the sizing profile value.
+
+                          The OpenShift Route (HAProxy) timeout is separate: it comes from the
+                          profile (180s small/medium, 600s large/xlarge). If ingressTimeout exceeds
+                          it, also raise spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"],
+                          otherwise HAProxy cuts the upload first.
+                        maxLength: 64
+                        pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a positive duration
+                          rule: duration(self) > duration('0s')
                       replicas:
-                        default: 2
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -223,6 +259,11 @@ spec:
                     type: string
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -231,10 +272,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   persistence:
                     properties:
@@ -343,6 +385,11 @@ spec:
                         type: object
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -351,14 +398,15 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -432,8 +480,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -504,8 +552,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -576,8 +624,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -722,8 +770,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -794,8 +842,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -866,8 +914,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -1088,8 +1136,8 @@ spec:
                                 format: int32
                                 type: integer
                               replicas:
-                                default: 1
                                 format: int32
+                                minimum: 0
                                 type: integer
                               resources:
                                 description: ResourceRequirements describes the compute
@@ -1173,8 +1221,8 @@ spec:
                           type: string
                         type: object
                       replicas:
-                        default: 2
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -1248,6 +1296,11 @@ spec:
                         type: object
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -1256,14 +1309,15 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -1363,6 +1417,11 @@ spec:
                     type: string
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1371,10 +1430,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   port:
                     default: 5432
@@ -1554,6 +1614,11 @@ spec:
                 properties:
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1562,15 +1627,24 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
-                  maxUploadSize:
-                    default: 104857600
-                    description: Maximum upload size in bytes.
+                  maxMemory:
+                    description: |-
+                      MaxMemory is the in-memory upload buffer in bytes (INGRESS_MAXUPLOADMEM).
+                      Unset uses the sizing profile value.
                     format: int64
+                    minimum: 1
+                    type: integer
+                  maxUploadSize:
+                    description: Maximum upload size in bytes. Unset uses the sizing
+                      profile value.
+                    format: int64
+                    minimum: 1
                     type: integer
                   resources:
                     description: ResourceRequirements describes the compute resource
@@ -1678,6 +1752,11 @@ spec:
                 properties:
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -1686,10 +1765,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   partitions:
                     properties:
@@ -1767,8 +1847,9 @@ spec:
                         type: object
                     type: object
                   replicas:
-                    default: 1
                     format: int32
+                    maximum: 1
+                    minimum: 0
                     type: integer
                   resources:
                     description: ResourceRequirements describes the compute resource
@@ -1927,21 +2008,23 @@ spec:
                     type: boolean
                 type: object
               profile:
-                default: standard
+                default: small
                 description: |-
-                  Profile selects a pre-defined resource sizing tier.
-                  Currently applies to UI containers only; other workloads use per-component spec.*.resources fields.
+                  Profile selects a validated workload sizing tier (small, medium, large, xlarge).
+                  Explicit per-component fields in the spec always override profile values.
                 enum:
-                - standard
-                - ha
+                - small
+                - medium
+                - large
+                - xlarge
                 type: string
               rbac:
                 properties:
                   api:
                     properties:
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2006,6 +2089,11 @@ spec:
                     type: object
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -2014,10 +2102,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   keycloakSync:
                     properties:
@@ -2114,8 +2203,8 @@ spec:
                   worker:
                     properties:
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2391,6 +2480,11 @@ spec:
                     type: object
                   image:
                     properties:
+                      digest:
+                        description: Digest pins immutable image content. When set,
+                          it takes precedence over Tag.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
                       pullPolicy:
                         default: IfNotPresent
                         description: PullPolicy describes a policy for if/when to
@@ -2399,10 +2493,11 @@ spec:
                       repository:
                         type: string
                       tag:
+                        description: Tag selects a legacy tag reference when Digest
+                          is empty.
                         type: string
                     required:
                     - repository
-                    - tag
                     type: object
                   processor:
                     properties:
@@ -2410,8 +2505,8 @@ spec:
                         default: INFO
                         type: string
                       replicas:
-                        default: 1
                         format: int32
+                        minimum: 0
                         type: integer
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2562,6 +2657,11 @@ spec:
                     properties:
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -2570,10 +2670,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2669,6 +2770,11 @@ spec:
                         type: string
                       image:
                         properties:
+                          digest:
+                            description: Digest pins immutable image content. When
+                              set, it takes precedence over Tag.
+                            pattern: ^sha256:[a-f0-9]{64}$
+                            type: string
                           pullPolicy:
                             default: IfNotPresent
                             description: PullPolicy describes a policy for if/when
@@ -2677,10 +2783,11 @@ spec:
                           repository:
                             type: string
                           tag:
+                            description: Tag selects a legacy tag reference when Digest
+                              is empty.
                             type: string
                         required:
                         - repository
-                        - tag
                         type: object
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2744,8 +2851,60 @@ spec:
                         type: object
                     type: object
                   replicaCount:
-                    default: 1
                     format: int32
+                    minimum: 0
+                    type: integer
+                type: object
+              upgrade:
+                description: |-
+                  UpgradePolicy controls application image ownership and explicit recovery.
+                  PostgreSQL engine upgrades and restores remain customer-owned.
+                properties:
+                  imagePolicy:
+                    default: Pinned
+                    description: |-
+                      Pinned requires explicit images. FollowOperator resolves omitted images
+                      from the operator's embedded release bundle; complete explicit pins win.
+                    enum:
+                    - Pinned
+                    - FollowOperator
+                    type: string
+                  recovery:
+                    description: Recovery is an explicit request after investigating/repairing
+                      database state.
+                    properties:
+                      action:
+                        description: |-
+                          Retry accepts the current requested target after database inspection.
+                          ResumePrevious confirms the database was restored/repaired to support
+                          the previous revision at its recorded connection references.
+                        enum:
+                        - Retry
+                        - ResumePrevious
+                        type: string
+                      operationID:
+                        description: OperationID must identify the currently failed
+                          operation.
+                        minLength: 1
+                        type: string
+                      requestID:
+                        description: RequestID is a unique, administrator-chosen idempotency
+                          key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - action
+                    - operationID
+                    - requestID
+                    type: object
+                  timeoutSeconds:
+                    default: 7200
+                    description: |-
+                      TimeoutSeconds bounds an upgrade, including graceful worker shutdown.
+                      Expiry never force-deletes migration Jobs or terminating application Pods.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
                     type: integer
                 type: object
             type: object
@@ -2866,8 +3025,266 @@ spec:
                 - Ready
                 - Degraded
                 type: string
+              profile:
+                description: |-
+                  Profile is the sizing tier whose workloads the operator applied for the
+                  current generation (spec.profile, or small when unset). It is set once the
+                  sized workloads are applied, not when every readiness gate passes.
+                enum:
+                - small
+                - medium
+                - large
+                - xlarge
+                type: string
+              upgrade:
+                description: Upgrade records the installed revision and restart-safe
+                  upgrade operation.
+                properties:
+                  installed:
+                    description: |-
+                      ApplicationRevision contains resolved images and configuration references.
+                      Secret objects are never read into this snapshot. It has the same access
+                      boundary as the CMSC spec, including user-supplied literal environment values.
+                    properties:
+                      discoveredConfig:
+                        description: |-
+                          DiscoveredConfig holds values auto-detected by the Discovery phase.
+                          These are populated before workloads are created and can be used
+                          to verify what the operator resolved.
+                        properties:
+                          clusterDomain:
+                            description: ClusterDomain detected from the OpenShift
+                              cluster configuration.
+                            type: string
+                          s3:
+                            description: S3 holds resolved object storage connection
+                              details.
+                            properties:
+                              bucket:
+                                description: Bucket is the object-store bucket name
+                                  (not a Secret).
+                                type: string
+                              endpoint:
+                                description: Endpoint in the form scheme://host:port.
+                                type: string
+                              region:
+                                description: Region used for S3 signature generation.
+                                type: string
+                              secretName:
+                                description: SecretName of the Secret containing access-key
+                                  and secret-key.
+                                type: string
+                            type: object
+                          storageClass:
+                            description: StorageClass detected as the cluster default.
+                            type: string
+                        type: object
+                      id:
+                        type: string
+                      images:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      migrations:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      releaseID:
+                        type: string
+                      releaseManaged:
+                        type: boolean
+                      spec:
+                        description: |-
+                          Spec is a frozen, resolved CMSC spec, allowing restart-safe execution and
+                          recovery without rewriting the user's requested spec or explicit pins.
+                        x-kubernetes-preserve-unknown-fields: true
+                    required:
+                    - id
+                    - images
+                    - migrations
+                    - releaseID
+                    - spec
+                    type: object
+                  operation:
+                    properties:
+                      failure:
+                        type: string
+                      id:
+                        type: string
+                      recoveryRequestID:
+                        type: string
+                      schemaMutationPossible:
+                        description: |-
+                          SchemaMutationPossible is persisted before starting a migration. Once
+                          true, automatic image restoration must not resume old application writers.
+                        type: boolean
+                      source:
+                        description: |-
+                          ApplicationRevision contains resolved images and configuration references.
+                          Secret objects are never read into this snapshot. It has the same access
+                          boundary as the CMSC spec, including user-supplied literal environment values.
+                        properties:
+                          discoveredConfig:
+                            description: |-
+                              DiscoveredConfig holds values auto-detected by the Discovery phase.
+                              These are populated before workloads are created and can be used
+                              to verify what the operator resolved.
+                            properties:
+                              clusterDomain:
+                                description: ClusterDomain detected from the OpenShift
+                                  cluster configuration.
+                                type: string
+                              s3:
+                                description: S3 holds resolved object storage connection
+                                  details.
+                                properties:
+                                  bucket:
+                                    description: Bucket is the object-store bucket
+                                      name (not a Secret).
+                                    type: string
+                                  endpoint:
+                                    description: Endpoint in the form scheme://host:port.
+                                    type: string
+                                  region:
+                                    description: Region used for S3 signature generation.
+                                    type: string
+                                  secretName:
+                                    description: SecretName of the Secret containing
+                                      access-key and secret-key.
+                                    type: string
+                                type: object
+                              storageClass:
+                                description: StorageClass detected as the cluster
+                                  default.
+                                type: string
+                            type: object
+                          id:
+                            type: string
+                          images:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          migrations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          releaseID:
+                            type: string
+                          releaseManaged:
+                            type: boolean
+                          spec:
+                            description: |-
+                              Spec is a frozen, resolved CMSC spec, allowing restart-safe execution and
+                              recovery without rewriting the user's requested spec or explicit pins.
+                            x-kubernetes-preserve-unknown-fields: true
+                        required:
+                        - id
+                        - images
+                        - migrations
+                        - releaseID
+                        - spec
+                        type: object
+                      stage:
+                        enum:
+                        - Quiescing
+                        - Migrating
+                        - RollingOut
+                        - RollingBack
+                        - RecoveryRequired
+                        - RolledBack
+                        - Recovering
+                        type: string
+                      stageStartedAt:
+                        format: date-time
+                        type: string
+                      startedAt:
+                        format: date-time
+                        type: string
+                      target:
+                        description: |-
+                          ApplicationRevision contains resolved images and configuration references.
+                          Secret objects are never read into this snapshot. It has the same access
+                          boundary as the CMSC spec, including user-supplied literal environment values.
+                        properties:
+                          discoveredConfig:
+                            description: |-
+                              DiscoveredConfig holds values auto-detected by the Discovery phase.
+                              These are populated before workloads are created and can be used
+                              to verify what the operator resolved.
+                            properties:
+                              clusterDomain:
+                                description: ClusterDomain detected from the OpenShift
+                                  cluster configuration.
+                                type: string
+                              s3:
+                                description: S3 holds resolved object storage connection
+                                  details.
+                                properties:
+                                  bucket:
+                                    description: Bucket is the object-store bucket
+                                      name (not a Secret).
+                                    type: string
+                                  endpoint:
+                                    description: Endpoint in the form scheme://host:port.
+                                    type: string
+                                  region:
+                                    description: Region used for S3 signature generation.
+                                    type: string
+                                  secretName:
+                                    description: SecretName of the Secret containing
+                                      access-key and secret-key.
+                                    type: string
+                                type: object
+                              storageClass:
+                                description: StorageClass detected as the cluster
+                                  default.
+                                type: string
+                            type: object
+                          id:
+                            type: string
+                          images:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          migrations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          releaseID:
+                            type: string
+                          releaseManaged:
+                            type: boolean
+                          spec:
+                            description: |-
+                              Spec is a frozen, resolved CMSC spec, allowing restart-safe execution and
+                              recovery without rewriting the user's requested spec or explicit pins.
+                            x-kubernetes-preserve-unknown-fields: true
+                        required:
+                        - id
+                        - images
+                        - migrations
+                        - releaseID
+                        - spec
+                        type: object
+                      targetGeneration:
+                        format: int64
+                        type: integer
+                    required:
+                    - id
+                    - stage
+                    - stageStartedAt
+                    - startedAt
+                    - target
+                    - targetGeneration
+                    type: object
+                type: object
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name must be at most 33 characters (27 when spec.ros.enabled
+            is true) so generated resource names stay within Kubernetes limits
+          rule: 'size(self.metadata.name) <= ((has(self.spec) && has(self.spec.ros)
+            && has(self.spec.ros.enabled) && self.spec.ros.enabled) ? 27 : 33)'
     served: true
     storage: true
     subresources:

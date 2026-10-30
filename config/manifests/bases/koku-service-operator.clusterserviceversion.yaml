@@ -22,8 +22,7 @@ metadata:
               "image": {
                 "repository": "registry.redhat.io/openshift-service-mesh/proxyv2-rhel9",
                 "tag": "2.6"
-              },
-              "replicas": 2
+              }
             },
             "keycloak": {
               "url": ""
@@ -43,37 +42,13 @@ metadata:
               "image": {
                 "repository": "quay.io/project-koku/koku",
                 "tag": "422f758"
-              },
-              "replicas": 1
-            },
-            "celery": {
-              "workers": {
-                "costModel": {
-                  "replicas": 1
-                },
-                "default": {
-                  "replicas": 1
-                },
-                "ocp": {
-                  "replicas": 2
-                },
-                "priority": {
-                  "replicas": 1
-                },
-                "summary": {
-                  "replicas": 2
-                }
               }
-            },
-            "listener": {
-              "replicas": 2
             },
             "masu": {
               "image": {
                 "repository": "quay.io/project-koku/koku",
                 "tag": "422f758"
-              },
-              "replicas": 1
+              }
             }
           },
           "database": {
@@ -100,8 +75,7 @@ metadata:
             "image": {
               "repository": "quay.io/redhat-services-prod/kruize-autotune-tenant/autotune",
               "tag": "d1f0140"
-            },
-            "replicas": 1
+            }
           },
           "monitoring": {
             "enabled": true
@@ -115,16 +89,11 @@ metadata:
             "secretName": "",
             "useSSL": true
           },
+          "profile": "small",
           "rbac": {
-            "api": {
-              "replicas": 1
-            },
             "image": {
               "repository": "quay.io/project-koku/insights-rbac",
-              "tag": "34e25ed"
-            },
-            "worker": {
-              "replicas": 1
+              "tag": "73870d8"
             }
           },
           "ros": {
@@ -132,9 +101,6 @@ metadata:
             "image": {
               "repository": "quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend",
               "tag": "ae8c990"
-            },
-            "processor": {
-              "replicas": 1
             }
           },
           "ui": {
@@ -149,8 +115,7 @@ metadata:
                 "repository": "registry.redhat.io/rhceph/oauth2-proxy-rhel9",
                 "tag": "v7.6.0"
               }
-            },
-            "replicaCount": 1
+            }
           }
         }
       }

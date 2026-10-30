@@ -1,14 +1,17 @@
-# Production / HA BYOI sample (COST-7679)
+# Production BYOI sample (COST-7679)
 #
 # Demonstrates a full external-infrastructure deployment with:
-#   - spec.profile: ha (raises UI CPU/memory when component resources are unset)
+#   - spec.profile: large, a validated sizing tier (small|medium|large|xlarge)
+#     that drives resources, replicas, upload limits and gateway timeouts for
+#     every operator-managed workload
 #   - monitoring.enabled: true
-#   - explicit resource overrides on core workloads
-#   - higher replica counts on gateway and listener
+#   - one explicit resources override (costManagement.listener.resources) to
+#     show precedence: it keeps large's listener memory and raises CPU for
+#     faster bulk ingestion. An explicit resources block replaces the profile
+#     values whole (no merge), so memory must be restated.
 #
-# Profile sizing maps for Koku, Celery, RBAC, etc. are tracked in COST-8095.
-# Until those land, this sample uses explicit spec.*.resources overrides for
-# production-shaped footprints. spec.profile still affects UI defaults.
+# Everything else (replicas, requests/limits) comes from the profile. Change
+# spec.profile to resize the whole stack; no per-component tuning is needed.
 #
 # Beta: ROS/Kruize are out of scope — ros.enabled stays false.
 #
@@ -36,7 +39,7 @@ metadata:
   name: cost-management-production
   namespace: cost-onprem
 spec:
-  profile: ha
+  profile: large
 
   global:
     clusterDomain: "apps.cluster.example.com"
@@ -98,60 +101,25 @@ spec:
       image:
         repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
         tag: "2.6"
-      replicas: 2
-      resources:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
 
   costManagement:
     api:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 2
-      resources:
-        requests:
-          cpu: 500m
-          memory: 1Gi
-        limits:
-          cpu: "2"
-          memory: 4Gi
     masu:
       image:
         repository: quay.io/project-koku/koku
         tag: "422f758"
-      replicas: 2
+    listener:
+      # Precedence example: explicit resources override the large profile.
       resources:
         requests:
           cpu: 500m
-          memory: 1Gi
-        limits:
-          cpu: "2"
-          memory: 4Gi
-    listener:
-      replicas: 2
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: "1"
           memory: 2Gi
-    celery:
-      # Worker CPU/memory defaults → COST-8095; replica counts shown here only.
-      workers:
-        default:
-          replicas: 2
-        priority:
-          replicas: 2
-        summary:
-          replicas: 2
-        ocp:
-          replicas: 2
+        limits:
+          cpu: 1000m
+          memory: 4Gi
 
   ros:
     enabled: false
@@ -160,62 +128,22 @@ spec:
     image:
       repository: quay.io/project-koku/insights-rbac
       tag: "34e25ed"
-    api:
-      replicas: 2
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
-    worker:
-      replicas: 2
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
 
   ingress:
     # Pin a release tag for production — master is mutable (dev-only).
     image:
       repository: quay.io/iop/ingress
       tag: "sha-6dde23d"
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
 
   ui:
-    replicaCount: 2
     app:
       image:
         repository: quay.io/insights-onprem/koku-ui-onprem
         tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"
-      resources:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
     oauthProxy:
       image:
         repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
         tag: "v7.6.0"
-      resources:
-        requests:
-          cpu: 50m
-          memory: 128Mi
-        limits:
-          cpu: 200m
-          memory: 256Mi
 
   monitoring:
     enabled: true

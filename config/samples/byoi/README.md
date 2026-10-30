@@ -1,5 +1,10 @@
 # BYOI test fixture
 
+> **Dev/CI only — no TLS, not for production.** The sample CRs use
+> `sslMode: disable`, Kafka `PLAINTEXT`, and `useSSL: false`. For production
+> crypto controls, see [docs/install/production.md](../../../docs/install/production.md)
+> and the `_production` sample.
+
 Dev-only manifests that stand up external infrastructure in one namespace and a
 separate `CostManagementServiceConfig` (BYOI mode) in another. The operator
 does **not** provision DB/cache; it only connects.
@@ -13,7 +18,7 @@ does **not** provision DB/cache; it only connects.
 The operator may share the CR NS (`cost-byoi` here). BYOI infra in
 `cost-byoi-infra` / `kafka` is connected via CR fields; the operator does not
 own those namespaces. See
-[docs/development/allnamespaces.md](../../docs/development/allnamespaces.md).
+[docs/development/allnamespaces.md](../../../docs/development/allnamespaces.md).
 
 **Kafka options**
 
@@ -183,7 +188,7 @@ kubectl -n cost-byoi logs deploy/koku-service-operator -f
 ```
 
 End-to-end pre-prod path (deps → operator → UI):
-[docs/development/pre-prod-install.md](../../docs/development/pre-prod-install.md).
+[docs/development/pre-prod-install.md](../../../docs/development/pre-prod-install.md).
 
 ## Monitoring (optional)
 

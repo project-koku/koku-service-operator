@@ -198,6 +198,11 @@ In-cluster OLM installs watch every namespace. See
 
 ## Apply a sample CR
 
+The default `small` profile now sets real resource requests (roughly 3.5 CPU and
+11 Gi of memory requested across the core operator-managed pods, about 6.5 CPU
+and 16 Gi with ROS and Kruize enabled, before the bundled DB/cache), so small CRC VMs may leave pods `Pending`; use the `crc_minimal`
+sample or give the VM more CPU/memory.
+
 | Goal | Sample |
 |------|--------|
 | Koku API + celery only (recommended on CRC) | `config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_crc_minimal.yaml` |

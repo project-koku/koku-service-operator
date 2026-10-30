@@ -64,9 +64,12 @@ See [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) for the full 
 ## Reconciler architecture
 
 The controller uses a phase-gated pipeline. The ordered list of `PhaseFn`
-calls lives in the `reconcile()` method in
-`internal/controller/costmanagementserviceconfig_controller.go` — look at the
-`runPhases([]PhaseFn{...})` call for the authoritative stage order.
+calls lives in the `phases()` method in
+`internal/controller/costmanagementserviceconfig_controller.go` — that is the
+authoritative stage order. `reconcile()` in
+`internal/controller/upgrade_lifecycle.go` decides whether to run it directly
+or through an upgrade operation (see
+[docs/design/application-upgrades.md](docs/design/application-upgrades.md)).
 
 Key conventions:
 

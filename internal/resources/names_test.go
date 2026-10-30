@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -134,7 +135,7 @@ func TestCeleryWorkerDeploymentKeepsCeleryQueue(t *testing.T) {
 	cfg.Spec.CostManagement.API.Image.Repository = "quay.io/example/koku"
 	cfg.Spec.CostManagement.API.Image.Tag = "latest"
 
-	d := CeleryWorkerDeployment(cfg, "cost_model", costv1alpha1.CeleryWorkerSpec{Replicas: 1})
+	d := CeleryWorkerDeployment(cfg, "cost_model", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](1)})
 	if d.Name != "cost-management-celery-worker-cost-model" {
 		t.Errorf("Deployment.Name = %q, want cost-management-celery-worker-cost-model", d.Name)
 	}

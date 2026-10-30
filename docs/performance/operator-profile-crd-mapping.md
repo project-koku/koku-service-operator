@@ -21,21 +21,24 @@ Key constraints from performance findings that affect operator design:
 
 - **`spec.kruize.replicas` must stay 1** — scaling Kruize degrades throughput (PERF-FINDING-004)
 - **Kruize CPU limit ≥ 2000m** — required for liveness under load
-- **`spec.ingress.maxUploadSize`** — needs raising for large/xlarge profiles (default 100 MB)
+- **`spec.ingress.maxUploadSize`** — needs raising for large/xlarge profiles (profile-supplied: 100 MB at `small`, no CRD default)
 - **HAProxy/Envoy timeout** — large/xlarge require ≥ 600s (PERF-FINDING-001)
 
 ---
 
 ## `spec.profile` in the current CRD
 
-The operator currently defines two profile values (`standard`, `ha`) that
-control UI replica counts and CPU defaults. These are **not** the same as the
-chart's four sizing tiers (small / medium / large / xlarge). The chart tiers
-drive Celery worker counts, ingress limits, and timeouts — fields the operator
-exposes individually in the spec.
+`spec.profile` is a validated sizing tier: `small` (default), `medium`,
+`large`, or `xlarge`, matching the chart's four tiers. It supplies defaults for
+resources, replicas, ingress upload limits, Envoy ingress timeouts, and the
+HAProxy route timeout. Any explicit CR field overrides the profile value, and
+`status.profile` reports the tier whose sized workloads were applied for the current generation. Replica fields and
+`spec.ingress.maxUploadSize` have no CRD defaults; the profile supplies them.
+Authoritative behaviour and tables:
+[profile-sizing-maps.md](../design/profile-sizing-maps.md).
 
-Until a richer `spec.profile` abstraction is added (see [Sizing abstraction](#sizing-abstraction)
-below), callers set component fields directly in the CR.
+The per-field mapping and per-tier YAML below remain as the reference for how
+the Helm overlays map to CR paths.
 
 ---
 
@@ -49,7 +52,7 @@ below), callers set component fields directly in the CR.
 | `costManagement.celery.workers.ocp.replicas` | `spec.costManagement.celery.workers.ocp.replicas` | |
 | `costManagement.celery.workers.summary.replicas` | `spec.costManagement.celery.workers.summary.replicas` | |
 | `ros.processor.replicas` | `spec.ros.processor.replicas` | |
-| *(always 1)* | `spec.kruize.replicas` | Hardcoded — see PERF-FINDING-004 |
+| *(always 1)* | `spec.kruize.replicas` | Optional `*int32`, capped at 1 by CRD validation (PERF-FINDING-004) |
 
 ### Resource requests / limits
 
@@ -68,150 +71,66 @@ below), callers set component fields directly in the CR.
 | Helm overlay path | CR path | Notes |
 |-------------------|---------|-------|
 | `ingress.upload.maxUploadSize` | `spec.ingress.maxUploadSize` | int64, bytes |
-| `ingress.upload.maxMemory` | *(field not yet in CRD)* | Add `spec.ingress.maxMemory`; cap at 128Mi until multipart upload lands (PERF-FINDING-024) |
+| `ingress.upload.maxMemory` | `spec.ingress.maxMemory` | Cap at 128Mi until multipart upload lands (PERF-FINDING-024) |
 
 ### Timeouts
 
 | Helm overlay path | CR path | Notes |
 |-------------------|---------|-------|
 | `gatewayRoute.annotations["haproxy.router.openshift.io/timeout"]` | `spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"]` | e.g. `"180s"` or `"600s"` |
-| `jwtAuth.envoy.ingressTimeout` | *(not yet in CRD)* | Envoy route timeout — add to `spec.auth.envoy` |
-| `jwtAuth.envoy.ingressPerTryTimeout` | *(not yet in CRD)* | Envoy per-try timeout — add to `spec.auth.envoy` |
+| `jwtAuth.envoy.ingressTimeout` | `spec.auth.envoy.ingressTimeout` | Envoy route timeout |
+| `jwtAuth.envoy.ingressPerTryTimeout` | `spec.auth.envoy.ingressPerTryTimeout` | Envoy per-try timeout |
 
-> The operator injects `haproxy.router.openshift.io/timeout=180s` by default
-> unless `spec.gatewayRoute.annotations` overrides it (see `GatewayRouteConfig`).
-> Large/xlarge profiles need `"600s"`.
+> The profile supplies the HAProxy route timeout (180s at small/medium, 600s at
+> large/xlarge). An explicit
+> `spec.gatewayRoute.annotations["haproxy.router.openshift.io/timeout"]`
+> overrides it.
 
 ---
 
-## Per-profile numbers (from validated Helm overlays)
+## Per-profile numbers
 
-These are the numeric values to set on the CR for each sizing tier.
-`baseline`/`small` match chart defaults and require no overrides.
+The operator applies the sizing tiers via `spec.profile`; the authoritative
+per-workload values are in
+[profile-sizing-maps.md §5](../design/profile-sizing-maps.md). They are not
+duplicated here.
 
-### `medium` profile
+To override one component, set the field explicitly. An explicit `resources`
+block replaces the profile's block **whole**, so restate both CPU and memory.
+Example override on top of `profile: large`: keep large's listener memory
+(2Gi/4Gi) and raise listener CPU from the profile's 150m/300m to 500m/1000m for
+faster bulk ingestion. Because the explicit block replaces the profile's block
+whole, memory must be restated:
 
 ```yaml
 spec:
+  profile: large
   costManagement:
     listener:
-      replicas: 2
       resources:
-        requests: { memory: 1Gi }
-        limits:   { memory: 2Gi }
-    celery:
-      workers:
-        ocp:
-          replicas: 2
-          resources:
-            requests: { cpu: 250m, memory: 512Mi }
-            limits:   { cpu: 1000m, memory: 2Gi }
-        summary:
-          replicas: 2
-          resources:
-            requests: { cpu: 250m }
-            limits:   { cpu: 1000m }
-  ros:
-    processor:
-      replicas: 2
-      resources:
-        requests: { memory: 2Gi }
-        limits:   { memory: 4Gi }
-  kruize:
-    replicas: 1
-    resources:
-      limits: { cpu: 2000m }
-  ingress:
-    maxUploadSize: 209715200   # 200 MB
-    resources:
-      requests: { memory: 1Gi }
-      limits:   { memory: 2Gi }
-  gatewayRoute:
-    annotations:
-      haproxy.router.openshift.io/timeout: "180s"
-```
-
-### `large` profile
-
-```yaml
-spec:
-  costManagement:
-    listener:
-      replicas: 3
-      resources:
-        requests: { memory: 2Gi }
-        limits:   { memory: 4Gi }
-    celery:
-      workers:
-        ocp:
-          replicas: 3
-          resources:
-            requests: { cpu: 500m, memory: 1Gi }
-            limits:   { cpu: 1000m, memory: 2Gi }
-        summary:
-          replicas: 3
-          resources:
-            requests: { cpu: 500m }
-            limits:   { cpu: 1000m }
-  ros:
-    processor:
-      replicas: 3
-      resources:
-        requests: { memory: 2Gi }
-        limits:   { memory: 4Gi }
-  kruize:
-    replicas: 1
-    resources:
-      limits: { cpu: 2000m }
-  ingress:
-    maxUploadSize: 524288000   # 500 MB
-    resources:
-      requests: { memory: 2Gi }
-      limits:   { memory: 4Gi }
-  gatewayRoute:
-    annotations:
-      haproxy.router.openshift.io/timeout: "600s"
-```
-
-### `xlarge` profile
-
-Same replica and resource config as `large`, with raised worker CPU for
-tag-based cost model processing:
-
-```yaml
-spec:
-  costManagement:
-    celery:
-      workers:
-        ocp:
-          replicas: 3
-          resources:
-            requests: { cpu: 1000m, memory: 2Gi }
-            limits:   { cpu: 2000m, memory: 4Gi }
-        summary:
-          replicas: 3
-          resources:
-            requests: { cpu: 1000m }
-            limits:   { cpu: 2000m }
-  # All other fields identical to large profile above
+        requests: { cpu: 500m, memory: 2Gi }
+        limits:   { cpu: 1000m, memory: 4Gi }
 ```
 
 ---
 
 ## Sizing abstraction
 
-The chart's `apply_perf_profile_config()` in `scripts/lib/perf-testing.sh`
-handles replica scaling at test time (Phase 2 — `oc scale`). Resource limits
-are the operator's responsibility via the CMSC spec.
+Implemented by COST-8095: `spec.profile` accepts `small | medium | large | xlarge`
+and the operator resolves the effective values in the workload builders at render time (see
+[profile-sizing-maps.md](../design/profile-sizing-maps.md)). Rules:
 
-Longer term, `spec.profile` could be extended with `small | medium | large | xlarge`
-values alongside the existing `standard | ha` tiers, using a mutating webhook
-to expand sparse CRs into the per-component field values above. Suggested rules:
+1. A profile supplies defaults for any **unset** nested field.
+2. Explicit component values in the CR always win: explicit scalar fields (for
+   example `replicas`) override individually, while an explicit `resources`
+   block replaces the profile's resources block whole (no per-key merge).
+3. If `spec.profile` is unset, `small` applies (COST-7599 baseline).
+4. The tier whose sized workloads were applied is reported in `status.profile`
+   (set once they are applied, not when every readiness gate passes).
 
-1. If `spec.profile` matches a sizing tier, apply its defaults to any **unset** nested fields.
-2. Explicit component values in the CR always win (sparse override).
-3. If `spec.profile` is unset, use `standard` / `small` defaults (COST-7599 baseline).
-4. Reflect the effective profile in `status.appliedProfile`.
+The perf harness (`scripts/lib/perf-testing.sh`) now patches `spec.profile`
+rather than using `oc scale`. Envoy's HTTP connection manager matches the chart
+(no `request_timeout`, `idle_timeout` 300s, `max_connection_duration` 600s).
 
 ### CEL validation rules worth encoding
 
@@ -225,13 +144,14 @@ to expand sparse CRs into the per-component field values above. Suggested rules:
 
 ---
 
-## CRD gaps to close for full large/xlarge support
+## CRD gaps
 
-1. **Envoy ingress timeout** (`spec.auth.envoy.ingressTimeout`) — Envoy reads
-   its timeout config at startup; operator must restart the gateway pod on change.
-2. **Envoy per-try timeout** (`spec.auth.envoy.ingressPerTryTimeout`).
-3. **Ingress max in-memory buffer** (`spec.ingress.maxMemory`) — cap at 128 Mi
-   until multipart upload lands (PERF-FINDING-024).
+The previously missing fields now exist: `spec.auth.envoy.ingressTimeout`,
+`spec.auth.envoy.ingressPerTryTimeout`, and `spec.ingress.maxMemory`. The
+remaining CEL-table suggestions above (Kruize CPU >= 2000m when overridden,
+upload-size caps, timeout floors) are deliberately not encoded: explicit
+overrides are the customer's call and the profile already sets those values
+correctly (see [design §4.5](../design/profile-sizing-maps.md)).
 
 ---
 
@@ -240,5 +160,5 @@ to expand sparse CRs into the per-component field values above. Suggested rules:
 - [sizing-guide.md](./sizing-guide.md) — validated numbers per profile
 - [CHART-FINDINGS.md](./CHART-FINDINGS.md) — performance issues and root causes
 - [TEST-MATRIX.md](./TEST-MATRIX.md) — complete test matrix
-- `scripts/lib/perf-testing.sh` — `apply_perf_profile_config()` (Phase 2 oc scale)
+- `scripts/lib/perf-testing.sh` — `apply_perf_profile_config()` (patches `spec.profile`)
 - `api/v1alpha1/costmanagementserviceconfig_types.go` — authoritative CRD source

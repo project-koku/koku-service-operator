@@ -206,13 +206,10 @@ func kruizeConfigVolumeAndMount(cfg *costv1alpha1.CostManagementServiceConfig) (
 // KruizeDeployment builds the Kruize optimization engine Deployment.
 func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.Kruize
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	selLabels := SelectorLabels(cfg, "ros-optimization")
 	allLabels := Labels(cfg, "ros-optimization")
-	replicas := spec.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := ProfileReplicas(cfg, WorkloadKruize, spec.Replicas)
 
 	cfgVol, cfgMount := kruizeConfigVolumeAndMount(cfg)
 	initEnv := kruizeEnv(cfg, true)
@@ -236,7 +233,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 		Args:            []string{"-c", "export DB_CONFIG_FILE=/tmp/cdappconfig.json && /home/autotune/app/target/bin/CreatePartition"},
 		Env:             initEnv,
 		VolumeMounts:    []corev1.VolumeMount{cfgMount},
-		Resources:       spec.Partitions.Resources,
+		Resources:       ProfileResources(cfg, WorkloadKruizePartitions, spec.Partitions.Resources),
 		SecurityContext: restrictedContainerSC(),
 	}
 
@@ -245,7 +242,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 		initContainers = append(initContainers, createPartitionsInit)
 	}
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameKruize(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -274,7 +271,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/listPerformanceProfiles", Port: intstr.FromInt32(kruizePort)}},
 							InitialDelaySeconds: 30, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 						},
-						Resources:       spec.Resources,
+						Resources:       ProfileResources(cfg, WorkloadKruize, spec.Resources),
 						VolumeMounts:    []corev1.VolumeMount{cfgMount},
 						SecurityContext: restrictedContainerSC(),
 					}},
@@ -283,6 +280,7 @@ func KruizeDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // KruizeService exposes Kruize internally.
@@ -300,7 +298,7 @@ func KruizeService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servic
 // KruizeDeletePartitionsCronJob builds the CronJob that purges old Kruize partitions.
 func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1.CronJob {
 	spec := cfg.Spec.Kruize
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	schedule := spec.Partitions.DeleteSchedule
 	if schedule == "" {
 		schedule = "0 0 * * *"
@@ -326,6 +324,8 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 			Labels:    Labels(cfg, "ros-optimization-maintenance"),
 		},
 		Spec: batchv1.CronJobSpec{
+			// Explicit so SSA resumes schedules suspended during upgrade quiescence.
+			Suspend:           new(false),
 			Schedule:          schedule,
 			ConcurrencyPolicy: CronJobConcurrencyForbid,
 			JobTemplate: batchv1.JobTemplateSpec{
@@ -343,7 +343,7 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 								Command:         []string{"sh"},
 								Args:            []string{"-c", "export DB_CONFIG_FILE=/tmp/cdappconfig.json && /home/autotune/app/target/bin/RetentionPartition"},
 								Env:             env,
-								Resources:       spec.Partitions.Resources,
+								Resources:       ProfileResources(cfg, WorkloadKruizePartitions, spec.Partitions.Resources),
 								VolumeMounts:    []corev1.VolumeMount{cfgMount},
 								SecurityContext: restrictedContainerSC(),
 							}},

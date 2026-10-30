@@ -158,3 +158,27 @@ func TestGatewayAPIRoute_PreExistingNonEdgeCoercedToEdge(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayAPIRouteProfileTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		profile costv1alpha1.Profile
+		annots  map[string]string
+		want    string
+	}{
+		{"small", costv1alpha1.ProfileSmall, nil, "180s"},
+		{"large", costv1alpha1.ProfileLarge, nil, "600s"},
+		{"explicit wins", costv1alpha1.ProfileLarge, map[string]string{gatewayRouteTimeoutAnnotation: "42s"}, "42s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg()
+			cfg.Spec.Global.ClusterDomain = "apps.cluster.local"
+			cfg.Spec.Profile = tc.profile
+			cfg.Spec.GatewayRoute.Annotations = tc.annots
+			route := GatewayAPIRoute(cfg)
+			if got := route.GetAnnotations()[gatewayRouteTimeoutAnnotation]; got != tc.want {
+				t.Errorf("timeout = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

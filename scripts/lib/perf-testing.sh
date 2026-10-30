@@ -28,21 +28,26 @@ _PERF_TESTING_SOURCED=1
 # the given PERF_PROFILE before tests run.  Called at the start of
 # run_performance_tests() unless --skip-profile-config is set (COST-7599).
 #
-# Operator path (COST-8147): resource limits and ingress timeouts are managed
-# via the CostManagementServiceConfig CR — not via helm upgrade.  Phase 1 is
-# intentionally a no-op stub.  To adjust resources for a profile, patch the
-# CMSC spec before invoking this script.
+# Operator path (COST-8095): sizing is owned by the operator.  The harness
+# patches CostManagementServiceConfig spec.profile (small|medium|large|xlarge;
+# "baseline" maps to "small") and the operator derives replicas, resources,
+# upload limits and timeouts from it.  Direct `oc scale` is NOT used: the
+# reconciler re-applies desired state (SSA, 5-minute drift requeue) and would
+# revert it.
 #
-# Phase 2 — oc scale
-#   Replica counts are set directly (idempotent, fast).
-#   Kruize is always kept at replicas=1 (scaling degrades throughput,
-#   see PERF-FINDING-004).
+# The same single merge patch sets spec.profile and nulls the explicit
+# per-component fields earlier harness versions wrote (listener, celery ocp /
+# summary workers, ros processor, kruize resources, ingress upload limits) so
+# stale explicit values cannot override the profile.  kruize replicas is left
+# alone (validation caps it at 1).
 #
-# Profile matrix (chart defaults = small since COST-7599):
-#   baseline/small : chart defaults (no-op — 2 replicas, 180s timeouts, etc.)
-#   medium         : replicas=2; raised CPU/memory, 200MB upload
-#   large          : replicas=3; raised resources, 500MB upload, 600s timeouts
-#   xlarge         : replicas=3; higher worker CPU (1000m/2000m) for tag processing
+# With DRY_RUN=true the exact oc command and expected replicas are printed
+# instead of executed.
+#
+# Expected replicas (listener/ocp/summary/ros-processor/kruize):
+#   small (baseline) : 2/2/2/1/1
+#   medium           : 2/2/2/2/1
+#   large, xlarge    : 3/3/3/3/1
 apply_perf_profile_config() {
     perf_sync_release_env
     local release
@@ -53,160 +58,90 @@ apply_perf_profile_config() {
         ros_workloads_required=true
     fi
 
-    # Baseline defaults match the chart's values.yaml (small profile).
-    # After COST-7599 these are the new chart defaults — the baseline/small
-    # case below is intentionally a no-op.
+    local profile="${PERF_PROFILE:-}"
     local ros_processor_replicas=1
     local listener_replicas=2
     local ocp_worker_replicas=2
     local summary_worker_replicas=2
+    local kruize_cpu_lim="2000m"
 
-    local kruize_cpu_req="1000m"  kruize_cpu_lim="2000m"
-    local ros_mem_req="1Gi"       ros_mem_lim="1Gi"
-    local listener_mem_req="300Mi" listener_mem_lim="600Mi"
-    local ocp_worker_cpu_req="250m"  ocp_worker_cpu_lim="500m"
-    local ocp_worker_mem_req="512Mi" ocp_worker_mem_lim="1Gi"
-    local summary_worker_cpu_req="250m" summary_worker_cpu_lim="500m"
-    local max_upload_size="104857600"   # 100MB chart default
-    local max_upload_mem="33554432"    # 32MB chart default (in-memory buffer before spilling to disk)
-    local app_mem_req="1Gi"  app_mem_lim="1Gi"   # resources.application (ingress pod + others)
-    local haproxy_timeout="180s"
-    local ingress_timeout="180s"   ingress_per_try_timeout="60s"
-
-    case "${PERF_PROFILE}" in
-        small)
-            # Small profile now matches chart defaults — no overrides needed.
+    case "${profile}" in
+        baseline|small|"")
+            profile="small"
             ;;
         medium)
             ros_processor_replicas=2
-            listener_replicas=2
-            ocp_worker_replicas=2
-            summary_worker_replicas=2
-            kruize_cpu_lim="2000m"
-            ros_mem_req="2Gi";          ros_mem_lim="4Gi"
-            listener_mem_req="1Gi";     listener_mem_lim="2Gi"
-            ocp_worker_cpu_req="250m";  ocp_worker_cpu_lim="1000m"
-            ocp_worker_mem_req="512Mi"; ocp_worker_mem_lim="2Gi"
-            summary_worker_cpu_req="250m"; summary_worker_cpu_lim="1000m"
-            max_upload_size="209715200"   # 200MB
-            max_upload_mem="67108864"     # 64MB — reduce disk spill for medium payloads
-            app_mem_req="1Gi";          app_mem_lim="2Gi"   # PERF-FINDING-022: ingress OOM on large uploads
-            haproxy_timeout="180s"
-            ingress_timeout="180s";       ingress_per_try_timeout="180s"
             ;;
-        large)
+        large|xlarge)
             ros_processor_replicas=3
             listener_replicas=3
             ocp_worker_replicas=3
             summary_worker_replicas=3
-            kruize_cpu_lim="2000m"
-            ros_mem_req="2Gi";          ros_mem_lim="4Gi"
-            listener_mem_req="2Gi";     listener_mem_lim="4Gi"
-            ocp_worker_cpu_req="500m";  ocp_worker_cpu_lim="1000m"
-            ocp_worker_mem_req="1Gi";   ocp_worker_mem_lim="2Gi"
-            summary_worker_cpu_req="500m"; summary_worker_cpu_lim="1000m"
-            max_upload_size="524288000"   # 500MB
-            max_upload_mem="134217728"    # 128MB — matches prior validated runs; larger values destabilize the pipeline
-            app_mem_req="2Gi";          app_mem_lim="4Gi"   # PERF-FINDING-022: ingress OOM on large uploads
-            haproxy_timeout="600s"
-            ingress_timeout="600s";       ingress_per_try_timeout="300s"
             ;;
-        xlarge)
-            # 3.3x data volume vs large (23 clusters, 346 nodes, 6954 cores)
-            # Same replica/resource config as large — cluster headroom is the constraint.
-            # Worker CPU raised to 1000m/2000m to handle tag-based cost model processing.
-            ros_processor_replicas=3
-            listener_replicas=3
-            ocp_worker_replicas=3
-            summary_worker_replicas=3
-            kruize_cpu_req="1000m";     kruize_cpu_lim="2000m"
-            ros_mem_req="2Gi";          ros_mem_lim="4Gi"
-            listener_mem_req="2Gi";     listener_mem_lim="4Gi"
-            ocp_worker_cpu_req="1000m"; ocp_worker_cpu_lim="2000m"
-            ocp_worker_mem_req="2Gi";   ocp_worker_mem_lim="4Gi"
-            summary_worker_cpu_req="1000m"; summary_worker_cpu_lim="2000m"
-            max_upload_size="524288000"   # 500MB
-            max_upload_mem="134217728"    # 128MB
-            app_mem_req="2Gi";          app_mem_lim="4Gi"
-            haproxy_timeout="600s"
-            ingress_timeout="600s";       ingress_per_try_timeout="300s"
-            ;;
-        baseline|*)
+        *)
+            log_error "Unknown PERF_PROFILE '${profile}' (valid: baseline|small|medium|large|xlarge)"
+            return 1
             ;;
     esac
 
-    log_step "Applying per-profile cluster config for profile: ${PERF_PROFILE}"
-    log_info "  replicas (processor/listener/ocp/summary) = ${ros_processor_replicas}/${listener_replicas}/${ocp_worker_replicas}/${summary_worker_replicas}"
-    log_info "  kruize replicas                           = 1 (always)"
-    log_info "  kruize cpu req/lim                        = ${kruize_cpu_req}/${kruize_cpu_lim}"
-    log_info "  ros-processor memory req/lim              = ${ros_mem_req}/${ros_mem_lim}"
-    log_info "  listener memory req/lim                   = ${listener_mem_req}/${listener_mem_lim}"
-    log_info "  ocp worker cpu req/lim                    = ${ocp_worker_cpu_req}/${ocp_worker_cpu_lim}"
-    log_info "  ocp worker memory req/lim                = ${ocp_worker_mem_req}/${ocp_worker_mem_lim}"
-    log_info "  summary worker cpu req/lim               = ${summary_worker_cpu_req}/${summary_worker_cpu_lim}"
-    log_info "  ingress max upload size                   = ${max_upload_size}"
-    log_info "  ingress max upload memory                 = ${max_upload_mem}"
-    log_info "  application memory req/lim (ingress pod)  = ${app_mem_req}/${app_mem_lim}"
-    log_info "  haproxy/envoy ingress timeout             = ${haproxy_timeout}"
+    local patch
+    patch="{\"spec\":{\"profile\":\"${profile}\""
+    patch+=',"costManagement":{"listener":{"replicas":null,"resources":null}'
+    patch+=',"celery":{"workers":{"ocp":{"replicas":null,"resources":null},"summary":{"replicas":null,"resources":null}}}}'
+    patch+=',"ros":{"processor":{"replicas":null,"resources":null}}'
+    patch+=',"kruize":{"resources":null}'
+    patch+=',"ingress":{"maxUploadSize":null,"maxMemory":null}}}'
 
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        log_info "DRY RUN: Would scale: processor=${ros_processor_replicas} listener=${listener_replicas} ocp=${ocp_worker_replicas} summary=${summary_worker_replicas} kruize=1"
-        log_info "DRY RUN: Resource limits (cpu/memory) and ingress timeouts are managed via the CMSC CR — patch spec before running."
+    log_step "Applying per-profile cluster config for profile: ${PERF_PROFILE:-} (spec.profile=${profile})"
+    log_info "  expected replicas: listener=${listener_replicas} ocp=${ocp_worker_replicas} summary=${summary_worker_replicas} ros-processor=${ros_processor_replicas} kruize=1"
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        log_info "DRY RUN: oc patch cmsc ${release} -n ${namespace} --type merge -p '${patch}'"
+        log_info "DRY RUN: would wait up to 600s for CMSC status.observedGeneration == metadata.generation and status.profile == ${profile}"
+        log_info "DRY RUN: would verify replicas: listener=${listener_replicas} ocp=${ocp_worker_replicas} summary=${summary_worker_replicas} ros-processor=${ros_processor_replicas} kruize=1"
         return 0
     fi
 
-    # Phase 1 — STUB (operator path)
-    # Resource limits, ingress upload sizes, and timeouts are driven by the
-    # CostManagementServiceConfig CR, not by helm upgrade.  Patch the CMSC spec
-    # before invoking this function if profile-specific resource overrides are
-    # needed.  The suggested per-profile values are logged above for reference.
-    log_info "Phase 1 skipped: resource/timeout configuration is owned by the CMSC CR (operator path)."
-    log_info "  To apply profile overrides, patch spec.CostManagement.* in the CMSC before running tests."
-
-    # Phase 2: oc scale — replica counts (idempotent)
-    local scale_failed=false
-    _scale_deploy() {
-        local name="$1" replicas="$2" required="${3:-true}"
-
-        if ! perf_deployment_exists "${name}"; then
-            if [[ "${required}" == "true" ]]; then
-                log_error "  deployment ${name} not found — cannot scale to ${replicas}"
-                if [[ "${name}" == *"-ros-processor" || "${name}" == *"-kruize" ]]; then
-                    log_error "  ROS workloads require spec.ros.enabled=true on CMSC ${namespace}/${release}"
-                fi
-                scale_failed=true
-            else
-                log_verbose "  skipping ${name} (not deployed)"
-            fi
-            return
-        fi
-
-        if perf_kubectl scale deployment "${name}" --replicas="${replicas}" -n "${namespace}" 2>/dev/null; then
-            log_info "  scaled ${name} → ${replicas}"
-        else
-            log_error "  could not scale ${name}"
-            scale_failed=true
-        fi
-    }
-
-    _scale_deploy "${release}-koku-listener"          "${listener_replicas}"          true
-    _scale_deploy "${release}-celery-worker-ocp"      "${ocp_worker_replicas}"        true
-    _scale_deploy "${release}-celery-worker-summary"  "${summary_worker_replicas}"    true
-    _scale_deploy "${release}-ros-processor"          "${ros_processor_replicas}"     "${ros_workloads_required}"
-    _scale_deploy "${release}-kruize"                 "1"                             "${ros_workloads_required}"
-
-    if [[ "${scale_failed}" == "true" ]]; then
-        log_error "One or more deployments could not be scaled — verify cluster state before running tests"
+    if ! perf_kubectl patch cmsc "${release}" -n "${namespace}" --type merge -p "${patch}"; then
+        log_error "Could not patch CMSC ${namespace}/${release} spec.profile=${profile}"
         return 1
     fi
+    log_info "Patched CMSC ${namespace}/${release}: spec.profile=${profile}"
 
-    log_info "Waiting for replica rollouts..."
+    # Wait for the operator to reconcile the new profile before looking at
+    # Deployments; otherwise rollout/verify can read the pre-patch state.
+    log_info "Waiting for operator to observe profile ${profile} (up to 600s)..."
+    local waited=0 gen observed status_profile
+    while true; do
+        gen="$(perf_kubectl get cmsc "${release}" -n "${namespace}" -o jsonpath='{.metadata.generation}' 2>/dev/null || true)"
+        observed="$(perf_kubectl get cmsc "${release}" -n "${namespace}" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || true)"
+        status_profile="$(perf_kubectl get cmsc "${release}" -n "${namespace}" -o jsonpath='{.status.profile}' 2>/dev/null || true)"
+        # status.profile is written once the sized workloads were applied for
+        # the current generation, even if readiness-only gates (UI OAuth Secret,
+        # Progressing) are unmet, so do not wait on Progressing (design 3.4).
+        # Rollout readiness is checked by the waits below.
+        if [[ -n "${gen}" && "${gen}" == "${observed}" && "${status_profile}" == "${profile}" ]]; then
+            log_info "  operator observed generation ${gen}, status.profile=${status_profile}"
+            break
+        fi
+        if (( waited >= 600 )); then
+            log_error "Timed out waiting for CMSC ${namespace}/${release} to report profile ${profile} (generation=${gen:-?} observedGeneration=${observed:-?} status.profile=${status_profile:-?})"
+            return 1
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+
+    log_info "Waiting for operator to roll out profile (replica rollouts)..."
     local rollout_ok=true
     _wait_rollout() {
         local deploy="$1" required="${2:-true}"
         if ! perf_deployment_exists "${deploy}"; then
             if [[ "${required}" == "true" ]]; then
                 log_error "  rollout skipped — ${deploy} not found"
+                if [[ "${deploy}" == *"-ros-processor" || "${deploy}" == *"-kruize" ]]; then
+                    log_error "  ROS workloads require spec.ros.enabled=true on CMSC ${namespace}/${release}"
+                fi
                 rollout_ok=false
             fi
             return
@@ -254,7 +189,7 @@ apply_perf_profile_config() {
     _verify_replicas "${release}-kruize"                 "1"                             "${ros_workloads_required}"
 
     if [[ "${verified}" == "true" ]]; then
-        log_success "All replica counts verified for ${PERF_PROFILE} profile"
+        log_success "All replica counts verified for ${profile} profile"
     else
         log_warning "Some replica counts did not match — tests may not reflect expected scaling"
     fi

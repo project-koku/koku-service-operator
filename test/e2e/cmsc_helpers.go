@@ -529,3 +529,9 @@ func collectOperatorLogs() (string, error) {
 		"-n", cmscNamespace, "--tail=200",
 	)
 }
+
+// desiredAPIReplicas returns the effective koku-api replica count: the explicit
+// spec value when set (including 0), otherwise the profile default.
+func desiredAPIReplicas(cfg *costv1alpha1.CostManagementServiceConfig) int32 {
+	return resources.ProfileReplicas(cfg, resources.WorkloadKokuAPI, cfg.Spec.CostManagement.API.Replicas)
+}

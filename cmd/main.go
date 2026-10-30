@@ -22,6 +22,8 @@ import (
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/controller"
+	"github.com/project-koku/koku-service-operator/internal/fips"
+	"github.com/project-koku/koku-service-operator/internal/release"
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
@@ -112,9 +114,11 @@ func main() {
 		leaderElectionID string
 		developmentMode  bool
 		operatorImage    string
+		fipsStatus       bool
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address for the metrics endpoint.")
+	flag.BoolVar(&fipsStatus, "fips-status", false, "Print runtime FIPS mode and module version as JSON, then exit.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Address for health probes.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for controller manager.")
 	flag.StringVar(&leaderElectionID, "leader-election-id", "costmanagementserviceconfigs.service.costmanagement.openshift.io", "Leader election resource ID.")
@@ -129,6 +133,13 @@ func main() {
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	if fipsStatus {
+		if err := fips.WriteStatus(os.Stdout); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "error writing FIPS status:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	// DevelopmentMode must be set after Parse — flag defaults are false until then.
 	opts.Development = developmentMode
 
@@ -144,6 +155,11 @@ func main() {
 	resources.OperatorImage = operatorImage
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	releaseImages, err := release.Current()
+	if err != nil {
+		setupLog.Error(err, "invalid embedded application release bundle")
+		os.Exit(1)
+	}
 
 	ns, err := resolveWatchNamespace()
 	if err != nil {
@@ -179,10 +195,11 @@ func main() {
 	}
 
 	if err = (&controller.CostManagementServiceConfigReconciler{
-		Client:    mgr.GetClient(),
-		APIReader: mgr.GetAPIReader(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("koku-service-operator"),
+		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorderFor("koku-service-operator"),
+		ReleaseImages: map[string]string(releaseImages),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CostManagementServiceConfig")
 		os.Exit(1)

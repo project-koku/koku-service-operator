@@ -3,9 +3,11 @@ package v1alpha1
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 )
 
@@ -272,5 +274,124 @@ func TestSampleCRs_CommunityPublicImages(t *testing.T) {
 	}
 	if !BoolVal(cfg.Spec.Cache.Deploy, true) {
 		t.Error("community sample cache.deploy: want true (bundled/dev path)")
+	}
+}
+
+func TestProductionSampleUsesLargeProfile(t *testing.T) {
+	t.Parallel()
+	cfg := loadSampleCR(t, sampleProduction)
+	if cfg.Spec.Profile != ProfileLarge {
+		t.Errorf("profile = %q, want %q", cfg.Spec.Profile, ProfileLarge)
+	}
+	// One explicit resources override remains as the precedence example.
+	res := cfg.Spec.CostManagement.Listener.Resources
+	if len(res.Requests) == 0 && len(res.Limits) == 0 {
+		t.Error("listener resources override missing; sample should demonstrate precedence over the profile")
+	}
+	// The override replaces the profile whole, so it must not downgrade memory.
+	if got, min := res.Requests.Memory(), resource.MustParse("2Gi"); got.Cmp(min) < 0 {
+		t.Errorf("listener memory request = %s, want >= %s", got, &min)
+	}
+	if got, min := res.Limits.Memory(), resource.MustParse("4Gi"); got.Cmp(min) < 0 {
+		t.Errorf("listener memory limit = %s, want >= %s", got, &min)
+	}
+	// Overrides that merely duplicate the profile were dropped.
+	api := cfg.Spec.CostManagement.API
+	if api.Replicas != nil || len(api.Resources.Requests) != 0 || len(api.Resources.Limits) != 0 {
+		t.Error("koku api replicas/resources should come from the large profile, not the sample")
+	}
+	if cfg.Spec.Monitoring.Enabled == nil || !*cfg.Spec.Monitoring.Enabled {
+		t.Error("monitoring.enabled should stay true in the production sample")
+	}
+}
+
+// findReplicaPins returns the dotted paths of every replica-count key
+// ("replicas", or spec.ui's "replicaCount") in a decoded YAML tree.
+func findReplicaPins(node any, path string) []string {
+	var out []string
+	switch v := node.(type) {
+	case map[string]any:
+		for k, child := range v {
+			p := path + "." + k
+			if k == "replicas" || k == "replicaCount" {
+				out = append(out, p)
+			}
+			out = append(out, findReplicaPins(child, p)...)
+		}
+	case []any:
+		for _, child := range v {
+			out = append(out, findReplicaPins(child, path)...)
+		}
+	}
+	return out
+}
+
+// The default sample is alm-examples[0] in the OLM bundle, so it must let the
+// profile drive sizing rather than pinning replicas.
+func TestSampleCRs_ProfileDrivesReplicas(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		sampleDefault,
+		sampleCommunity,
+		"service.costmanagement_v1alpha1_costmanagementserviceconfig_byoi.yaml",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg := loadSampleCR(t, name)
+			if cfg.Spec.Profile != ProfileSmall {
+				t.Errorf("profile = %q, want %q", cfg.Spec.Profile, ProfileSmall)
+			}
+			data, err := os.ReadFile(samplePath(name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tree map[string]any
+			if err := yaml.Unmarshal(data, &tree); err != nil {
+				t.Fatal(err)
+			}
+			if pins := findReplicaPins(tree, ""); len(pins) != 0 {
+				t.Errorf("replica pins defeat spec.profile: %v", pins)
+			}
+		})
+	}
+}
+
+// The hand-maintained CSV initialization-resource annotation is what OLM
+// offers as the default CR in the console; it must stay equal to the default
+// sample (profile-driven, no replica pins).
+func TestCSVInitializationResourceMatchesDefaultSample(t *testing.T) {
+	t.Parallel()
+	csvData, err := os.ReadFile(filepath.Join("..", "..", "config", "manifests", "bases", "koku-service-operator.clusterserviceversion.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var csv struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if err := yaml.Unmarshal(csvData, &csv); err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := csv.Metadata.Annotations["operatorframework.io/initialization-resource"]
+	if !ok {
+		t.Fatal("CSV base lacks operatorframework.io/initialization-resource")
+	}
+	var got, want map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("parse annotation: %v", err)
+	}
+	sample, err := os.ReadFile(samplePath(sampleDefault))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(sample, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("initialization-resource differs from default sample\n got: %v\nwant: %v", got, want)
+	}
+	if pins := findReplicaPins(got, ""); len(pins) != 0 {
+		t.Errorf("annotation pins replicas: %v", pins)
 	}
 }

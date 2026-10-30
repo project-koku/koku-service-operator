@@ -276,7 +276,7 @@ spec:
 
   # --- Ingress ---
   ingress:
-    maxUploadSize: 104857600              # 100MB
+    maxUploadSize: 104857600              # 100MB (historical: no longer a CRD default; supplied by spec.profile, see profile-sizing-maps.md)
     resources:
       requests: { cpu: 100m, memory: 128Mi }
       limits: { cpu: 500m, memory: 256Mi }

@@ -68,6 +68,52 @@ func TestIsDeploymentReady(t *testing.T) {
 			want: false,
 		},
 		{
+			// Seen on cluster: the new UI pod crash-looped while the old pod
+			// kept serving. updated=1 and available=1 each meet spec, but the
+			// available pod is the old one.
+			name: "new pod crash-looping while old pod serves",
+			deploy: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 3},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(1))},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 3,
+					Replicas:           2,
+					UpdatedReplicas:    1,
+					ReadyReplicas:      1,
+					AvailableReplicas:  1,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "surge pods updated but old pods remain",
+			deploy: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 2},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 2,
+					Replicas:           3,
+					UpdatedReplicas:    2,
+					AvailableReplicas:  2,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "rollout complete",
+			deploy: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Generation: 2},
+				Spec:       appsv1.DeploymentSpec{Replicas: new(int32(2))},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 2,
+					Replicas:           2,
+					UpdatedReplicas:    2,
+					AvailableReplicas:  2,
+				},
+			},
+			want: true,
+		},
+		{
 			name: "zero replicas is ready",
 			deploy: &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns"},

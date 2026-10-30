@@ -5,23 +5,31 @@ Cost Management instance this operator deployed — not at `console.redhat.com`.
 
 CMMO is a **separate** product. This operator does not install or manage it.
 
-**Lab-derived.** The `api_url` + `ingress_path` combination below comes from
-the in-repo lab script (`scripts/setup-cost-mgmt-tls.sh`). Treat it as the
-path we use in testing, not a certified CMMO support contract. Confirm with
-CMMO owners before a GA install.
-
 **Beta.** Disable Resource Optimization collection on CMMO. Do not enable
 `spec.ros.enabled` on the Cost Management CR.
+
+### Upload URL status
+
+| Item | Status |
+|------|--------|
+| `api_url` must be **HTTPS** against this instance's gateway Route | **Required** for production (in transit). Never use `http://`. |
+| `upload.validate_cert: true` | **Required** for production; trust the gateway (and token URL) certs |
+| `api_url` + `ingress_path` values below | **Lab-validated** against this operator's Envoy gateway (`scripts/setup-cost-mgmt-tls.sh`). Working path for beta/lab. |
+| Certified CMMO support contract for GA | **Open** — confirm with CMMO owners before a GA install |
+
+Until that confirmation lands, treat the path as the supported **operator-side**
+upload target, not a CMMO product commitment.
 
 ## What CMMO talks to
 
 Uploads go through the **Envoy gateway Route**, which only matches path `/api`
-and forwards `/api/ingress/` to insights-ingress-go.
+and forwards `/api/ingress/` to insights-ingress-go. Edge TLS on that Route is
+documented under [production.md](production.md#tls).
 
 | Piece | Value |
 |-------|--------|
 | Gateway host | `{cr-name}-gateway-{namespace}.{apps-domain}` |
-| `spec.api_url` | `https://<gateway-host>` — **no path**, not `console.redhat.com` |
+| `spec.api_url` | `https://<gateway-host>` — **HTTPS, no path**, not `console.redhat.com` |
 | `spec.upload.ingress_path` | `/api/ingress/v1/upload` |
 | Resulting upload URL | `https://<gateway-host>/api/ingress/v1/upload` |
 | Auth | Keycloak `client_credentials` (CMMO `authentication.type: service-account`) |

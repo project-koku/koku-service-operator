@@ -45,10 +45,8 @@ var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func(
 			Skip("koku-api Deployment not found in namespace")
 		}
 
-		desired := getCMSC().Spec.CostManagement.API.Replicas
-		if desired == 0 {
-			desired = 1
-		}
+		cmsc := getCMSC()
+		desired := desiredAPIReplicas(cmsc)
 		driftReplicas := desired + 2
 
 		By("setting pause annotation on CMSC")
@@ -72,10 +70,8 @@ var _ = Describe("CMSC pause and resume", Ordered, Label("cmsc", "pause"), func(
 	// OP-E2E-002 — resume clears pause and drift corrects.
 	It("OP-E2E-002: resume restores desired state", func() {
 		depName := kokuAPIDeploymentName()
-		desired := getCMSC().Spec.CostManagement.API.Replicas
-		if desired == 0 {
-			desired = 1
-		}
+		cmsc := getCMSC()
+		desired := desiredAPIReplicas(cmsc)
 
 		By("removing pause annotation")
 		setCMSCPaused(false)

@@ -261,6 +261,20 @@ overwrites them on later reconciles.
 Rotate them yourself if needed; there is no operator annotation to roll them
 yet.
 
+## CR name length
+
+The operator derives child resource names from the CR `metadata.name`. The CRD
+rejects names longer than **33 characters** (**27** when `spec.ros.enabled` is
+true) because the longest generated CronJob names would exceed the Kubernetes
+52-character limit.
+
+Route hosts default to `{cr-name}-gateway-{namespace}.{apps-domain}` and
+`{cr-name}-ui-{namespace}.{apps-domain}`. The first DNS label of each must stay
+within 63 characters, which depends on the namespace and is not checked at
+admission. With a long namespace, use a shorter CR name or namespace; the
+gateway host can also be set with `spec.gatewayRoute.host` (the UI host has no
+override).
+
 ## Versions tested in the lab fixture (not a support matrix)
 
 These are what the in-repo BYOI fixture and Kafka script use. They are **not**

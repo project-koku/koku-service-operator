@@ -239,3 +239,42 @@ func TestIngressDeploymentStorageCredentialEnv(t *testing.T) {
 		}
 	}
 }
+
+func ingressEnvMap(t *testing.T, cfg *costv1alpha1.CostManagementServiceConfig) map[string]string {
+	t.Helper()
+	m := map[string]string{}
+	for _, e := range IngressDeployment(cfg).Spec.Template.Spec.Containers[0].Env {
+		m[e.Name] = e.Value
+	}
+	return m
+}
+
+func TestIngressEnv_ProfileUploadLimits(t *testing.T) {
+	for _, tc := range []struct {
+		profile costv1alpha1.Profile
+		size    string
+		mem     string
+	}{
+		{costv1alpha1.ProfileSmall, "104857600", "33554432"},
+		{costv1alpha1.ProfileLarge, "524288000", "134217728"},
+	} {
+		cfg := ingressCfg()
+		cfg.Spec.Profile = tc.profile
+		env := ingressEnvMap(t, cfg)
+		if env["INGRESS_DEFAULTMAXSIZE"] != tc.size || env["INGRESS_MAXUPLOADMEM"] != tc.mem {
+			t.Errorf("%s: got %s/%s, want %s/%s", tc.profile,
+				env["INGRESS_DEFAULTMAXSIZE"], env["INGRESS_MAXUPLOADMEM"], tc.size, tc.mem)
+		}
+	}
+}
+
+func TestIngressEnv_ExplicitUploadLimitsWin(t *testing.T) {
+	cfg := ingressCfg()
+	cfg.Spec.Profile = costv1alpha1.ProfileLarge
+	cfg.Spec.Ingress.MaxUploadSize = new(int64(1000))
+	cfg.Spec.Ingress.MaxMemory = new(int64(2000))
+	env := ingressEnvMap(t, cfg)
+	if env["INGRESS_DEFAULTMAXSIZE"] != "1000" || env["INGRESS_MAXUPLOADMEM"] != "2000" {
+		t.Errorf("got %s/%s, want 1000/2000", env["INGRESS_DEFAULTMAXSIZE"], env["INGRESS_MAXUPLOADMEM"])
+	}
+}
