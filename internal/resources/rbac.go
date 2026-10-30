@@ -73,7 +73,26 @@ func rbacEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
 			env = append(env, EnvVal("REDIS_SSL_CA_CERTS", "/etc/redis-tls/ca.crt"))
 		}
 	}
+	// When Keycloak sync is enabled, also expose Admin API credentials on the
+	// RBAC API (and worker) pods so BYPASS_BOP_VERIFICATION principals can
+	// enrich is_org_admin / email / name from Keycloak (COST-8167).
+	if cfg.Spec.RBAC.KeycloakSync.Enabled {
+		env = append(env, keycloakAdminEnv(cfg)...)
+	}
 	return env
+}
+
+// keycloakAdminEnv returns KEYCLOAK_* vars shared by the sync CronJob and the
+// RBAC API Deployment when keycloakSync.enabled is true.
+func keycloakAdminEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVar {
+	spec := cfg.Spec.RBAC.KeycloakSync
+	return []corev1.EnvVar{
+		EnvVal("KEYCLOAK_URL", KeycloakURL(cfg)),
+		EnvVal("KEYCLOAK_REALM", KeycloakRealm(cfg)),
+		EnvVal("KEYCLOAK_CLIENT_ID", spec.ClientID),
+		EnvFromSecret("KEYCLOAK_CLIENT_SECRET", spec.ClientSecretRef.Name, clientSecretKey(spec.ClientSecretRef.Key)),
+		EnvVal("KEYCLOAK_TLS_VERIFY", keycloakTLSVerifyStr(cfg)),
+	}
 }
 
 // rbacVolumesAndMounts returns shared volumes for RBAC pods (/tmp + optional Valkey TLS).

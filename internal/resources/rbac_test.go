@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,6 +65,45 @@ func TestRBACEnvRoleCreateAllowList(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("ROLE_CREATE_ALLOW_LIST not set on RBAC env (would evaluate to [\"\"] in insights-rbac)")
+	}
+}
+
+// TestRBACEnvKeycloakAdminWhenSyncEnabled verifies COST-8167: RBAC API pods
+// get KEYCLOAK_* so BYPASS_BOP_VERIFICATION can enrich is_org_admin/profile.
+func TestRBACEnvKeycloakAdminWhenSyncEnabled(t *testing.T) {
+	cfg := keycloakSyncCfg()
+	envMap := map[string]string{}
+	var secretRef string
+	for _, e := range rbacEnv(cfg) {
+		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
+			if e.Name == "KEYCLOAK_CLIENT_SECRET" {
+				secretRef = e.ValueFrom.SecretKeyRef.Name
+			}
+			continue
+		}
+		envMap[e.Name] = e.Value
+	}
+	if envMap["KEYCLOAK_URL"] != "http://keycloak.keycloak.svc:8080" {
+		t.Fatalf("KEYCLOAK_URL = %q", envMap["KEYCLOAK_URL"])
+	}
+	if envMap["KEYCLOAK_REALM"] != "kubernetes" {
+		t.Fatalf("KEYCLOAK_REALM = %q", envMap["KEYCLOAK_REALM"])
+	}
+	if envMap["KEYCLOAK_CLIENT_ID"] != "rbac-sync-client" {
+		t.Fatalf("KEYCLOAK_CLIENT_ID = %q", envMap["KEYCLOAK_CLIENT_ID"])
+	}
+	if envMap["KEYCLOAK_TLS_VERIFY"] != "true" {
+		t.Fatalf("KEYCLOAK_TLS_VERIFY = %q", envMap["KEYCLOAK_TLS_VERIFY"])
+	}
+	if secretRef != "kc-secret" {
+		t.Fatalf("KEYCLOAK_CLIENT_SECRET secret = %q, want kc-secret", secretRef)
+	}
+
+	cfg.Spec.RBAC.KeycloakSync.Enabled = false
+	for _, e := range rbacEnv(cfg) {
+		if strings.HasPrefix(e.Name, "KEYCLOAK_") {
+			t.Fatalf("unexpected %s when keycloakSync.disabled", e.Name)
+		}
 	}
 }
 
