@@ -49,7 +49,7 @@ flowchart LR
   subgraph thisRepo [This repo]
     Dockerfile
     Bundle[bundle.Dockerfile]
-    E2Esh["hack/ci/e2e.sh"]
+    E2Esh["scripts/ci/e2e.sh"]
     Pytest["scripts/run-pytest.sh"]
     IQE["scripts/run-iqe-tests.sh"]
   end
@@ -82,7 +82,7 @@ flowchart LR
 2. ci-operator builds pipeline images (operator, bundle, catalog, e2e runner).
 3. For e2e jobs it **claims** a pre-installed OCP 4.20 cluster from the `openshift-ci` AWS pool ([cluster pools](https://docs.ci.openshift.org/docs/architecture/ci-operator/#testing-with-a-cluster-from-a-cluster-pool)).
 4. The [`generic-claim`](https://github.com/openshift/release/blob/master/ci-operator/step-registry/generic-claim/generic-claim-workflow.yaml) workflow grants RBAC onto the claimed cluster (`ipi-install-rbac`), then runs this repo’s test steps, then **gathers** must-gather / extra / audit logs on the way out.
-5. The CI **pod is not on the claimed cluster**. `oc`/`kubectl` talk to it over the kube API. Keycloak admin calls use `oc port-forward` (`KEYCLOAK_ADMIN_VIA=port-forward` in [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh)).
+5. The CI **pod is not on the claimed cluster**. `oc`/`kubectl` talk to it over the kube API. Keycloak admin calls use `oc port-forward` (`KEYCLOAK_ADMIN_VIA=port-forward` in [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh)).
 
 ## What this repo supplies
 
@@ -92,15 +92,15 @@ Prow YAML lives only in `openshift/release`. This checkout has **no** `openshift
 |------------|-----------------|
 | [`Dockerfile`](../../Dockerfile) | Operator image (`manager` + `wait-for`; CSV substitution) |
 | [`bundle.Dockerfile`](../../bundle.Dockerfile) + committed [`bundle/`](../../bundle/) | Bundle image (`e2e-olm`, catalog input) |
-| [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) | `stack` step (`SKIP_PYTEST=1`) |
-| [`hack/deploy-byoi.sh`](../../hack/deploy-byoi.sh) + [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) | Kafka / Postgres / Valkey / MinIO / RHBK. Prow does **not** clone `cost-onprem-chart`; RHBK is this repo’s script |
+| [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) | `stack` step (`SKIP_PYTEST=1`) |
+| [`scripts/deploy-byoi.sh`](../../scripts/deploy-byoi.sh) + [`scripts/deploy-rhbk.sh`](../../scripts/deploy-rhbk.sh) | Kafka / Postgres / Valkey / MinIO / RHBK. Prow does **not** clone `cost-onprem-chart`; RHBK is this repo’s script |
 | [`config/samples/byoi/`](../../config/samples/byoi/) | Infra + CMSC sample (rewritten for `cost-onprem`) |
 | [`scripts/run-pytest.sh`](../../scripts/run-pytest.sh), [`scripts/run-iqe-tests.sh`](../../scripts/run-iqe-tests.sh) | smoke / pytest / iqe steps |
 | Root [`OWNERS`](../../OWNERS) | Mirrored into `openshift/release` |
 
 Repo-specific gotchas (details in [openshift-ci-jobs.md](openshift-ci-jobs.md)):
 
-- **Namespace rewrite.** Sample / [`hack/deploy-byoi.sh`](../../hack/deploy-byoi.sh) defaults are namespace `cost-byoi` and CR `cost-management`. Prow and [`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) use `cost-onprem`. The stack step rewrites the sample YAML and copies `byoi-*-credentials` → `{CR_NAME}-{db,cache,storage}-credentials` because pytest expects the CR-prefixed names.
+- **Namespace rewrite.** Sample / [`scripts/deploy-byoi.sh`](../../scripts/deploy-byoi.sh) defaults are namespace `cost-byoi` and CR `cost-management`. Prow and [`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) use `cost-onprem`. The stack step rewrites the sample YAML and copies `byoi-*-credentials` → `{CR_NAME}-{db,cache,storage}-credentials` because pytest expects the CR-prefixed names.
 - **No sibling chart on Prow.** `ensure_chart_root` in `e2e.sh` is optional; BYOI falls back to in-repo `scripts/deploy-rhbk.sh`.
 - **Catalog and e2e images are not files here.** The catalog Dockerfile is inline in `openshift/release`; the e2e runner is `FROM src` plus Python deps defined there. Local / GitHub Actions catalog publish uses `make catalog-build`, a different path.
 
@@ -147,7 +147,7 @@ The catalog Dockerfile pins CSV `koku-service-operator.v0.0.1` on channel `beta`
 | Check | GitHub Actions | Prow |
 |-------|----------------|------|
 | `go build` / lint / `make test` | Yes | `build` only (no golangci-lint) |
-| `make test-hack` (issuer injection, RHBK port-forward, other no-cluster hack tests) | Yes (`hack-scripts`) | No |
+| `make test-scripts` (issuer injection, RHBK port-forward, other no-cluster script tests) | Yes (`scripts`) | No |
 | Kind cluster `make test-e2e` | Yes (`e2e` job) | No |
 | OLM on real OCP | No | `e2e-olm`, `e2e-pytest`, `e2e-iqe` |
 | BYOI + CMSC Ready + pytest | No (use Cluster Bot) | `e2e-pytest` |
@@ -168,6 +168,6 @@ OWNERS files under `openshift/release` for this repo are generated from this rep
    [`ci-operator/config/project-koku/koku-service-operator/project-koku-koku-service-operator-main.yaml`](https://github.com/openshift/release/blob/master/ci-operator/config/project-koku/koku-service-operator/project-koku-koku-service-operator-main.yaml).
 2. Never hand-edit `ci-operator/jobs/...`. Run `make update` in `openshift/release`.
 3. Reusable steps live under [`ci-operator/step-registry/project-koku/`](https://github.com/openshift/release/tree/master/ci-operator/step-registry/project-koku).
-4. Scripts that the jobs **call** (`hack/ci/e2e.sh`, `scripts/run-pytest.sh`, `scripts/run-iqe-tests.sh`) live **here**. A Prow job change often needs a matching script change in this repo (or vice versa).
+4. Scripts that the jobs **call** (`scripts/ci/e2e.sh`, `scripts/run-pytest.sh`, `scripts/run-iqe-tests.sh`) live **here**. A Prow job change often needs a matching script change in this repo (or vice versa).
 
 OpenShift CI reference: [docs.ci.openshift.org](https://docs.ci.openshift.org/), [ci-operator spec](https://steps.ci.openshift.org/ci-operator-reference).

@@ -36,6 +36,21 @@ def test_execute_db_query_retries_empty_exec_then_succeeds():
     assert calls["n"] == 4
 
 
+def test_execute_db_query_zero_rows_returns_empty_list_without_retry():
+    """Polling SELECTs with no matches must not retry or warn (rc=0, empty stdout)."""
+    with patch.object(utils, "exec_in_pod_raw", return_value=_proc(0, stdout="")) as exec_raw, patch.object(
+        utils.time, "sleep"
+    ) as sleep:
+        rows = utils.execute_db_query(
+            "ns", "postgres-0", "koku", "koku_user",
+            "SELECT p.uuid FROM api_provider p WHERE 1=0",
+        )
+
+    assert rows == []
+    exec_raw.assert_called_once()
+    sleep.assert_not_called()
+
+
 def test_execute_db_query_does_not_retry_sql_error():
     def sql_error(*_args, **_kwargs):
         return _proc(1, stderr='ERROR:  relation "missing" does not exist')

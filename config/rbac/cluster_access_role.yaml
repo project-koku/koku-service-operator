@@ -2,7 +2,7 @@
 # single cross-namespace read). Bound via ClusterRoleBinding.
 #
 # Namespace-scoped manage rights (Secrets, Jobs, Deployments, …) are NOT here —
-# they come from manager-role bound with a namespaced RoleBinding.
+# they come from manager-role bound with a ClusterRoleBinding (AllNamespaces).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

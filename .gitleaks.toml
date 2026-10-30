@@ -8,10 +8,11 @@ title = "koku-service-operator"
 useDefault = true
 
 [allowlist]
-description = "Dev-only BYOI fixtures (fixed lab credentials — not for production)"
+description = "Dev-only BYOI fixtures (fixed lab credentials — not for production) and release artifacts"
 paths = [
   '''(^|/)config/samples/byoi/''',
   '''(^|/)docs/jira/''',
+  '''(^|/)releases/''',
 ]
 
 # Explicit fixture credential strings (also referenced outside byoi YAML).

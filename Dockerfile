@@ -23,9 +23,8 @@ COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o wait-for ./cmd/wait-for/
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# Use Red Hat UBI Micro as the minimal supported runtime image.
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1789345812
 
 WORKDIR /
 COPY --from=builder /workspace/manager /manager

@@ -113,7 +113,7 @@ If you change redaction rules, extend `STREAM_CASES` and `_run_wrapper_selftest`
 
 ## This repo’s own redaction (stack script)
 
-[`hack/ci/e2e.sh`](../../hack/ci/e2e.sh) has a **second**, narrower `redact_filter` for dumps it writes itself (operator logs, CMSC JSON with `managedFields` stripped, events). That is defense in depth for local/Cluster Bot runs where `koso-sanitize` is not installed. `make test-hack` on GitHub Actions covers issuer injection and RHBK port-forward helpers; it does **not** run `koso-sanitize` (that lives only in `openshift/release`).
+[`scripts/ci/e2e.sh`](../../scripts/ci/e2e.sh) has a **second**, narrower `redact_filter` for dumps it writes itself (operator logs, CMSC JSON with `managedFields` stripped, events). That is defense in depth for local/Cluster Bot runs where `koso-sanitize` is not installed. `make test-scripts` on GitHub Actions covers issuer injection and RHBK port-forward helpers; it does **not** run `koso-sanitize` (that lives only in `openshift/release`).
 
 On Prow, `e2e.sh` stdout still goes through `_sanitize`, and install-step dumps go through `_run_sanitized`. Do not log Secret or ConfigMap **payloads** in either layer — table output of names is fine; `-o yaml` of secrets is not.
 

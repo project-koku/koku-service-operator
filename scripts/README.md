@@ -9,11 +9,32 @@ Automation scripts for deploying, configuring, and testing the Cost Management O
 | `deploy-test-cost-onprem.sh` | **Full deployment + test orchestration** | OpenShift |
 | `run-pytest.sh` | Run pytest test suite | All environments |
 | `deploy-kafka.sh` | Deploy Kafka infrastructure | All environments |
-| `install-helm-chart.sh` | Deploy CoP Helm chart | All environments |
+| `install-cmsc.sh` | Deploy the Cost Management Service configuration | OpenShift |
 | `deploy-rhbk.sh` | Deploy Red Hat Build of Keycloak | OpenShift |
 | `setup-cost-mgmt-tls.sh` | Configure TLS certificates | OpenShift |
 | `query-kruize.sh` | Query Kruize database | All environments |
 | `flush-rbac-cache.sh` | Flush insights-rbac + Koku RBAC caches after permission changes | OpenShift |
+| `deploy-byoi.sh` | Deploy BYOI infrastructure, Keycloak, and application Secrets | OpenShift |
+| `deploy-dev.sh` | Install CRDs and development RBAC for a local or lab namespace | OpenShift |
+| `deploy-incluster.sh` | Deploy the operator in-cluster with webhook TLS | OpenShift |
+| `deploy-test-operator.sh` | Orchestrate operator, infrastructure, CMSC, and optional pytest tests | OpenShift |
+| `clusterbot-smoke.sh` | Provision the Cluster Bot Redpanda smoke path | OpenShift |
+| `demo-preprod.sh` | Run the full pre-production BYOI/operator/UI demo | OpenShift / CRC |
+| `demo-preprod-olm.sh` | Prepare and observe the published OLM pre-production demo | OpenShift |
+| `deploy-crc.sh` | Compatibility alias for `deploy-dev.sh` | CRC |
+| `push-image-crc.sh` | Push an operator image to the CRC registry | CRC |
+| `ci/e2e.sh` | Run the Prow BYOI and CMSC end-to-end path | OpenShift CI |
+
+The no-cluster checks for these workflows run together with:
+
+```bash
+make test-scripts
+```
+
+This covers the pre-production demos, operator orchestration, issuer injection,
+pytest marker handling, and RHBK helper tests. Shared implementation files live
+under `lib/`; environment examples and CI-specific helpers are kept beside the
+scripts they support.
 
 ## 🚀 Quick Start
 
@@ -26,7 +47,7 @@ Automation scripts for deploying, configuring, and testing the Cost Management O
 ./deploy-kafka.sh
 
 # 3. Deploy Cost Management
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # 4. Validate the deployment (E2E test)
 NAMESPACE=cost-onprem ./run-pytest.sh
@@ -43,7 +64,7 @@ NAMESPACE=cost-onprem ./run-pytest.sh
 
 # 3. Deploy CoP with JWT authentication
 export JWT_AUTH_ENABLED=true
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # 4. Configure TLS certificates
 ./setup-cost-mgmt-tls.sh
@@ -54,7 +75,7 @@ NAMESPACE=cost-onprem ./run-pytest.sh --auth
 
 ## 📖 Script Documentation
 
-### `install-helm-chart.sh`
+### `install-cmsc.sh`
 Deploy or upgrade the CoP Helm chart with automatic configuration.
 
 **Key features:**
@@ -74,21 +95,21 @@ kubectl label namespace cost-onprem cost_management_optimizations-
 **Usage:**
 ```bash
 # Basic installation
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # Use local chart for development
 export USE_LOCAL_CHART=true
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # Custom namespace
 export NAMESPACE=cost-onprem
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # Check deployment status
-./install-helm-chart.sh status
+./install-cmsc.sh status
 
 # Cleanup
-./install-helm-chart.sh cleanup
+./install-cmsc.sh cleanup
 ```
 
 **Environment variables:**
@@ -218,7 +239,7 @@ release/ci-operator/step-registry/insights-onprem/cost-onprem-chart/e2e/
 
 **Operator path (Cluster Bot / COST-8121):** use this script for infra only
 (`--deploy-s4 --skip-helm --skip-chart-tests --skip-tls`), then deploy the operator with
-`hack/deploy-incluster.sh` and apply the CMSC — see
+`scripts/deploy-incluster.sh` and apply the CMSC — see
 [docs/development/clusterbot-operator-pytest.md](../docs/development/clusterbot-operator-pytest.md).
 
 **Common workflows:**
@@ -423,7 +444,7 @@ Use the orchestration script for comprehensive E2E deployment and validation:
 
 # Or deploy and test separately:
 # 1. Deploy Cost Management
-./install-helm-chart.sh
+./install-cmsc.sh
 
 # 2. Validate Cost Management data flow (~3 minutes)
 NAMESPACE=cost-onprem ./run-pytest.sh || exit 1

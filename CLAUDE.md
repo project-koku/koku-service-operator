@@ -175,8 +175,8 @@ operator-managed stack (COST-7697), use the in-cluster operator path — not lap
 
 | Rule | Detail |
 |------|--------|
-| OwnNamespace | Operator install NS **must equal** CR NS and pytest `NAMESPACE` (e.g. `cost-onprem`) |
-| Deploy operator | `IMG=quay.io/<user>/koku-service-operator:<tag> ./hack/deploy-incluster.sh cost-onprem` |
+| AllNamespaces | Operator watches CMSC in every NS. Suggested install NS is `cost-onprem`. Pytest `NAMESPACE` is the CR NS. BYOI may live elsewhere. |
+| Deploy operator | `IMG=quay.io/<user>/koku-service-operator:<tag> ./scripts/deploy-incluster.sh cost-onprem` |
 | Avoid on laptop | `make deploy`, `install-cmsc.sh` registry push, `make run` against `*.svc.cluster.local` BYOI |
 | Infra | `./scripts/deploy-test-cost-onprem.sh --deploy-s4 --skip-helm --skip-chart-tests ...` |
 | Pytest | `NAMESPACE=cost-onprem ./scripts/run-pytest.sh --no-ui` (Mac: see runbook for SSL/Playwright) |
@@ -186,6 +186,7 @@ Quick Redpanda smoke (alternate path): [clusterbot.md](docs/development/clusterb
 
 ## Reference material
 
+- [docs/development/allnamespaces.md](docs/development/allnamespaces.md) — AllNamespaces watch vs suggested install NS
 - [docs/development/clusterbot-operator-pytest.md](docs/development/clusterbot-operator-pytest.md) — Cluster Bot operator + pytest runbook (COST-7697)
 - [docs/openshift-ci/openshift-ci.md](docs/openshift-ci/openshift-ci.md) — OpenShift CI (Prow) jobs, repo contracts, redaction
 - [docs/development/crc-testing.md](docs/development/crc-testing.md) — local development and CRC testing guide

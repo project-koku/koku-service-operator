@@ -1,0 +1,658 @@
+#!/usr/bin/env bash
+# Helpers for scripts/deploy-test-operator.sh. Sourced; do not execute.
+
+dto_log_info() { echo -e "\033[0;34mℹ INFO:\033[0m $*"; }
+dto_log_success() { echo -e "\033[0;32m✅ SUCCESS:\033[0m $*"; }
+dto_log_warning() { echo -e "\033[1;33m⚠ WARNING:\033[0m $*" >&2; }
+dto_log_error() { echo -e "\033[0;31m❌ ERROR:\033[0m $*" >&2; }
+dto_log_step() { echo -e "\033[0;36m▶\033[0m $*"; }
+dto_log_verbose() {
+  if [[ "${VERBOSE:-false}" == "true" ]]; then
+    echo -e "\033[0;36m[VERBOSE]\033[0m $*" >&2
+  fi
+}
+
+dto_kubectl() {
+  if command -v oc >/dev/null 2>&1; then
+    oc "$@"
+  else
+    kubectl "$@"
+  fi
+}
+
+# create / apply / patch must target the pinned context (KUBE_CONTEXT is required).
+dto_kubectl_mutate() {
+  dto_kubectl --context="${KUBE_CONTEXT}" "$@"
+}
+
+dto_print_plan() {
+  cat <<EOF
+
+Cost Management operator deploy + test
+  namespace:     ${NAMESPACE}
+  CR name:       ${CR_NAME}
+  kafka NS:      ${KAFKA_NAMESPACE}
+  keycloak NS:   ${KEYCLOAK_NAMESPACE}
+  S4:            ${DEPLOY_S4} (ns=${S4_NAMESPACE})
+  ODF S3 CA:     $([[ "${DEPLOY_S4}" == "true" ]] && echo "n/a (S4 HTTP)" || echo "${ODF_S3_CA_SECRET_NAME:-odf-s3-ca} (when openshift-storage present)")
+  IMG:           ${IMG:-<skip>}
+  tests only:    ${TESTS_ONLY}
+  skip test:     ${SKIP_TEST}
+
+EOF
+}
+
+dto_check_prerequisites() {
+  dto_log_step "Checking prerequisites"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: skipping tool checks"
+    return 0
+  fi
+  local missing=()
+  if ! command -v oc >/dev/null 2>&1 && ! command -v kubectl >/dev/null 2>&1; then
+    missing+=("oc or kubectl")
+  fi
+  command -v yq >/dev/null 2>&1 || missing+=("yq")
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    dto_log_error "missing required tools: ${missing[*]}"
+    exit 1
+  fi
+  if [[ "${SKIP_OPERATOR:-false}" != "true" && "${TESTS_ONLY:-false}" != "true" ]]; then
+    command -v openssl >/dev/null 2>&1 || {
+      dto_log_error "openssl is required for deploy-incluster.sh webhook certs"
+      exit 1
+    }
+  fi
+  dto_log_success "prerequisites OK"
+}
+
+dto_check_oc_connection() {
+  dto_log_step "Checking OpenShift connection"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would run oc whoami"
+    return 0
+  fi
+  if ! dto_kubectl whoami >/dev/null 2>&1; then
+    dto_log_error "not logged in — run oc login first"
+    exit 1
+  fi
+  dto_log_success "connected as $(dto_kubectl whoami) ($(dto_kubectl whoami --show-server))"
+}
+
+dto_pin_kube_context() {
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_verbose "DRY RUN: context pinned to ${KUBE_CONTEXT:-<current>}"
+    return 0
+  fi
+  local current
+  current="$(dto_kubectl config current-context 2>/dev/null || true)"
+  if [[ -z "${KUBE_CONTEXT:-}" ]]; then
+    # No explicit pin — adopt the active current-context (set by oc login / oc_login_auto).
+    if [[ -z "${current}" ]]; then
+      dto_log_error "KUBE_CONTEXT is unset and no current-context found in kubeconfig — run oc login first"
+      exit 1
+    fi
+    KUBE_CONTEXT="${current}"
+    export KUBE_CONTEXT
+    dto_log_info "KUBE_CONTEXT not set — using active context: ${KUBE_CONTEXT}"
+    return 0
+  fi
+  if [[ "$current" != "$KUBE_CONTEXT" ]]; then
+    dto_log_error "current-context is '${current:-<unset>}', expected '${KUBE_CONTEXT}'"
+    exit 1
+  fi
+  dto_log_verbose "context pinned: ${KUBE_CONTEXT}"
+}
+
+dto_execute_script() {
+  local script_path="$1"
+  shift
+  if [[ ! -f "$script_path" ]]; then
+    dto_log_error "script not found: ${script_path}"
+    return 1
+  fi
+  chmod +x "$script_path" 2>/dev/null || true
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would execute: ${script_path} $*"
+    return 0
+  fi
+  dto_log_info "executing: ${script_path} $*"
+  if [[ "${VERBOSE:-false}" == "true" ]]; then
+    bash -x "$script_path" "$@"
+  else
+    "$script_path" "$@"
+  fi
+}
+
+dto_create_app_namespace() {
+  dto_log_step "Ensuring app namespace ${NAMESPACE}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would create namespace ${NAMESPACE}"
+    return 0
+  fi
+  if dto_kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+    dto_log_info "namespace ${NAMESPACE} already exists"
+  else
+    dto_kubectl_mutate create namespace "${NAMESPACE}"
+    dto_log_success "created namespace ${NAMESPACE}"
+  fi
+  dto_kubectl label namespace "${NAMESPACE}" cost_management_optimizations=true --overwrite >/dev/null
+}
+
+dto_deploy_rhbk() {
+  if [[ "${SKIP_RHBK:-false}" == "true" ]]; then
+    dto_log_warning "skipping RHBK (--skip-rhbk)"
+    return 0
+  fi
+  dto_log_step "Deploying Red Hat Build of Keycloak (1/5)"
+  export RHBK_NAMESPACE="${KEYCLOAK_NAMESPACE}"
+  dto_execute_script "${ROOT}/scripts/deploy-rhbk.sh"
+  dto_log_success "RHBK deployment step finished"
+}
+
+dto_deploy_kafka() {
+  if [[ "${SKIP_KAFKA:-false}" == "true" ]]; then
+    dto_log_warning "skipping Kafka (--skip-kafka)"
+    return 0
+  fi
+  dto_log_step "Deploying AMQ Streams / Kafka (2/5)"
+  export KAFKA_NAMESPACE
+  export STORAGE_CLASS
+  dto_execute_script "${ROOT}/scripts/deploy-kafka.sh"
+  dto_log_success "Kafka deployment step finished"
+}
+
+dto_copy_s4_storage_credentials() {
+  local source_ns="$1"
+  local target_ns="$2"
+  local storage_secret="cost-onprem-storage-credentials"
+  local source_secret="" candidate
+
+  for candidate in s4-credentials "${storage_secret}"; do
+    if dto_kubectl get secret "${candidate}" -n "${source_ns}" >/dev/null 2>&1; then
+      source_secret="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "$source_secret" ]]; then
+    dto_log_error "no S4 secret in ${source_ns} (expected s4-credentials)"
+    return 1
+  fi
+
+  local access_key secret_key
+  access_key="$(dto_kubectl get secret "${source_secret}" -n "${source_ns}" -o jsonpath='{.data.access-key}' | base64 -d)"
+  secret_key="$(dto_kubectl get secret "${source_secret}" -n "${source_ns}" -o jsonpath='{.data.secret-key}' | base64 -d)"
+  if [[ -z "$access_key" || -z "$secret_key" ]]; then
+    dto_log_error "secret ${source_ns}/${source_secret} missing access-key or secret-key"
+    return 1
+  fi
+
+  dto_kubectl_mutate create secret generic "${storage_secret}" \
+    --namespace="${target_ns}" \
+    --from-literal=access-key="${access_key}" \
+    --from-literal=secret-key="${secret_key}" \
+    --dry-run=client -o yaml | dto_kubectl_mutate apply -f -
+  dto_log_success "synced ${source_ns}/${source_secret} → ${target_ns}/${storage_secret}"
+}
+
+dto_deploy_s4() {
+  if [[ "${DEPLOY_S4:-false}" != "true" ]]; then
+    dto_log_verbose "skipping S4 (pass --deploy-s4 to enable)"
+    return 0
+  fi
+  dto_log_step "Deploying S4 storage stand-in (3/5)"
+  export STORAGE_CLASS
+  dto_execute_script "${ROOT}/scripts/deploy-s4-test.sh" "${S4_NAMESPACE}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would sync S4 credentials ${S4_NAMESPACE} → ${NAMESPACE}"
+    return 0
+  fi
+  dto_copy_s4_storage_credentials "${S4_NAMESPACE}" "${NAMESPACE}"
+  dto_log_success "S4 deployment step finished"
+}
+
+dto_deploy_operator() {
+  if [[ "${SKIP_OPERATOR:-false}" == "true" ]]; then
+    dto_log_warning "skipping operator (--skip-operator)"
+    return 0
+  fi
+  dto_log_step "Deploying operator in-cluster (4/5)"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would run IMG=${IMG} ${ROOT}/scripts/deploy-incluster.sh ${NAMESPACE}"
+    return 0
+  fi
+  IMG="${IMG}" "${ROOT}/scripts/deploy-incluster.sh" "${NAMESPACE}"
+  dto_kubectl -n "${NAMESPACE}" rollout status deploy/koku-service-operator --timeout=180s
+  dto_log_success "operator deployment step finished"
+}
+
+# Defaults for ODF/NooBaa TLS (operator ListBuckets probe; see docs/gap_analysis/COST-7684.md).
+ODF_S3_CA_SECRET_NAME="${ODF_S3_CA_SECRET_NAME:-odf-s3-ca}"
+OPENSHIFT_SERVICE_CA_CONFIGMAP="${OPENSHIFT_SERVICE_CA_CONFIGMAP:-openshift-service-ca.crt}"
+OPENSHIFT_SERVICE_CA_NAMESPACE="${OPENSHIFT_SERVICE_CA_NAMESPACE:-openshift-config-managed}"
+
+dto_fetch_openshift_service_ca_pem() {
+  local pem=""
+  pem="$(dto_kubectl get configmap "${OPENSHIFT_SERVICE_CA_CONFIGMAP}" -n "${OPENSHIFT_SERVICE_CA_NAMESPACE}" \
+    -o jsonpath='{.data.service-ca\.crt}' 2>/dev/null || true)"
+  if [[ -z "$pem" ]]; then
+    pem="$(dto_kubectl get configmap service-ca-bundle -n openshift-config \
+      -o jsonpath='{.data.service-ca\.crt}' 2>/dev/null || true)"
+  fi
+  if [[ -z "$pem" ]]; then
+    return 1
+  fi
+  if [[ "$pem" != *"BEGIN CERTIFICATE"* ]]; then
+    dto_log_error "cluster service CA data is not valid PEM (expected BEGIN CERTIFICATE)"
+    return 1
+  fi
+  printf '%s' "$pem"
+}
+
+# ODF/NooBaa S3 uses certs signed by the OpenShift service CA. App pods trust it via
+# AWS_CA_BUNDLE; the operator probe needs spec.objectStorage.caCertSecretName (key ca.crt).
+# See docs/install/prerequisites.md and docs/install/production.md (prefer CA over insecureSkipVerify).
+dto_ensure_odf_s3_ca_secret() {
+  if [[ "${DEPLOY_S4:-false}" == "true" ]]; then
+    return 0
+  fi
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would ensure Secret ${NAMESPACE}/${ODF_S3_CA_SECRET_NAME} (OpenShift service CA for objectStorage TLS)"
+    return 0
+  fi
+  if ! dto_kubectl get namespace openshift-storage >/dev/null 2>&1; then
+    dto_log_warning "namespace openshift-storage not found; assuming BYOI or external S3 (skipping ODF service-CA Secret)"
+    ODF_S3_CA_SECRET_NAME=""
+    return 0
+  fi
+  local pem
+  if ! pem="$(dto_fetch_openshift_service_ca_pem)"; then
+    dto_log_warning "OpenShift service CA ConfigMap not found; StorageReady ListBuckets may fail on ODF HTTPS"
+    dto_log_warning "Create a Secret with key ca.crt and set spec.objectStorage.caCertSecretName, or use --deploy-s4"
+    ODF_S3_CA_SECRET_NAME=""
+    return 0
+  fi
+  dto_log_info "Ensuring Secret ${NAMESPACE}/${ODF_S3_CA_SECRET_NAME} from cluster service CA (objectStorage TLS)"
+  printf '%s' "$pem" | dto_kubectl_mutate -n "${NAMESPACE}" create secret generic "${ODF_S3_CA_SECRET_NAME}" \
+    --from-file=ca.crt=/dev/stdin \
+    --dry-run=client -o yaml | dto_kubectl_mutate apply -f -
+}
+
+dto_apply_cmsc() {
+  if [[ "${SKIP_CMSC:-false}" == "true" ]]; then
+    dto_log_warning "skipping CMSC (--skip-cmsc)"
+    return 0
+  fi
+  dto_log_step "Applying CostManagementServiceConfig (5/5)"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would apply ${CMSC_SAMPLE} and patch lab endpoints"
+    dto_ensure_odf_s3_ca_secret
+    return 0
+  fi
+
+  local domain keycloak_host keycloak_url s4_endpoint patch_file
+  domain="$(dto_kubectl get ingresses.config cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
+  if [[ -z "$domain" ]]; then
+    dto_log_warning "cluster ingress domain unset; Routes may not resolve externally"
+  fi
+
+  keycloak_host="$(dto_kubectl get route keycloak -n "${KEYCLOAK_NAMESPACE}" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  if [[ -z "$keycloak_host" ]]; then
+    dto_log_error "Keycloak route not found in ${KEYCLOAK_NAMESPACE} (deploy RHBK first or pass --skip-cmsc)"
+    exit 1
+  fi
+  keycloak_url="https://${keycloak_host}"
+  s4_endpoint="s4.${S4_NAMESPACE}.svc.cluster.local"
+
+  dto_ensure_odf_s3_ca_secret
+
+  # Build the full spec overlay first, then apply the sample and overlay as a
+  # single merged manifest. The BYOI template is admission-rejected unedited
+  # (empty auth.keycloak.url, and objectStorage.buckets.koku is required once
+  # secretName is set), so applying it raw and patching afterwards would fail at
+  # the first apply. Merge-then-apply keeps every applied object valid.
+  patch_file="$(mktemp)"
+  trap 'rm -f "${patch_file:-}"' RETURN
+  python3 - "$patch_file" "$domain" "$s4_endpoint" "$keycloak_url" "${KEYCLOAK_NAMESPACE}" "${DEPLOY_S4:-false}" "${ODF_S3_CA_SECRET_NAME:-}" <<'PY'
+import json, sys
+path, domain, s4_endpoint, keycloak_url, keycloak_ns, deploy_s4, odf_ca_secret = sys.argv[1:8]
+spec = {
+    "auth": {
+        "keycloak": {
+            "url": f"http://keycloak-service.{keycloak_ns}.svc:8080",
+            "issuerURL": keycloak_url,
+        }
+    },
+    # buckets.koku is required (the operator does not create buckets). Set it on
+    # every path so the merged CR passes admission and, on ODF/NooBaa discovery,
+    # resolves to a real cost bucket.
+    "objectStorage": {"buckets": {"koku": "koku-bucket"}},
+}
+if domain:
+    spec["global"] = {"clusterDomain": domain}
+if deploy_s4 == "true":
+    spec["objectStorage"].update({
+        "endpoint": s4_endpoint,
+        "port": 7480,
+        "useSSL": False,
+        "secretName": "cost-onprem-storage-credentials",
+        "s3": {"region": "us-east-1"},
+    })
+elif odf_ca_secret:
+    # Keep sample endpoint (ODF) and add CA for the operator StorageReady probe.
+    spec["objectStorage"]["caCertSecretName"] = odf_ca_secret
+open(path, "w").write(json.dumps({"spec": spec}))
+PY
+  yq e ".metadata.namespace = \"${NAMESPACE}\" | .metadata.name = \"${CR_NAME}\" | . *= load(\"${patch_file}\")" "${CMSC_SAMPLE}" \
+    | dto_kubectl_mutate apply -f -
+  if [[ "${DEPLOY_S4:-false}" == "true" ]]; then
+    dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (S4 + Keycloak)"
+  elif [[ -n "${ODF_S3_CA_SECRET_NAME:-}" ]]; then
+    dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (Keycloak + ODF service CA; objectStorage endpoint from sample)"
+  else
+    dto_log_success "CMSC ${NAMESPACE}/${CR_NAME} applied and patched for lab (Keycloak; objectStorage from sample / ODF discovery)"
+  fi
+}
+
+dto_wait_cmsc_day_one() {
+  if [[ "${SKIP_CMSC:-false}" == "true" ]]; then
+    return 0
+  fi
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would wait for SchemaUpToDate=True and Available=True"
+    return 0
+  fi
+
+  dto_log_step "Waiting for CMSC day-one success (${CMSC_READY_TIMEOUT})"
+  dto_log_info "Expect SchemaUpToDate=True and Available=True (Phase may stay Progressing without UI OAuth)"
+
+  local deadline schema avail
+  deadline=$((SECONDS + $(dto_parse_duration_seconds "${CMSC_READY_TIMEOUT}")))
+  while (( SECONDS < deadline )); do
+    schema="$(dto_kubectl get cmsc "${CR_NAME}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="SchemaUpToDate")].status}' 2>/dev/null || true)"
+    avail="$(dto_kubectl get cmsc "${CR_NAME}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || true)"
+    if [[ "$schema" == "True" && "$avail" == "True" ]]; then
+      dto_log_success "CMSC day-one conditions met"
+      dto_kubectl -n "${NAMESPACE}" get cmsc "${CR_NAME}" \
+        -o jsonpath='{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true
+      return 0
+    fi
+    sleep 15
+  done
+
+  dto_log_error "CMSC did not reach day-one success within ${CMSC_READY_TIMEOUT}"
+  dto_kubectl -n "${NAMESPACE}" get cmsc "${CR_NAME}" \
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status} ({.reason}): {.message}{"\n"}{end}' 2>/dev/null || true
+  exit 1
+}
+
+dto_parse_duration_seconds() {
+  local spec="$1"
+  if [[ "$spec" =~ ^([0-9]+)m$ ]]; then
+    echo $(( "${BASH_REMATCH[1]}" * 60 ))
+  elif [[ "$spec" =~ ^([0-9]+)s$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+  else
+    dto_log_warning "unrecognized duration '${spec}', defaulting to 2700s (45m); supported: Nm, Ns"
+    echo 2700
+  fi
+}
+
+# scripts/lib/perf-testing.sh expects logging helpers and globals from its parent
+# orchestrator (LOCAL_SCRIPTS_DIR, log_step, listener-cpu, perf-observability).
+dto_setup_perf_lib() {
+  LOCAL_SCRIPTS_DIR="${ROOT}/scripts"
+  PROJECT_ROOT="${ROOT}"
+  CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  HELM_RELEASE_NAME="${CMSC_NAME}"
+  export TEST_RUNNER="${TEST_RUNNER:-operator}"
+  PERF_OUTPUT_DIR="${PERF_OUTPUT_DIR:-${PROJECT_ROOT}/tests/perf-runs}"
+  TEST_RUN_ID="${TEST_RUN_ID:-}"
+  CPU_BOOST_APPLIED="${CPU_BOOST_APPLIED:-false}"
+  SKIP_GRAFANA_LINKS="${SKIP_GRAFANA_LINKS:-true}"
+  METRICS_INTERVAL="${METRICS_INTERVAL:-30}"
+
+  log_info() { dto_log_info "$@"; }
+  log_success() { dto_log_success "$@"; }
+  log_warning() { dto_log_warning "$@"; }
+  log_error() { dto_log_error "$@"; }
+  log_step() { dto_log_step "$@"; }
+  log_verbose() { dto_log_verbose "$@"; }
+
+  local scripts_lib="${ROOT}/scripts/lib"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-common.sh" ]] && source "${scripts_lib}/perf-common.sh"
+  perf_sync_release_env
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/listener-cpu.sh" ]] && source "${scripts_lib}/listener-cpu.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-observability.sh" ]] && source "${scripts_lib}/perf-observability.sh"
+  # shellcheck disable=SC1090
+  [[ -f "${scripts_lib}/perf-testing.sh" ]] && source "${scripts_lib}/perf-testing.sh"
+}
+
+dto_perf_cleanup_on_exit() {
+  local exit_code=$?
+  if [[ -n "${METRICS_COLLECTOR_PID:-}" ]]; then
+    dto_log_warning "Stopping metrics collection..."
+    kill -TERM "${METRICS_COLLECTOR_PID}" 2>/dev/null || true
+  fi
+  if [[ "${CPU_BOOST_APPLIED:-false}" == "true" ]] && [[ -n "${ORIGINAL_LISTENER_CPU_LIMIT:-}" ]]; then
+    dto_log_warning "Resetting listener CPU to original values..."
+    reset_listener_cpu 2>/dev/null || true
+  fi
+  exit "$exit_code"
+}
+
+dto_wait_deploy_ready() {
+  local deploy="$1"
+  local timeout="${2:-600}"
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local deadline=$(( $(date +%s) + timeout ))
+
+  while (( $(date +%s) < deadline )); do
+    if dto_kubectl_mutate get deployment "${deploy}" -n "${namespace}" >/dev/null 2>&1; then
+      if dto_kubectl_mutate rollout status deployment "${deploy}" -n "${namespace}" --timeout=120s 2>/dev/null; then
+        return 0
+      fi
+    fi
+    sleep 10
+  done
+  dto_log_warning "Deployment ${namespace}/${deploy} did not become ready within ${timeout}s"
+  return 1
+}
+
+dto_ensure_perf_listener_resources() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would patch CMSC listener resources (chart small-profile defaults)"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_warning "CMSC ${namespace}/${cr_name} not found — skipping listener resource patch"
+    return 0
+  fi
+
+  local limit
+  limit="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+    -o jsonpath='{.spec.costManagement.listener.resources.limits.cpu}' 2>/dev/null || true)"
+  if [[ -n "${limit}" ]]; then
+    dto_log_info "CMSC listener CPU limit already set (${limit})"
+    return 0
+  fi
+
+  dto_log_step "Patching CMSC listener resources (chart small-profile defaults)"
+  dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p \
+    '{"spec":{"costManagement":{"listener":{"resources":{"requests":{"cpu":"150m","memory":"300Mi"},"limits":{"cpu":"300m","memory":"600Mi"}}}}}}'
+
+  local listener_deploy="${cr_name}-koku-listener"
+  if ! dto_wait_deploy_ready "${listener_deploy}" 300; then
+    dto_log_error "Listener ${namespace}/${listener_deploy} not ready after CMSC resource patch"
+    dto_kubectl_mutate get deployment "${listener_deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl_mutate get pods -n "${namespace}" -l "app.kubernetes.io/component=listener" 2>/dev/null || true
+    exit 1
+  fi
+  dto_log_success "Listener resources applied via CMSC (${listener_deploy})"
+}
+
+dto_ensure_ros_for_perf() {
+  local namespace="${NAMESPACE:-cost-onprem}"
+  local cr_name="${CR_NAME:-${CMSC_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}}"
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would enable spec.ros.enabled=true on CMSC ${namespace}/${cr_name} and wait for ${cr_name}-kruize"
+    return 0
+  fi
+
+  if ! dto_kubectl get cmsc "${cr_name}" -n "${namespace}" >/dev/null 2>&1; then
+    dto_log_error "CMSC ${namespace}/${cr_name} not found — cannot enable ROS for performance tests"
+    exit 1
+  fi
+
+  local enabled
+  enabled="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.spec.ros.enabled}' 2>/dev/null || true)"
+  if [[ "$enabled" == "true" ]]; then
+    dto_log_info "ROS already enabled on CMSC ${namespace}/${cr_name}"
+  else
+    dto_log_step "Enabling ROS on CMSC for performance tests (${namespace}/${cr_name})"
+    dto_kubectl_mutate patch cmsc "${cr_name}" -n "${namespace}" --type merge -p '{"spec":{"ros":{"enabled":true}}}'
+  fi
+
+  local deploy="${cr_name}-kruize"
+  local deadline=$(( $(date +%s) + 600 ))
+  local cond=""
+  while (( $(date +%s) < deadline )); do
+    cond="$(dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="ROSEnabled")].status}' 2>/dev/null || true)"
+    if [[ "$cond" == "True" ]]; then
+      dto_log_success "ROSEnabled condition is True"
+      break
+    fi
+    sleep 10
+  done
+
+  if [[ "$cond" != "True" ]]; then
+    dto_log_error "ROSEnabled condition did not become True within 10 minutes — check RBAC escalation or operator logs"
+    dto_kubectl get cmsc "${cr_name}" -n "${namespace}" \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+    exit 1
+  fi
+
+  if ! dto_kubectl rollout status deployment "${deploy}" -n "${namespace}" --timeout=600s 2>/dev/null; then
+    dto_log_error "Kruize deployment ${namespace}/${deploy} not ready — ROS performance tests require Kruize"
+    dto_kubectl get deployment "${deploy}" -n "${namespace}" 2>/dev/null || true
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    dto_kubectl describe cmsc "${cr_name}" -n "${namespace}" 2>/dev/null | tail -40 || true
+    exit 1
+  fi
+
+  if ! dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization \
+      --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+    dto_log_error "No Running Kruize pod found after ${deploy} rollout"
+    dto_kubectl get pods -n "${namespace}" -l app.kubernetes.io/component=ros-optimization 2>/dev/null || true
+    exit 1
+  fi
+
+  # Kruize is reconciled in core-services; ROS API/processor in workers stage.
+  local ros_deploy
+  for ros_deploy in "${cr_name}-ros-api" "${cr_name}-ros-processor"; do
+    dto_log_step "Waiting for ROS deployment ${namespace}/${ros_deploy}"
+    if ! dto_wait_deploy_ready "${ros_deploy}" 600; then
+      dto_log_error "ROS deployment ${namespace}/${ros_deploy} not ready — operator reconcile may be stuck"
+      dto_kubectl get cmsc "${cr_name}" -n "${namespace}" -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}' 2>/dev/null || true
+      dto_kubectl get deployment -n "${namespace}" 2>/dev/null | grep -E 'ros|kruize' || true
+      dto_kubectl get pods -n "${namespace}" -l 'app.kubernetes.io/component in (ros-api,ros-processor)' 2>/dev/null || true
+      exit 1
+    fi
+    dto_log_success "ROS deployment ready (${ros_deploy})"
+  done
+
+  export ROS_ENABLED=true
+  dto_log_success "ROS stack ready for performance tests (Kruize + ros-api + ros-processor)"
+}
+
+dto_run_pytest() {
+  export NAMESPACE KEYCLOAK_NAMESPACE
+  export CMSC_NAME="${CR_NAME:-${HELM_RELEASE_NAME:-cost-onprem}}"
+  export HELM_RELEASE_NAME="${CMSC_NAME}"
+  if [[ "${VERBOSE:-false}" == "true" ]]; then
+    export VERBOSE=true
+  fi
+
+  # ── Performance-only path ──────────────────────────────────────────────────
+  # Sources scripts/lib/perf-testing.sh which handles profile config, listener
+  # CPU tuning, suite→flag mapping, and result upload.  Mirrors the entrypoint
+  # used by the legacy chart orchestrator --perf-only path.
+  if [[ "${PERF_ONLY:-false}" == "true" ]]; then
+    dto_log_step "Running performance tests (profile: ${PERF_PROFILE:-baseline}, suite: ${PERF_SUITE:-all})"
+    dto_setup_perf_lib
+    if ! declare -F run_performance_tests >/dev/null; then
+      dto_log_error "perf-testing lib not loaded (expected ${ROOT}/scripts/lib/perf-testing.sh)"
+      exit 1
+    fi
+    trap dto_perf_cleanup_on_exit EXIT
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+      dto_log_info "DRY RUN: would call apply_perf_profile_config + run_performance_tests"
+      dto_log_info "  PERF_PROFILE=${PERF_PROFILE:-baseline}"
+      dto_log_info "  PERF_SUITE=${PERF_SUITE:-all}"
+      dto_log_info "  LISTENER_CPU_LIMIT=${LISTENER_CPU_LIMIT:-<auto>}"
+      dto_log_info "  SKIP_PROFILE_CONFIG=${SKIP_PROFILE_CONFIG:-false}"
+      if perf_suite_needs_ros; then
+        dto_ensure_ros_for_perf
+      fi
+      return 0
+    fi
+
+    dto_ensure_perf_listener_resources
+
+    if perf_suite_needs_ros; then
+      dto_ensure_ros_for_perf
+    fi
+
+    # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+    # so it doesn't bleed into subsequent shell operations.
+    if ! ( unset REQUESTS_CA_BUNDLE SSL_CERT_FILE; run_performance_tests ); then
+      dto_log_error "Performance tests failed — see tests/perf-runs/"
+      exit 1
+    fi
+    dto_log_success "Performance tests completed"
+    return 0
+  fi
+
+  # ── Standard pytest path ──────────────────────────────────────────────────
+  dto_log_step "Running pytest suite"
+  local pytest_script="${ROOT}/scripts/run-pytest.sh"
+  if [[ ! -f "$pytest_script" ]]; then
+    dto_log_error "pytest runner not found: ${pytest_script}"
+    exit 1
+  fi
+  chmod +x "$pytest_script"
+
+  local -a pytest_args=()
+  if [[ "${VERBOSE:-false}" == "true" ]]; then
+    pytest_args+=("-v")
+  fi
+  if [[ "${NO_UI:-false}" == "true" ]]; then
+    pytest_args+=("--no-ui")
+  fi
+
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    dto_log_info "DRY RUN: would execute: ${pytest_script} ${pytest_args[*]:-}"
+    return 0
+  fi
+
+  # Homebrew Python sets REQUESTS_CA_BUNDLE; scope the unset to the subprocess
+  # only so it doesn't affect subsequent shell operations.
+  if ! env -u REQUESTS_CA_BUNDLE -u SSL_CERT_FILE \
+      "${pytest_script}" ${pytest_args[@]+"${pytest_args[@]}"}; then
+    dto_log_error "pytest failed — see test/pytest/reports/"
+    exit 1
+  fi
+  dto_log_success "pytest completed"
+}

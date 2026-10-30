@@ -212,8 +212,11 @@ def _is_oc_transport_failure(
     result: Optional[subprocess.CompletedProcess] = None,
     exc: Optional[BaseException] = None,
 ) -> bool:
+    # TimeoutExpired is NOT an infinitely retryable transport failure: the command ran long
+    # enough to time out, and retrying will just time out again.  Return False
+    # so the caller propagates or raises rather than looping.
     if isinstance(exc, subprocess.TimeoutExpired):
-        return True
+        return False
     if result is None:
         return False
     blob = f"{result.stderr or ''}{result.stdout or ''}"
@@ -264,8 +267,9 @@ def exec_in_pod_raw(
         try:
             result = run_oc_command(args, check=False, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            last_exc = exc
-            last_result = None
+            # Timeouts are not retryable: each retry will also time out.
+            # Surface immediately rather than burning retry budget.
+            raise
         else:
             last_result = result
             last_exc = None
@@ -517,9 +521,13 @@ def execute_db_query(
 ) -> Optional[list[tuple]]:
     """Execute a SQL query via oc exec and return results.
 
-    Prow pytest ``oc exec`` into BYOI Postgres can fail once with empty
-    stdout even when the schema is healthy (next test then succeeds).
-    Retry transport/empty-output misses; do not retry SQL ``ERROR:``.
+    Returns a list of row tuples on success (``[]`` when the query matches no
+    rows — psql ``-t -A`` exits 0 with empty stdout).  Returns ``None`` only
+    when ``oc exec``/psql fails after retries or the server returns SQL
+    ``ERROR:``.
+
+    Prow ``oc exec`` into BYOI Postgres can fail with transport errors (EOF,
+    upgrade connection).  Those are retried; zero-row results are not.
     """
     env_prefix: list[str] = []
     if password:
@@ -529,6 +537,11 @@ def execute_db_query(
         "-t", "-A", "-F", "|",
         "-c", query,
     ]
+
+    # ctx is used in error-path log messages.  Do NOT include the full query
+    # text here — it may contain data values (tenant IDs, cluster IDs, etc.)
+    # that should not appear in CI logs.
+    ctx = f"ns={namespace} pod={pod_name} db={database} user={user}"
 
     last_detail = "no attempt"
     for attempt in range(1, _OC_EXEC_ATTEMPTS + 1):
@@ -540,7 +553,9 @@ def execute_db_query(
             last_detail = f"{type(exc).__name__}: {exc}"
         else:
             combined = f"{result.stdout or ''}{result.stderr or ''}"
-            if result.returncode == 0 and result.stdout and result.stdout.strip():
+            if result.returncode == 0:
+                if not result.stdout or not result.stdout.strip():
+                    return []
                 rows: list[tuple] = []
                 for line in result.stdout.strip().split("\n"):
                     if line:
@@ -551,14 +566,19 @@ def execute_db_query(
                 f"stderr={(result.stderr or '')[:300]!r}"
             )
             if "ERROR:" in combined:
-                logger.warning("execute_db_query SQL error (not retried): %s", last_detail)
+                logger.warning(
+                    "execute_db_query SQL error (not retried) [%s]: %s",
+                    ctx,
+                    last_detail,
+                )
                 return None
         if attempt < _OC_EXEC_ATTEMPTS:
             time.sleep(_OC_EXEC_BACKOFF * (2 ** (attempt - 1)))
 
     logger.warning(
-        "execute_db_query failed after %s attempts: %s",
+        "execute_db_query failed after %s attempts [%s]: %s",
         _OC_EXEC_ATTEMPTS,
+        ctx,
         last_detail,
     )
     return None

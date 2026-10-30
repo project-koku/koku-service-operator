@@ -32,14 +32,14 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-  hack-scripts:
-    name: Hack Scripts
+  scripts:
+    name: Scripts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: demo-preprod helpers
-        run: make test-hack
+      - name: No-cluster script tests
+        run: make test-scripts
 
   rbac-seed-sync:
     name: RBAC seed drift check

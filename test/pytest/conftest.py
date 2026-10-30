@@ -24,6 +24,7 @@ import urllib3
 from ros_feature import detect_ros_enabled, ROS_DISABLED_SKIP_REASON
 from utils import (
     check_pod_exists,
+    create_rh_identity_header,
     exec_in_pod,
     exec_in_pod_raw,
     external_http_session,
@@ -1005,6 +1006,17 @@ def org_id(cluster_config: ClusterConfig, keycloak_config: KeycloakConfig) -> st
         return _DEFAULT_ORG_ID
     except Exception:
         return _DEFAULT_ORG_ID
+
+
+@pytest.fixture(scope="session")
+def rh_identity_header(org_id: str) -> str:
+    """Base64-encoded X-Rh-Identity header for the test org.
+
+    Used by any test that calls the Koku Sources API (source registration,
+    cleanup, etc.) via in-cluster curl.  Shared by e2e, sources, performance,
+    and interpod suites so the definition lives once here.
+    """
+    return create_rh_identity_header(org_id)
 
 
 @pytest.fixture(scope="session", autouse=True)

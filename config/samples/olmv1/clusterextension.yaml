@@ -1,0 +1,13 @@
+apiVersion: olm.operatorframework.io/v1
+kind: ClusterExtension
+metadata:
+  name: koku-service-operator
+spec:
+  namespace: cost-onprem
+  serviceAccount:
+    name: koku-service-operator-controller-manager
+  source:
+    sourceType: Catalog
+    catalog:
+      packageName: koku-service-operator
+  # Do not set spec.config.inline.watchNamespace — empty means watch all.

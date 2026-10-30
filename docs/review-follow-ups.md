@@ -83,7 +83,7 @@ remaining gap.
 
 ## 10. OwnNamespace + CR finalizer: OLM uninstall still kills the manager first
 
-**Source:** Cluster Bot pre-prod install (`hack/demo-preprod.sh --reset`), 2026-08-15.
+**Source:** Cluster Bot pre-prod install (`scripts/demo-preprod.sh --reset`), 2026-08-15.
 
 The CR finalizer
 `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
@@ -98,7 +98,7 @@ ConsoleLink leaks.
 
 **Documented:** [uninstall.md](install/uninstall.md) — delete the CR, wait
 until it is gone, then the namespace or operator.
-`hack/demo-preprod.sh --reset` strips the finalizer if the operator is already
+`scripts/demo-preprod.sh --reset` strips the finalizer if the operator is already
 gone. `scripts/install-cmsc.sh` cleanup deletes the CR first but does **not**
 recover a stuck finalizer.
 

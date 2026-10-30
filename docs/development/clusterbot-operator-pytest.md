@@ -11,8 +11,8 @@ cluster-bot reproduction are tracked in
 
 | Related docs | When to use |
 |--------------|-------------|
-| [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`hack/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
-| [ownnamespace.md](ownnamespace.md) | Why operator install NS must equal CR NS |
+| [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`scripts/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
+| [allnamespaces.md](allnamespaces.md) | AllNamespaces watch vs suggested install NS |
 | [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
@@ -98,30 +98,29 @@ PostgreSQL and Valkey** in `cost-onprem` (lab/CI — not production BYOI).
 
 ## Critical rules (read first)
 
-### 1. OwnNamespace — one namespace for everything
+### 1. AllNamespaces — suggested install NS `cost-onprem`
 
-The operator watches **only** the namespace where it is installed. The
-`CostManagementServiceConfig` CR **must** live in that same namespace.
+The operator watches **every** namespace. Recommended lab layout is still one
+NS for operator + CR + pytest:
 
 ```text
-operator NS  ==  CR NS  ==  NAMESPACE for pytest
+operator NS  ==  CR NS  ==  NAMESPACE for pytest  ==  cost-onprem
 ```
 
-Use **`cost-onprem`** (or any single name) consistently. Do **not** deploy the
-operator with `make deploy` into `koku-service-operator-system` while applying
-the CR in `cost-onprem` — the operator will not reconcile it.
+BYOI (Kafka, RHBK, S4) may live in other namespaces. `make deploy` scaffolds
+into `cost-onprem`.
 
-See [ownnamespace.md](ownnamespace.md).
+See [allnamespaces.md](allnamespaces.md).
 
-### 2. Use `hack/deploy-incluster.sh`, not `make deploy` from a laptop
+### 2. Use `scripts/deploy-incluster.sh`, not `make deploy` from a laptop
 
 | Path | Cluster Bot pytest? |
 |------|---------------------|
-| `IMG=quay.io/... ./hack/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, OwnNamespace |
-| `make deploy` / `install-cmsc.sh` operator step | **No** — integrated registry push from laptop, cert-manager, wrong NS default |
+| `IMG=quay.io/... ./scripts/deploy-incluster.sh cost-onprem` | **Yes** — Quay image, lab webhook TLS, AllNamespaces |
+| `make deploy` / `install-cmsc.sh` operator step | **No** — integrated registry push from laptop, cert-manager |
 | `make run` / `go run ./cmd/main.go` | **No** — `*.svc.cluster.local` not reachable from laptop |
 
-`deploy-incluster.sh` calls `hack/deploy-dev.sh` (CRDs + RBAC), creates a
+`deploy-incluster.sh` calls `scripts/deploy-dev.sh` (CRDs + RBAC), creates a
 self-signed webhook serving-cert Secret, and rolls out the manager. It does
 **not** install Validating/MutatingWebhookConfiguration — CR apply is not
 admission-gated on this lab path (OLM/cert-manager covers production).
@@ -269,11 +268,56 @@ kubectl create secret generic cost-onprem-storage-credentials \
 Required buckets: `koku-bucket`, `ros-data`, `insights-upload-perma`
 (`deploy-s4-test.sh` does not create them).
 
+### S3 buckets before CMSC (recommended)
+
+Step 1 deploys S4 and syncs credentials but **does not create** application
+bucket names. Without buckets, `StorageReady` stays False and ingress readiness
+fails (`HeadBucket` 404) until buckets exist. Create them **after Step 2**
+(operator running) and **before Step 3** (or rely on pytest
+`s3_bucket_preflight` at the start of Step 4 — that is too late for ingress
+during CMSC reconcile):
+
+```bash
+oc -n cost-onprem exec deploy/cost-onprem-koku-api -- python3 -c "
+import boto3, os
+s3 = boto3.client('s3',
+  endpoint_url=os.environ.get('S3_ENDPOINT'),
+  aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+  aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+  verify=False)
+for b in ['koku-bucket', 'ros-data', 'insights-upload-perma']:
+    try:
+        s3.head_bucket(Bucket=b)
+        print('exists', b)
+    except Exception:
+        s3.create_bucket(Bucket=b)
+        print('created', b)
+"
+```
+
+If the `exec` fails because `cost-onprem-koku-api` does not exist yet, create
+buckets after CMSC reconcile using the same command, or use the pytest preflight
+in Step 4.
+
+### Keycloak Admin Console (lab)
+
+RHBK stores bootstrap credentials in `keycloak-initial-admin`. Decode **both**
+fields (username is base64-encoded in the Secret):
+
+```bash
+echo -n 'user='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d; echo
+echo -n 'pass='; oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+Open `https://<keycloak-route>/admin`, select realm **`kubernetes`** (not
+`master`). Customer-facing Keycloak user and **CMMO service account**
+procedures: [keycloak.md](../install/keycloak.md) and [cmmo.md](../install/cmmo.md).
+
 ## Step 2 — Operator in-cluster
 
 ```bash
 export IMG=quay.io/<your-quay-user>/koku-service-operator:clusterbot-test
-./hack/deploy-incluster.sh cost-onprem
+./scripts/deploy-incluster.sh cost-onprem
 ```
 
 ```bash
@@ -283,7 +327,11 @@ oc -n cost-onprem logs deploy/koku-service-operator --tail=30
 
 ## Step 3 — CMSC + cluster-bot patches
 
-Apply the default sample into **`cost-onprem`** (same NS as Step 2):
+Apply the **community lab sample** (bundled Postgres/Valkey in `cost-onprem`) into
+**`cost-onprem`** (same NS as Step 2). Do **not** use
+`service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml` unedited —
+that file is a BYOI template (`database.deploy: false` / `cache.deploy: false`)
+and admission rejects it until hosts and secrets are filled in.
 
 ```bash
 DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
@@ -291,10 +339,6 @@ KEYCLOAK_HOST="$(oc get route keycloak -n keycloak -o jsonpath='{.spec.host}')"
 test -n "$KEYCLOAK_HOST"
 KEYCLOAK_URL="https://${KEYCLOAK_HOST}"
 
-# The default sample is a BYOI template that admission rejects unedited (empty
-# auth.keycloak.url; objectStorage.buckets.koku is required once secretName is
-# set). Merge the cluster-bot values into the sample and apply once — applying
-# the raw template and patching afterwards fails at the first apply.
 DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .metadata.namespace = "cost-onprem" |
   .metadata.name = "cost-onprem" |
@@ -307,11 +351,11 @@ DOMAIN="$DOMAIN" KEYCLOAK_URL="$KEYCLOAK_URL" yq e '
   .spec.objectStorage.s3.region = "us-east-1" |
   .spec.auth.keycloak.url = "http://keycloak-service.keycloak.svc.cluster.local:8080" |
   .spec.auth.keycloak.issuerURL = strenv(KEYCLOAK_URL)
-' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig.yaml \
+' config/samples/service.costmanagement_v1alpha1_costmanagementserviceconfig_community.yaml \
   | oc apply -f -
 ```
 
-`hack/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
+`scripts/deploy-incluster.sh` → `deploy-dev.sh` already grants `anyuid` to the
 default ServiceAccount in the operator namespace.
 
 Why these patches (sample defaults are ODF/CRC, not cluster-bot S4):
@@ -440,9 +484,10 @@ registry Route. **Fix:** Quay + `deploy-incluster.sh`.
 
 Apple Silicon built `arm64` image. **Fix:** `docker buildx build --platform linux/amd64`.
 
-### Operator in `koku-service-operator-system`, CR in `cost-onprem`
+### Split operator NS vs CR NS
 
-Operator never reconciles. **Fix:** `deploy-incluster.sh cost-onprem` — one NS.
+AllNamespaces reconciles a CMSC outside the operator pod NS. The recommended
+lab is still one NS: `deploy-incluster.sh cost-onprem`.
 
 ### S3 preflight: 301 pytest errors
 
@@ -466,7 +511,13 @@ Full order and recovery: [uninstall.md](../install/uninstall.md).
 ```bash
 # Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
 oc delete cmsc -n cost-onprem --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-onprem --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to deleting namespaces on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-onprem --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
   exit 1
 fi
@@ -478,9 +529,9 @@ oc delete ns cost-onprem s4-test kafka keycloak --ignore-not-found
 | Script | Cluster-bot pytest path? |
 |--------|--------------------------|
 | `deploy-test-cost-onprem.sh --deploy-s4 --skip-helm ...` | **Yes** — infra (RHBK, Kafka, S4) |
-| `hack/deploy-incluster.sh` | **Yes** — operator (preferred) |
-| `hack/deploy-byoi.sh` | Optional — full BYOI deps (see pre-prod) |
-| `hack/clusterbot-smoke.sh` | **Alternate** — Redpanda smoke, not this path |
+| `scripts/deploy-incluster.sh` | **Yes** — operator (preferred) |
+| `scripts/deploy-byoi.sh` | Optional — full BYOI deps (see pre-prod) |
+| `scripts/clusterbot-smoke.sh` | **Alternate** — Redpanda smoke, not this path |
 | `install-cmsc.sh` / `make deploy` | **Avoid** on cluster-bot from laptop |
 | `make run` | **No** — BYOI hostnames not reachable from laptop |
 | `scripts/run-pytest.sh` | **Yes** — test orchestration |

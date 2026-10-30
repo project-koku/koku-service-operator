@@ -8,12 +8,12 @@ does **not** provision DB/cache; it only connects.
 |-----------|----------|
 | `cost-byoi-infra` | PostgreSQL, Valkey, MinIO (+ optional Redpanda — see below) |
 | `kafka` | AMQ Streams (recommended) — via `deploy-kafka.sh`, not the infra kustomize |
-| `cost-byoi` | App Secrets + `CostManagementServiceConfig` **and** the OwnNamespace operator instance |
+| `cost-byoi` | App Secrets + `CostManagementServiceConfig` (operator may share this NS) |
 
-The operator install NS must be the CR NS (`cost-byoi` here). BYOI infra in
+The operator may share the CR NS (`cost-byoi` here). BYOI infra in
 `cost-byoi-infra` / `kafka` is connected via CR fields; the operator does not
-watch or own those namespaces. See
-[docs/development/ownnamespace.md](../../docs/development/ownnamespace.md).
+own those namespaces. See
+[docs/development/allnamespaces.md](../../docs/development/allnamespaces.md).
 
 **Kafka options**
 
@@ -94,8 +94,8 @@ day-one** so Kafka is not a second OLM project:
 
 ```bash
 # One-shot: infra + Redpanda + secrets + smoke CR
-./hack/clusterbot-smoke.sh
-# Then: IMG=… ./hack/deploy-incluster.sh cost-byoi
+./scripts/clusterbot-smoke.sh
+# Then: IMG=… ./scripts/deploy-incluster.sh cost-byoi
 # Docs: docs/development/clusterbot.md
 ```
 
@@ -150,7 +150,7 @@ for UI smoke without ROS images. Set `enabled: true` only when opting in.
 
 ```bash
 # 0. Optional one-shot BYOI (Kafka + infra + Keycloak + OAuth mirror + Secrets):
-#    NAMESPACE=cost-byoi CR_NAME=cost-management ./hack/deploy-byoi.sh
+#    NAMESPACE=cost-byoi CR_NAME=cost-management ./scripts/deploy-byoi.sh
 #    Or step through config/samples/byoi pieces manually — see
 #    docs/development/pre-prod-install.md
 
@@ -178,7 +178,7 @@ kubectl apply -f config/samples/byoi/app/costmanagementserviceconfig.yaml
 ```bash
 kubectl -n cost-byoi get cmsc cost-management -w
 kubectl -n cost-byoi describe cmsc cost-management
-# OwnNamespace: operator runs in the CR namespace (not a separate system NS)
+# AllNamespaces: operator may share the CR NS (no separate system NS)
 kubectl -n cost-byoi logs deploy/koku-service-operator -f
 ```
 

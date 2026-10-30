@@ -1,8 +1,9 @@
 # Cluster Bot day-one
 
 Short path to get a `CostManagementServiceConfig` reconciling on a **Cluster Bot**
-(or any remote OpenShift) lab cluster. OwnNamespace: operator install namespace
-**equals** CR namespace.
+(or any remote OpenShift) lab cluster. AllNamespaces: the operator watches
+CMSC in every namespace. Suggested install NS is `cost-onprem`. BYOI infra
+may live elsewhere.
 
 **Beta:** ROS/Kruize are off by default (`spec.ros.enabled` defaults to `false`).
 Day-one success does not require ROS images or migrate Jobs.
@@ -19,7 +20,7 @@ BYOI hosts are `*.svc.cluster.local`. A controller running on your laptop
 **cannot** resolve or TCP-probe them — DatabaseReady / CacheReady / KafkaReady
 stay False forever.
 
-Use **`./hack/deploy-incluster.sh`** so the manager runs inside the cluster.
+Use **`./scripts/deploy-incluster.sh`** so the manager runs inside the cluster.
 
 `make run` is for CRC / local kubeconfig when dependencies are reachable from
 the host (or you use bundled `database.deploy: true`).
@@ -30,7 +31,7 @@ One-shot infra + secrets + smoke CR (does **not** install the operator image):
 
 ```bash
 export NAMESPACE=cost-byoi
-./hack/clusterbot-smoke.sh
+./scripts/clusterbot-smoke.sh
 ```
 
 Then build/push a **linux/amd64** operator image and run it in-cluster:
@@ -38,7 +39,7 @@ Then build/push a **linux/amd64** operator image and run it in-cluster:
 ```bash
 export IMG=quay.io/<you>/koku-service-operator:clusterbot
 docker buildx build --platform linux/amd64 -t "$IMG" --push .
-IMG="$IMG" ./hack/deploy-incluster.sh "$NAMESPACE"
+IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 ```
 
 `deploy-incluster.sh` calls `deploy-dev.sh` (CRDs + RBAC), creates a lab webhook
@@ -55,8 +56,8 @@ oc -n "$NAMESPACE" logs -f deploy/koku-service-operator
 ```bash
 export NAMESPACE=cost-byoi INFRA_NAMESPACE=cost-byoi-infra
 
-# 1) CRDs + OwnNamespace RBAC
-./hack/deploy-dev.sh "$NAMESPACE"   # alias: ./hack/deploy-crc.sh
+# 1) CRDs + AllNamespaces RBAC
+./scripts/deploy-dev.sh "$NAMESPACE"   # alias: ./scripts/deploy-crc.sh
 
 # 2) BYOI infra (Postgres, Valkey, MinIO) + lightweight Redpanda
 oc get ns "$INFRA_NAMESPACE" >/dev/null 2>&1 || oc create ns "$INFRA_NAMESPACE"
@@ -77,7 +78,7 @@ sed "s/apps.cluster.example.com/${DOMAIN}/" \
   config/samples/byoi/app/costmanagementserviceconfig-smoke.yaml | oc apply -f -
 
 # 4) In-cluster operator (not laptop go run)
-IMG="$IMG" ./hack/deploy-incluster.sh "$NAMESPACE"
+IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 ```
 
 If you already have AMQ Streams Kafka, point
@@ -118,7 +119,7 @@ Prefer conditions over `Phase` (Phase stays Progressing until UIReady).
 ## Local-run DX (CRC / laptop)
 
 ```bash
-./hack/deploy-dev.sh cost-onprem
+./scripts/deploy-dev.sh cost-onprem
 NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make run
 ```
 
@@ -134,10 +135,10 @@ NAMESPACE=cost-onprem IMG=quay.io/project-koku/koku-service-operator:v0.0.1 make
 
 | Script | Role |
 |--------|------|
-| `hack/deploy-dev.sh` | CRDs + OwnNamespace RBAC (+ `deploy-crc.sh` alias) |
-| `hack/clusterbot-smoke.sh` | Redpanda BYOI infra + secrets + smoke CR |
-| `hack/deploy-incluster.sh` | In-cluster manager + webhook TLS mount |
-| `hack/deploy-byoi.sh` | Full lab deps (AMQ Streams + Keycloak) |
+| `scripts/deploy-dev.sh` | CRDs + AllNamespaces RBAC (+ `deploy-crc.sh` alias) |
+| `scripts/clusterbot-smoke.sh` | Redpanda BYOI infra + secrets + smoke CR |
+| `scripts/deploy-incluster.sh` | In-cluster manager + webhook TLS mount |
+| `scripts/deploy-byoi.sh` | Full lab deps (AMQ Streams + Keycloak) |
 
 ## Tear down
 
@@ -148,7 +149,13 @@ Full order and recovery: [uninstall.md](../install/uninstall.md).
 ```bash
 # Wait for the finalizer (ConsoleLink cleanup) while the operator is still up
 oc delete cmsc -n cost-byoi --all --timeout=180s --ignore-not-found
-if oc get cmsc -n cost-byoi --no-headers 2>/dev/null | grep -q .; then
+# Fail closed: if the list itself fails (auth, API down), do NOT fall through
+# to deleting namespaces on an empty-because-errored result.
+if ! remaining=$(oc get cmsc -n cost-byoi --no-headers 2>/dev/null); then
+  echo "Could not list CMSCs (oc get failed); not deleting the namespace." >&2
+  exit 1
+fi
+if [ -n "$remaining" ]; then
   echo "CMSC still present; not deleting the namespace. See uninstall.md recovery." >&2
   exit 1
 fi

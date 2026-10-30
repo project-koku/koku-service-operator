@@ -1,22 +1,22 @@
-# RoleBinding (not ClusterRoleBinding): binding manager-role (a ClusterRole)
-# via a namespaced RoleBinding grants its namespace-scoped rules (Secrets,
-# Jobs, Deployments, CMSC, …) only in this namespace — OwnNamespace model.
+# ClusterRoleBinding: AllNamespaces. manager-role (a ClusterRole of
+# namespace-scoped kinds: Secrets, Jobs, Deployments, CMSC, …) is granted
+# cluster-wide so a CMSC outside the operator install NS is visible and
+# reconcilable. CSV installModes advertise AllNamespaces only (OwnNamespace
+# is not supported — do not require it for CatalogSource).
 #
 # Cluster-scoped permissions (StorageClass, ConsoleLink, Kruize ClusterRole,
 # NooBaa admin Secret get) come from cluster_access_role_binding.yaml.
 #
-# Install the operator into the same namespace as the CostManagementServiceConfig
-# CR (or set NAMESPACE to that namespace when running out-of-cluster). BYOI
-# infrastructure may still live in other namespaces; the operator connects to
+# Suggested install NS is cost-onprem (CSV operatorframework.io/suggested-namespace).
+# BYOI infrastructure may live in other namespaces; the operator connects to
 # it via CR connection fields and does not manage those namespaces.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   labels:
     app.kubernetes.io/name: koku-service-operator
     app.kubernetes.io/managed-by: kustomize
   name: manager-rolebinding
-  namespace: system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
