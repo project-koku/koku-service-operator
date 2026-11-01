@@ -101,6 +101,11 @@ of condition type constants is in `api/v1alpha1/costmanagementserviceconfig_type
 The `Phase` field is a human-readable convenience only — not for machine
 consumption. Phase values are defined by the `Phase` type in the same file.
 
+[docs/design/status-model.md](docs/design/status-model.md) has the transition
+diagrams (reconcile dispatch, phase, upgrade operation), a per-stage table of
+the pipeline, and a reference of which stage writes each condition and Event. Update it when a stage starts
+or stops writing a condition.
+
 ## Key design decisions (vs JIRA spec)
 
 Full analysis in [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md). Short version:
@@ -195,6 +200,7 @@ Quick Redpanda smoke (alternate path): [clusterbot.md](docs/development/clusterb
 - [docs/development/crc-testing.md](docs/development/crc-testing.md) — local development and CRC testing guide
 - [docs/tasks.md](docs/tasks.md) — implementation status per JIRA ticket
 - [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) — design decisions and best-practice analysis
+- [docs/design/status-model.md](docs/design/status-model.md) — status transitions: phase, conditions, upgrade stages, Events
 - [docs/design/security-context-strategy.md](docs/design/security-context-strategy.md) — OpenShift SCC strategy
 - [docs/design/koku-django-log-handler-problem.md](docs/design/koku-django-log-handler-problem.md) — why readOnlyRootFilesystem is blocked on koku containers
 - [docs/jira/](docs/jira/) — JIRA ticket source (COST-7678–7700)
