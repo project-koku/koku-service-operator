@@ -53,38 +53,24 @@ func TestDiscoveryCompleteEvent_FiresOnce(t *testing.T) {
 }
 
 func TestInfrastructureReadyEvent_ExternalInfra(t *testing.T) {
-	falseVal := false
-	scheme := testScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := newInfraEventsReconciler(t)
+	cfg := byoiCfg(listenLocal(t), listenLocal(t))
 
-	rec := record.NewFakeRecorder(10)
-	r := &CostManagementServiceConfigReconciler{Client: c, Scheme: scheme, Recorder: rec}
-	cfg := &costv1alpha1.CostManagementServiceConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
-		Spec: costv1alpha1.CostManagementServiceConfigSpec{
-			Database: costv1alpha1.DatabaseConfig{Deploy: &falseVal},
-			Cache:    costv1alpha1.CacheConfig{Deploy: &falseVal},
-		},
+	// First pass with reachable external infra — emits once validation has
+	// probed both dependencies.
+	infraPass(t, r, cfg)
+	if got := countEvents(drainEvents(r), "InfrastructureReady"); got != 1 {
+		t.Fatalf("pass 1: InfrastructureReady events = %d, want 1", got)
 	}
 
-	// First call with external infra — no waiting, should emit.
-	result, err := r.reconcileInfrastructure(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("pass 1: %v", err)
+	// Second pass — should NOT emit.
+	infraPass(t, r, cfg)
+	if got := countEvents(drainEvents(r), "InfrastructureReady"); got != 0 {
+		t.Fatalf("pass 2: InfrastructureReady events = %d, want 0", got)
 	}
-	if !result.IsZero() {
-		t.Fatalf("expected zero result for external infra, got %+v", result)
-	}
-	assertEvent(t, rec, "InfrastructureReady")
-
-	// Second call — should NOT emit.
-	if _, err := r.reconcileInfrastructure(context.Background(), cfg); err != nil {
-		t.Fatalf("pass 2: %v", err)
-	}
-	assertNoEvent(t, rec, "InfrastructureReady")
 }
 
-func TestInfrastructureReadyEvent_DefaultsToExternalInfraWhenDeployUnset(t *testing.T) {
+func TestReconcileInfrastructure_DefaultsToExternalInfraWhenDeployUnset(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
@@ -101,16 +87,14 @@ func TestInfrastructureReadyEvent_DefaultsToExternalInfraWhenDeployUnset(t *test
 	if !result.IsZero() {
 		t.Fatalf("expected zero result for default BYOI infra, got %+v", result)
 	}
-	assertEvent(t, rec, "InfrastructureReady")
-
-	db := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
-	if db == nil || db.Status != metav1.ConditionTrue || db.Reason != "ExternalDatabase" {
-		t.Fatalf("expected DatabaseReady=True ExternalDatabase, got %+v", db)
+	// Unset deploy means BYOI: nothing is deployed and the conditions are left
+	// to the validation probes.
+	for _, typ := range []string{costv1alpha1.ConditionDatabaseReady, costv1alpha1.ConditionCacheReady} {
+		if cond := apimeta.FindStatusCondition(cfg.Status.Conditions, typ); cond != nil {
+			t.Fatalf("expected no %s from the infrastructure stage, got %+v", typ, cond)
+		}
 	}
-	cache := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
-	if cache == nil || cache.Status != metav1.ConditionTrue || cache.Reason != "ExternalCache" {
-		t.Fatalf("expected CacheReady=True ExternalCache, got %+v", cache)
-	}
+	assertNoEvent(t, rec, "InfrastructureReady")
 }
 
 // Core services becoming ready must not emit a success Event or publish

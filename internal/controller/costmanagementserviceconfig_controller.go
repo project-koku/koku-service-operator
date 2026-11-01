@@ -278,7 +278,7 @@ func (r *CostManagementServiceConfigReconciler) phases(ctx context.Context, cfg 
 	if r.phasesOverride != nil {
 		return r.phasesOverride(ctx, cfg)
 	}
-	return []PhaseFn{
+	pipeline := []PhaseFn{
 		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
 		func() (Result, error) {
 			// A saved operation uses its frozen discovery snapshot.
@@ -288,8 +288,9 @@ func (r *CostManagementServiceConfigReconciler) phases(ctx context.Context, cfg 
 			return r.reconcileDiscovery(ctx, cfg)
 		},
 		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
-		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
-		func() (Result, error) { return r.reconcileValidation(ctx, cfg) },
+	}
+	pipeline = append(pipeline, r.infrastructurePhases(ctx, cfg)...)
+	return append(pipeline,
 		func() (Result, error) {
 			if !migrations {
 				return Result{}, nil
@@ -301,7 +302,35 @@ func (r *CostManagementServiceConfigReconciler) phases(ctx context.Context, cfg 
 		func() (Result, error) { return r.reconcileEdge(ctx, cfg) },
 		func() (Result, error) { return r.reconcileMonitoring(ctx, cfg) },
 		func() (Result, error) { return r.waitForApplicationRollout(ctx, cfg) },
+	)
+}
+
+// infrastructurePhases returns the infrastructure and validation stages.
+// DatabaseReady/CacheReady are final only after validation has probed the
+// external dependencies, so the InfrastructureReady Event compares the state
+// after validation with a snapshot taken before the infrastructure stage and
+// fires once per transition to ready, not on every pass.
+func (r *CostManagementServiceConfigReconciler) infrastructurePhases(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) []PhaseFn {
+	var wasReady bool
+	return []PhaseFn{
+		func() (Result, error) {
+			wasReady = infrastructureReady(cfg)
+			return r.reconcileInfrastructure(ctx, cfg)
+		},
+		func() (Result, error) {
+			result, err := r.reconcileValidation(ctx, cfg)
+			if err == nil && !wasReady && infrastructureReady(cfg) {
+				r.Recorder.Event(cfg, corev1.EventTypeNormal, "InfrastructureReady", "Database and cache are available")
+			}
+			return result, err
+		},
 	}
+}
+
+// infrastructureReady reports whether both DatabaseReady and CacheReady are True.
+func infrastructureReady(cfg *costv1alpha1.CostManagementServiceConfig) bool {
+	return apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady) &&
+		apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
 }
 
 // markProfileApplied records the tier whose sized workloads were applied for
@@ -512,9 +541,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 // -----------------------------------------------------------------------------
 
 func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
-	alreadyReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady) &&
-		apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionCacheReady)
-
+	// DatabaseReady/CacheReady for external dependencies are owned by
+	// reconcileValidation, which probes them. Writing them here as well made
+	// the conditions flip True/False on every pass during an outage, and each
+	// flip re-emitted InfrastructureReady and DependencyFailed.
 	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) {
 		if err := r.apply(ctx, cfg, resources.DatabaseService(cfg)); err != nil {
 			return Result{}, fmt.Errorf("database service: %w", err)
@@ -536,8 +566,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 			return Result{RequeueAfter: requeueFast}, nil
 		}
 		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionTrue, "DatabaseAvailable", "")
-	} else {
-		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionTrue, "ExternalDatabase", "")
 	}
 
 	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false) {
@@ -559,12 +587,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 			return Result{RequeueAfter: requeueFast}, nil
 		}
 		r.setCondition(cfg, costv1alpha1.ConditionCacheReady, metav1.ConditionTrue, "CacheAvailable", "")
-	} else {
-		r.setCondition(cfg, costv1alpha1.ConditionCacheReady, metav1.ConditionTrue, "ExternalCache", "")
-	}
-
-	if !alreadyReady {
-		r.Recorder.Event(cfg, corev1.EventTypeNormal, "InfrastructureReady", "Database and cache are available")
 	}
 	return Result{}, nil
 }

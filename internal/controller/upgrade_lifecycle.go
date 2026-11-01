@@ -517,8 +517,8 @@ func transientDatabaseOrCacheDependency(cfg *cost.CostManagementServiceConfig) (
 		conditionType string
 		reason        string
 	}{
-		{cost.ConditionDatabaseReady, "DatabaseUnreachable"},
-		{cost.ConditionCacheReady, "CacheUnreachable"},
+		{cost.ConditionDatabaseReady, reasonDatabaseUnreachable},
+		{cost.ConditionCacheReady, reasonCacheUnreachable},
 	} {
 		condition := apimeta.FindStatusCondition(cfg.Status.Conditions, item.conditionType)
 		if condition != nil && condition.Status == metav1.ConditionFalse && condition.Reason == item.reason {
