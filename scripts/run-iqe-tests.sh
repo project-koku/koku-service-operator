@@ -118,7 +118,9 @@ Environment Variables:
     IQE_IMAGE            IQE container image
     IQE_FILTER           Custom filter (overrides all skip groups)
     TEST_PROFILE         Same as --profile flag
-    HELM_RELEASE_NAME    Helm release name (default: cost-onprem)
+    HELM_RELEASE_NAME    Helm release / CMSC name (default: cost-onprem).
+                         Must match CMSC metadata.name so Secret
+                         {name}-masu-admin-token resolves (COST-8059).
     KEYCLOAK_SECRET_NS   Namespace containing Keycloak secret (default: keycloak)
     NISE_VERSION         NISE version to use
 
@@ -702,6 +704,19 @@ else
     echo "WARNING: Could not extract cluster CA certificates"
 fi
 
+# COST-8059: on-prem Masu admin paths require Authorization: Bearer <token>.
+# Operator create-only Secret; HELM_RELEASE_NAME must match the CMSC metadata.name.
+MASU_ADMIN_SECRET="${HELM_RELEASE_NAME}-masu-admin-token"
+MASU_ADMIN_TOKEN=$(kubectl get secret "${MASU_ADMIN_SECRET}" -n "${NAMESPACE}" \
+    -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+if [ -n "${MASU_ADMIN_TOKEN}" ]; then
+    echo "✓ Masu admin token loaded from Secret/${MASU_ADMIN_SECRET}"
+else
+    echo "⚠ WARNING: Secret/${MASU_ADMIN_SECRET} missing or empty."
+    echo "  On-prem Masu admin calls (exchange-rate seed, IQE masu client) will 401"
+    echo "  until the Operator COST-8059 wiring is deployed."
+fi
+
 # Pre-seed exchange rates so currency-filtered tests have valid rates available.
 # The EnabledCurrency table is populated by koku migration 0014_enabled_currency;
 # CURRENCY_URL must be set (CMSC spec.costManagement.api.env) for
@@ -711,11 +726,16 @@ fi
 # Exec into the masu pod and curl localhost:8000 so the request never leaves the
 # pod: the operator's MasuNetworkPolicy only permits Prometheus on :9000, so any
 # off-pod caller to masu:8000 is denied. localhost traffic bypasses NetworkPolicy.
+# With COST-8059, pass Bearer when the Operator Secret is present.
 echo ""
 echo "Seeding exchange rates via masu internal API..."
 MASU_INTERNAL_URL="http://localhost:${MASU_PORT}/api/cost-management/v1"
+MASU_CURL_AUTH=()
+if [ -n "${MASU_ADMIN_TOKEN}" ]; then
+    MASU_CURL_AUTH=(-H "Authorization: Bearer ${MASU_ADMIN_TOKEN}")
+fi
 EXCHANGE_RATE_RESPONSE=$(kubectl exec --request-timeout=30s -n "${NAMESPACE}" "deploy/${HELM_RELEASE_NAME}-koku-masu" -c masu -- \
-    curl -sf --max-time 20 "${MASU_INTERNAL_URL}/update_exchange_rates/" 2>/dev/null || echo "")
+    curl -sf --max-time 20 "${MASU_CURL_AUTH[@]}" "${MASU_INTERNAL_URL}/update_exchange_rates/" 2>/dev/null || echo "")
 if [ -n "$EXCHANGE_RATE_RESPONSE" ]; then
     RATE_COUNT=$(echo "$EXCHANGE_RATE_RESPONSE" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('updated_exchange_rates',{})))" 2>/dev/null || echo "0")
     echo "✓ Exchange rates seeded (${RATE_COUNT} currencies)"
@@ -1017,6 +1037,14 @@ spec:
       value: "${MASU_PORT}"
     - name: DYNACONF_SERVICE_OBJECTS__MASU__CONFIG__SCHEME
       value: "http"
+    # COST-8059: Masu admin Bearer (plugin swaps JWT auth on the masu client).
+    # optional:true so older Operator installs without the Secret still start IQE.
+    - name: MASU_ADMIN_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: ${MASU_ADMIN_SECRET}
+          key: token
+          optional: true
     - name: DYNACONF_SERVICE_OBJECTS__COST_MANAGEMENT_SOURCES__CONFIG__HOSTNAME
       value: "${KOKU_HOSTNAME}"
     - name: DYNACONF_SERVICE_OBJECTS__COST_MANAGEMENT_SOURCES__CONFIG__SCHEME
