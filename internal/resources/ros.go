@@ -208,7 +208,7 @@ func kafkaTLSVolumeAndMount(cfg *costv1alpha1.CostManagementServiceConfig) (*cor
 
 // ROSAPIDeployment builds the ROS API Deployment.
 func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-api")
 	allLabels := Labels(cfg, "ros-api")
 	replicas := int32(1)
@@ -230,7 +230,7 @@ func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 
 	volumes, mounts := rosAPIVolumes(cfg)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameROSAPI(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -252,7 +252,7 @@ func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
 						Command:         []string{"sh", "-c"},
-						Args:            []string{"./rosocp start api"},
+						Args:            []string{"exec ./rosocp start api"},
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: rosAPIPort, Protocol: corev1.ProtocolTCP},
 							{Name: "metrics", ContainerPort: rosMetricPort, Protocol: corev1.ProtocolTCP},
@@ -275,6 +275,7 @@ func ROSAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Dep
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 func rosAPIVolumes(cfg *costv1alpha1.CostManagementServiceConfig) ([]corev1.Volume, []corev1.VolumeMount) {
@@ -308,7 +309,7 @@ func ROSAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servic
 
 // ROSProcessorDeployment builds the ROS Processor Deployment.
 func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-processor")
 	allLabels := Labels(cfg, "ros-processor")
 	replicas := ProfileReplicas(cfg, WorkloadROSProcessor, cfg.Spec.ROS.Processor.Replicas)
@@ -369,7 +370,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 		EnvVal("SSL_CERT_FILE", "/etc/ssl/certs/ca-bundle/ca-bundle.crt"),
 	)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameROSProcessor(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -392,7 +393,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
 						Command:         []string{"sh", "-c"},
-						Args:            []string{"sleep 60 && ./rosocp start processor"},
+						Args:            []string{"sleep 60 && exec ./rosocp start processor"},
 						Ports:           []corev1.ContainerPort{{Name: "metrics", ContainerPort: rosMetricPort, Protocol: corev1.ProtocolTCP}},
 						Env:             env,
 						LivenessProbe: &corev1.Probe{
@@ -412,6 +413,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // -----------------------------------------------------------------------------
@@ -420,7 +422,7 @@ func ROSProcessorDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *apps
 
 // ROSPollerDeployment builds the Recommendation Poller Deployment.
 func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-recommendation-poller")
 	allLabels := Labels(cfg, "ros-recommendation-poller")
 	replicas := int32(1)
@@ -448,7 +450,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 		EnvVal("PROMETHEUS_PORT", "9000"),
 	)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameROSPoller(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -470,7 +472,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
 						Command:         []string{"sh", "-c"},
-						Args:            []string{"sleep 60 && ./rosocp start recommendation-poller"},
+						Args:            []string{"sleep 60 && exec ./rosocp start recommendation-poller"},
 						Ports:           []corev1.ContainerPort{{Name: "metrics", ContainerPort: rosMetricPort, Protocol: corev1.ProtocolTCP}},
 						Env:             env,
 						LivenessProbe: &corev1.Probe{
@@ -490,6 +492,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // -----------------------------------------------------------------------------
@@ -498,7 +501,7 @@ func ROSPollerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.
 
 // ROSHousekeeperDeployment builds the Housekeeper Deployment.
 func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	selLabels := SelectorLabels(cfg, "ros-housekeeper")
 	allLabels := Labels(cfg, "ros-housekeeper")
 	replicas := int32(1)
@@ -523,7 +526,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 		EnvVal("LOG_LEVEL", "INFO"),
 	)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameROSHousekeeper(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -543,10 +546,11 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 					},
 					Containers: []corev1.Container{{
 						Name:            "ros-housekeeper",
+						ReadinessProbe:  &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "test \"$(cat /proc/1/comm)\" = rosocp"}}}, InitialDelaySeconds: 70, PeriodSeconds: 15, TimeoutSeconds: 3, FailureThreshold: 3},
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
 						Command:         []string{"sh", "-c"},
-						Args:            []string{"sleep 60 && ./rosocp start housekeeper --sources"},
+						Args:            []string{"sleep 60 && exec ./rosocp start housekeeper --sources"},
 						Env:             env,
 						Resources:       ProfileResources(cfg, WorkloadROSHousekeeper, cfg.Spec.ROS.Housekeeper.Resources),
 						VolumeMounts:    mounts,
@@ -557,6 +561,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // -----------------------------------------------------------------------------
@@ -565,7 +570,7 @@ func ROSHousekeeperDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *ap
 
 // ROSPartitionCleanerCronJob builds the partition cleaner CronJob.
 func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1.CronJob {
-	image := cfg.Spec.ROS.Image.Repository + ":" + cfg.Spec.ROS.Image.Tag
+	image, _ := ImageRef(cfg.Spec.ROS.Image)
 	pc := cfg.Spec.ROS.Housekeeper.PartitionCleaner
 	schedule := pc.Schedule
 	if schedule == "" {
@@ -585,6 +590,8 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 			Labels:    Labels(cfg, "ros-database-maintenance"),
 		},
 		Spec: batchv1.CronJobSpec{
+			// Explicit so SSA resumes schedules suspended during upgrade quiescence.
+			Suspend:  new(false),
 			Schedule: schedule,
 			JobTemplate: batchv1.JobTemplateSpec{
 				Spec: batchv1.JobSpec{
@@ -600,7 +607,7 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 								Image:           image,
 								ImagePullPolicy: pullPolicy(cfg),
 								Command:         []string{"sh", "-c"},
-								Args:            []string{"./rosocp start housekeeper --partitions"},
+								Args:            []string{"exec ./rosocp start housekeeper --partitions"},
 								Env:             env,
 								Resources:       ProfileResources(cfg, WorkloadROSPartitionCleaner, pc.Resources),
 								SecurityContext: restrictedContainerSC(),

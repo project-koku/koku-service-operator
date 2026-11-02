@@ -231,7 +231,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-10-27T14:45:32Z"
+    createdAt: "2026-10-27T20:34:36Z"
     description: |
       Kubernetes operator for self-managed (on-premise) Cost Management on OpenShift
       that deploys and manages the Cost Management stack against external infrastructure
@@ -513,6 +513,12 @@ spec:
                 - update
                 - watch
             - apiGroups:
+                - apps
+              resources:
+                - replicasets
+              verbs:
+                - get
+            - apiGroups:
                 - batch
               resources:
                 - cronjobs
@@ -788,3 +794,19 @@ spec:
   relatedImages:
     - name: koku-service-operator
       image: quay.io/project-koku/koku-service-operator@sha256:7a9b1505cbc94ae0005a05b8eeb6feea0124fb9ea2c852eaaff5efc6a9d29fe2
+    - name: "gateway"
+      image: "registry.redhat.io/openshift-service-mesh/proxyv2-rhel9:2.6"
+    - name: "ingress"
+      image: "quay.io/iop/ingress:sha-6dde23d"
+    - name: "koku"
+      image: "quay.io/project-koku/koku:422f758"
+    - name: "kruize"
+      image: "quay.io/redhat-services-prod/kruize-autotune-tenant/autotune:d1f0140"
+    - name: "oauthProxy"
+      image: "registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0"
+    - name: "rbac"
+      image: "quay.io/project-koku/insights-rbac:34e25ed"
+    - name: "ros"
+      image: "quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend:ae8c990"
+    - name: "ui"
+      image: "quay.io/insights-onprem/koku-ui-onprem:d64d393ede6ab625e53c63202a6bcdb6fa48e718"

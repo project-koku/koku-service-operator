@@ -406,7 +406,7 @@ bundle: manifests kustomize operator-sdk yq ## Generate bundle manifests and met
 	$(YQ) -i '.metadata.labels["operatorframework.io/os.linux"] = "supported"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.minKubeVersion = "$(MIN_KUBE_VERSION)"' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 	$(YQ) -i '.spec.description |= load_str("docs/csv-description.md")' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
-	$(YQ) -i '.spec.relatedImages = [{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}]' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
+	$(YQ) -i '.spec.relatedImages = ([{"name": "koku-service-operator", "image": "$(IMAGE_SHA)"}] + (load("internal/release/images.json") | to_entries | map({"name": .key, "image": .value})))' bundle/manifests/koku-service-operator.clusterserviceversion.yaml
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.

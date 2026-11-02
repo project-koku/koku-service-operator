@@ -59,7 +59,7 @@ func ingressS3UseSSL(cfg *costv1alpha1.CostManagementServiceConfig) string {
 // binary trusts the X-Rh-Identity header injected by Envoy.
 func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.Ingress
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	selLabels := SelectorLabels(cfg, "ingress")
 	allLabels := Labels(cfg, "ingress")
 	replicas := int32(1)
@@ -125,7 +125,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	livenessProbe := ingressProbe("/healthz")
 	readinessProbe := ingressProbe("/status/")
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameIngress(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -159,6 +159,7 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // ingressProbe configures the timings used by the upstream ingress deployment.

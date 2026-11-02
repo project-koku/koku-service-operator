@@ -1,0 +1,10 @@
+{
+  "gateway": "registry.redhat.io/openshift-service-mesh/proxyv2-rhel9:2.6",
+  "ingress": "quay.io/iop/ingress:sha-6dde23d",
+  "koku": "quay.io/project-koku/koku:422f758",
+  "kruize": "quay.io/redhat-services-prod/kruize-autotune-tenant/autotune:d1f0140",
+  "oauthProxy": "registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0",
+  "rbac": "quay.io/project-koku/insights-rbac:34e25ed",
+  "ros": "quay.io/redhat-services-prod/insights-management-tenant/insights-ocp-resource-optimization/ros-ocp-backend:ae8c990",
+  "ui": "quay.io/insights-onprem/koku-ui-onprem:d64d393ede6ab625e53c63202a6bcdb6fa48e718"
+}

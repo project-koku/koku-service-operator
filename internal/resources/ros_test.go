@@ -189,6 +189,10 @@ func TestROSHousekeeperDeployment_WaitsForKoku(t *testing.T) {
 	if len(d.Spec.Template.Spec.InitContainers) < 4 {
 		t.Fatalf("expected DB+Kafka+Kruize+Koku inits, got %d", len(d.Spec.Template.Spec.InitContainers))
 	}
+	container := d.Spec.Template.Spec.Containers[0]
+	if container.ReadinessProbe == nil || container.ReadinessProbe.InitialDelaySeconds < 60 {
+		t.Fatal("housekeeper readiness must not start before its 60-second process startup delay")
+	}
 	env := envValues(d.Spec.Template.Spec.Containers[0])
 	if env["SERVICE_NAME"] != "ros-housekeeper-sources" {
 		t.Errorf("SERVICE_NAME = %q", env["SERVICE_NAME"])

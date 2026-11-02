@@ -130,14 +130,14 @@ func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Contain
 // Koku delegates all permission checks to this service via HTTP.
 func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	replicas := ProfileReplicas(cfg, WorkloadRBACAPI, spec.API.Replicas)
 	falseVal := false
 	selLabels := SelectorLabels(cfg, "rbac-api")
 	allLabels := Labels(cfg, "rbac-api")
 	vols, mounts := rbacVolumesAndMounts(cfg)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      NameRBACAPI(cfg),
@@ -193,6 +193,7 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // RBACAPIService exposes the RBAC API inside the cluster.
@@ -218,14 +219,14 @@ func RBACAPIService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servi
 // RBACWorkerDeployment builds the RBAC Celery worker Deployment.
 func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
-	image := spec.Image.Repository + ":" + spec.Image.Tag
+	image, _ := ImageRef(spec.Image)
 	replicas := ProfileReplicas(cfg, WorkloadRBACWorker, spec.Worker.Replicas)
 	falseVal := false
 	selLabels := SelectorLabels(cfg, "rbac-worker")
 	allLabels := Labels(cfg, "rbac-worker")
 	vols, mounts := rbacVolumesAndMounts(cfg)
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      NameRBACWorker(cfg),
@@ -253,6 +254,7 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 						WorkingDir:      "/opt/rbac/rbac",
 						Command:         []string{"celery"},
 						Args:            []string{"-A", "rbac.celery", "worker", "--pool=solo", "--loglevel=info"},
+						ReadinessProbe:  rbacWorkerReadiness(),
 						Env:             rbacEnv(cfg),
 						Resources:       ProfileResources(cfg, WorkloadRBACWorker, spec.Worker.Resources),
 						VolumeMounts:    mounts,
@@ -263,4 +265,16 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 			},
 		},
 	}
+	return ApplicationRollout(d)
+}
+
+func rbacWorkerReadiness() *corev1.Probe {
+	// The operand image provides Python/Celery, but no grep or other shell
+	// utilities. Address this worker explicitly and require a successful pong.
+	return &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{
+		"python", "-c", "import os; from rbac.celery import app; " +
+			"node='celery@'+os.environ['HOSTNAME']; " +
+			"reply=app.control.inspect(destination=[node],timeout=3).ping() or {}; " +
+			"raise SystemExit(reply.get(node,{}).get('ok')!='pong')",
+	}}}, InitialDelaySeconds: 15, PeriodSeconds: 30, TimeoutSeconds: 10, FailureThreshold: 3}
 }

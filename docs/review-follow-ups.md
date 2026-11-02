@@ -56,28 +56,18 @@ cluster-scoped watch.
 
 ---
 
-## 7. Keycloak sync: mount CA bundle for private-CA Keycloak
+## 7. Keycloak sync: mount CA bundle for private-CA Keycloak — **resolved (COST-8521)**
 
 **Source:** Code review finding.
 
-**Problem:** The Keycloak sync CronJob (now implemented in [PR #53](https://github.com/project-koku/koku-service-operator/pull/53)) verifies
-TLS against Keycloak. If Keycloak uses a private CA (common on-prem),
-`ssl.create_default_context()` won't trust it. `KEYCLOAK_TLS_VERIFY` follows
-`auth.keycloak.tls.insecureSkipVerify`, but `auth.keycloak.tls.caCertSecretName`
-is not mounted into the sync CronJob and the script has no `SSL_CERT_FILE`
-override.
-
-The Helm chart's CronJob template has the same gap.
-
-**Impact:** Private-CA Keycloak with `insecureSkipVerify=false` (the secure
-default) → CronJob auth failures. Users must set `insecureSkipVerify=true`
-as a workaround, defeating TLS verification.
-
-**Suggested fix:** Mount the Keycloak CA Secret (or the combined CA bundle
-from CACombineInitContainer) and set `SSL_CERT_FILE` in the container env.
-Follow the same pattern used by the Envoy gateway and oauth2-proxy.
-Envoy already trusts this CA (COST-7688 R2); this item is the CronJob-only
-remaining gap.
+The sync CronJob verified Keycloak TLS with the system trust store only, so a
+private-CA Keycloak needed `insecureSkipVerify=true`. **COST-8521** mounts the
+same CA oauth2-proxy uses (`auth.keycloak.tls.caCertSecretName`, else the
+OpenShift service CA) at `/etc/keycloak-ca/ca.crt` and sets
+`KEYCLOAK_CA_FILE` when the sync URL is `https://` with verification enabled;
+the sync script adds it to the default trust store (`load_verify_locations`)
+instead of replacing it. `http://` URLs and `insecureSkipVerify` mount no CA. The Helm chart's CronJob
+template still has the gap.
 
 ---
 

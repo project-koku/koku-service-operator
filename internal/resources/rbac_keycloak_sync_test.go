@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -275,5 +276,107 @@ func TestSyncScriptEmbedded(t *testing.T) {
 	}
 	if !strings.Contains(syncKeycloakScript, "def main()") {
 		t.Error("embedded script missing main() function")
+	}
+}
+
+// review-follow-ups #7: the sync CronJob must trust the same Keycloak CA as
+// oauth2-proxy (auth.keycloak.tls.caCertSecretName, else the service CA) so a
+// private-CA Keycloak works without insecureSkipVerify.
+func TestKeycloakSyncCronJobKeycloakCA(t *testing.T) {
+	cases := []struct {
+		name       string
+		caSecret   string
+		wantSecret bool
+	}{
+		{name: "caCertSecretName set", caSecret: "keycloak-ingress-ca", wantSecret: true},
+		{name: "service CA fallback", caSecret: "", wantSecret: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := keycloakSyncCfg()
+			cfg.Spec.Auth.Keycloak.URL = "https://keycloak.keycloak.svc:8443"
+			cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = tc.caSecret
+			pod := KeycloakSyncCronJob(cfg).Spec.JobTemplate.Spec.Template.Spec
+			c := pod.Containers[0]
+
+			var vol *corev1.Volume
+			for i := range pod.Volumes {
+				if pod.Volumes[i].Name == "keycloak-ca" {
+					vol = &pod.Volumes[i]
+				}
+			}
+			if vol == nil {
+				t.Fatal("missing keycloak-ca volume")
+			}
+			if tc.wantSecret {
+				if vol.Secret == nil || vol.Secret.SecretName != tc.caSecret {
+					t.Fatalf("keycloak-ca volume = %+v, want Secret %q", vol.VolumeSource, tc.caSecret)
+				}
+			} else if vol.ConfigMap == nil || vol.ConfigMap.Name != NameServiceCAConfigMap(cfg) {
+				t.Fatalf("keycloak-ca volume = %+v, want service-CA ConfigMap", vol.VolumeSource)
+			}
+
+			mounted := false
+			for _, m := range c.VolumeMounts {
+				if m.Name == "keycloak-ca" && m.MountPath == "/etc/keycloak-ca" && m.ReadOnly {
+					mounted = true
+				}
+			}
+			if !mounted {
+				t.Fatalf("keycloak-ca not mounted read-only at /etc/keycloak-ca: %+v", c.VolumeMounts)
+			}
+
+			env := map[string]string{}
+			for _, e := range c.Env {
+				env[e.Name] = e.Value
+			}
+			if env["KEYCLOAK_CA_FILE"] != "/etc/keycloak-ca/ca.crt" {
+				t.Fatalf("KEYCLOAK_CA_FILE = %q, want /etc/keycloak-ca/ca.crt", env["KEYCLOAK_CA_FILE"])
+			}
+		})
+	}
+}
+
+// The script must add KEYCLOAK_CA_FILE to the default trust store (not
+// replace it, as SSL_CERT_FILE would for the whole manage.py process).
+func TestSyncScriptLoadsKeycloakCA(t *testing.T) {
+	for _, want := range []string{`os.environ.get("KEYCLOAK_CA_FILE"`, "load_verify_locations(cafile="} {
+		if !strings.Contains(syncKeycloakScript, want) {
+			t.Errorf("sync script missing %q", want)
+		}
+	}
+}
+
+// The CA is only read for verified HTTPS. For an http:// URL or
+// insecureSkipVerify the CronJob must not depend on it: the service-CA
+// ConfigMap is created empty and filled by injection, and an unmounted key
+// would keep the Pod in ContainerCreating.
+func TestKeycloakSyncCronJobNoCAWhenUnused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		url      string
+		insecure bool
+	}{
+		{name: "http URL", url: "http://keycloak.keycloak.svc:8080"},
+		{name: "https with insecureSkipVerify", url: "https://keycloak.keycloak.svc:8443", insecure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := keycloakSyncCfg()
+			cfg.Spec.Auth.Keycloak.URL = tc.url
+			cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify = tc.insecure
+			cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "keycloak-ingress-ca"
+			pod := KeycloakSyncCronJob(cfg).Spec.JobTemplate.Spec.Template.Spec
+
+			for _, v := range pod.Volumes {
+				if v.Name == "keycloak-ca" {
+					t.Fatalf("unexpected keycloak-ca volume: %+v", v.VolumeSource)
+				}
+			}
+			for _, e := range pod.Containers[0].Env {
+				if e.Name == "KEYCLOAK_CA_FILE" {
+					t.Fatalf("unexpected KEYCLOAK_CA_FILE=%q", e.Value)
+				}
+			}
+		})
 	}
 }

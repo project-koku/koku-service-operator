@@ -343,7 +343,11 @@ admin_default permissions at login; it is not a bypass of RBAC.
 Keycloak-to-RBAC principal sync (`spec.rbac.keycloakSync`) is a separate
 CronJob. It copies top-level `org-{orgId}` group members into RBAC
 Principals. It is not required for JWT gateway auth and does not replace
-assigning the `org-admin` realm role to administrators.
+assigning the `org-admin` realm role to administrators. The CronJob trusts the
+same Keycloak CA as the UI (`spec.auth.keycloak.tls.caCertSecretName`, else the
+OpenShift service CA) in addition to the system trust store when
+`spec.auth.keycloak.url` is `https://`, so a private-CA Keycloak does not need
+`insecureSkipVerify`.
 
 ## Upgrade note
 

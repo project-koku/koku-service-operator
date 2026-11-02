@@ -39,13 +39,18 @@ func (r *CostManagementServiceConfigReconciler) reconcileDiscovery(ctx context.C
 	}
 	cfg.Status.DiscoveredConfig.ClusterDomain = domain
 
-	// Default StorageClass
+	// Default StorageClass. Only bundled PostgreSQL / Valkey create PVCs; a
+	// fully external (BYOI) install records it when present but does not
+	// require one.
 	sc, err := r.resolveStorageClass(ctx, cfg)
 	if err != nil {
-		r.setCondition(cfg, costv1alpha1.ConditionDiscoveryComplete, metav1.ConditionFalse,
-			"StorageClassNotFound",
-			fmt.Sprintf("%v — set spec.global.storageClass to override", err))
-		return Result{RequeueAfter: requeueSlow}, nil
+		if needsStorageClass(cfg) {
+			r.setCondition(cfg, costv1alpha1.ConditionDiscoveryComplete, metav1.ConditionFalse,
+				"StorageClassNotFound",
+				fmt.Sprintf("%v — set spec.global.storageClass to override", err))
+			return Result{RequeueAfter: requeueSlow}, nil
+		}
+		sc = ""
 	}
 	cfg.Status.DiscoveredConfig.StorageClass = sc
 
@@ -86,6 +91,13 @@ func (r *CostManagementServiceConfigReconciler) resolveClusterDomain(ctx context
 		return explicit, nil
 	}
 	return discoverClusterDomain(ctx, r.Client)
+}
+
+// needsStorageClass reports whether the CR creates PVCs (bundled database or
+// cache), which is when a StorageClass is required.
+func needsStorageClass(cfg *costv1alpha1.CostManagementServiceConfig) bool {
+	return costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, false) ||
+		costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, false)
 }
 
 // resolveStorageClass returns the StorageClass name to use.

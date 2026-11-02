@@ -228,7 +228,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 		InitialDelaySeconds: 30, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
 	}
 
-	return &appsv1.Deployment{
+	d := &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: NameUI(cfg), Namespace: cfg.Namespace, Labels: allLabels},
 		Spec: appsv1.DeploymentSpec{
@@ -294,6 +294,7 @@ func UIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deploym
 			},
 		},
 	}
+	return ApplicationRollout(d)
 }
 
 // UIService exposes the UI oauth-proxy on HTTPS.

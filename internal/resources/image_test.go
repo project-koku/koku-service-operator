@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,13 @@ func TestImageRef(t *testing.T) {
 		{"tag only", costv1alpha1.ImageSpec{Tag: "abc123"}, "", false},
 		{"whitespace", costv1alpha1.ImageSpec{Repository: "  ", Tag: " v1 "}, "", false},
 		{"trimmed", costv1alpha1.ImageSpec{Repository: " quay.io/example/koku ", Tag: " v1 "}, "quay.io/example/koku:v1", true},
+		{"digest only", costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Digest: "sha256:" + strings.Repeat("a", 64)},
+			"quay.io/example/koku@sha256:" + strings.Repeat("a", 64), true},
+		{"digest wins over tag", costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1", Digest: "sha256:" + strings.Repeat("b", 64)},
+			"quay.io/example/koku@sha256:" + strings.Repeat("b", 64), true},
+		{"digest without repository", costv1alpha1.ImageSpec{Digest: "sha256:" + strings.Repeat("a", 64)}, "", false},
+		{"invalid digest does not fall back to tag", costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1", Digest: "sha256:bad"}, "", false},
+		{"invalid digest hex", costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Digest: "sha256:" + strings.Repeat("g", 64)}, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,6 +127,20 @@ func TestMissingWorkloadImages_ROSRequiresImages(t *testing.T) {
 	missing := MissingWorkloadImages(cfg)
 	if !slices.Contains(missing, "spec.ros.image") || !slices.Contains(missing, "spec.kruize.image") {
 		t.Errorf("ROS enabled missing = %v, want spec.ros.image and spec.kruize.image", missing)
+	}
+}
+
+func TestMissingWorkloadImages_RejectsPartialMasuOverride(t *testing.T) {
+	t.Parallel()
+	for _, image := range []costv1alpha1.ImageSpec{
+		{Repository: "quay.io/test/masu"}, {Tag: "v1"},
+		{Repository: "quay.io/test/masu", Tag: "v1", Digest: "sha256:invalid"},
+	} {
+		cfg := minimalCRForResources("cm", "ns")
+		cfg.Spec.CostManagement.Masu.Image = image
+		if missing := MissingWorkloadImages(cfg); !slices.Contains(missing, "spec.costManagement.masu.image") {
+			t.Errorf("partial or invalid Masu override must be rejected: %+v", image)
+		}
 	}
 }
 

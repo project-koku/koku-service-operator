@@ -269,7 +269,45 @@ func TestReconcileDiscovery_DomainMissing_RequeuesWithCondition(t *testing.T) {
 	assertDiscoveryCondition(t, cfg, metav1.ConditionFalse, "ClusterDomainNotFound")
 }
 
+// Bundled PostgreSQL / Valkey create PVCs, so they still need a StorageClass.
 func TestReconcileDiscovery_StorageClassMissing_RequeuesWithCondition(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		database, cache bool
+	}{
+		{name: "bundled database", database: true},
+		{name: "bundled cache", cache: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewClientBuilder().
+				WithScheme(testScheme(t)).
+				WithObjects(openShiftIngress(testClusterDomain)).
+				Build()
+
+			r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+			cfg := &costv1alpha1.CostManagementServiceConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+				Spec: costv1alpha1.CostManagementServiceConfigSpec{
+					Database: costv1alpha1.DatabaseConfig{Deploy: new(tc.database)},
+					Cache:    costv1alpha1.CacheConfig{Deploy: new(tc.cache)},
+				},
+			}
+
+			result, err := r.reconcileDiscovery(context.Background(), cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.RequeueAfter == 0 {
+				t.Error("expected non-zero RequeueAfter when StorageClass not found")
+			}
+			assertDiscoveryCondition(t, cfg, metav1.ConditionFalse, "StorageClassNotFound")
+		})
+	}
+}
+
+// D21: fully external (BYOI) database and cache create no PVCs, so a missing
+// default StorageClass must not block discovery.
+func TestReconcileDiscovery_BYOI_NoDefaultStorageClass_Continues(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(openShiftIngress(testClusterDomain)).
@@ -278,14 +316,21 @@ func TestReconcileDiscovery_StorageClassMissing_RequeuesWithCondition(t *testing
 	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Database: costv1alpha1.DatabaseConfig{Deploy: new(false)},
+			Cache:    costv1alpha1.CacheConfig{Deploy: new(false)},
+		},
 	}
 
 	result, err := r.reconcileDiscovery(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.RequeueAfter == 0 {
-		t.Error("expected non-zero RequeueAfter when StorageClass not found")
+	if !result.IsZero() {
+		t.Fatalf("expected discovery to continue without a StorageClass, got %+v", result)
 	}
-	assertDiscoveryCondition(t, cfg, metav1.ConditionFalse, "StorageClassNotFound")
+	if got := cfg.Status.DiscoveredConfig.StorageClass; got != "" {
+		t.Errorf("StorageClass: got %q, want empty", got)
+	}
+	assertDiscoveryCondition(t, cfg, metav1.ConditionTrue, "Discovered")
 }

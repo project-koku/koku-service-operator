@@ -40,7 +40,7 @@ TOKEN_REFRESH_MARGIN = 0.8
 class KeycloakClient:
     """Minimal Keycloak Admin REST API client using urllib."""
 
-    def __init__(self, base_url, realm, client_id, client_secret, verify_tls=True):
+    def __init__(self, base_url, realm, client_id, client_secret, verify_tls=True, ca_file=None):
         self.base_url = base_url.rstrip("/")
         self.realm = realm
         self.client_id = client_id
@@ -51,6 +51,10 @@ class KeycloakClient:
 
         if verify_tls:
             self._ssl_ctx = ssl.create_default_context()
+            # Trust the configured Keycloak CA (private CA / service CA) in
+            # addition to the system store.
+            if ca_file and os.path.isfile(ca_file):
+                self._ssl_ctx.load_verify_locations(cafile=ca_file)
         else:
             self._ssl_ctx = ssl.create_default_context()
             self._ssl_ctx.check_hostname = False
@@ -322,6 +326,7 @@ def main():
     client_id = os.environ.get("KEYCLOAK_CLIENT_ID", "")
     client_secret = os.environ.get("KEYCLOAK_CLIENT_SECRET", "")
     verify_tls = os.environ.get("KEYCLOAK_TLS_VERIFY", "true").lower() not in ("false", "0", "no")
+    ca_file = os.environ.get("KEYCLOAK_CA_FILE", "")
     org_group_prefix = os.environ.get("SYNC_ORG_GROUP_PREFIX", "org-")
     org_admin_subgroup = os.environ.get("SYNC_ORG_ADMIN_SUBGROUP", "org-admin")
     prune_orphans = os.environ.get("SYNC_PRUNE_ORPHANS", "true").lower() not in ("false", "0", "no")
@@ -340,7 +345,7 @@ def main():
     log.info("Starting Keycloak-to-RBAC sync: realm=%s, org_group_prefix=%s, tls_verify=%s, prune=%s",
              realm, org_group_prefix, verify_tls, prune_orphans)
 
-    kc = KeycloakClient(keycloak_url, realm, client_id, client_secret, verify_tls)
+    kc = KeycloakClient(keycloak_url, realm, client_id, client_secret, verify_tls, ca_file)
 
     try:
         kc.authenticate()
