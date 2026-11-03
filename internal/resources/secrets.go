@@ -63,6 +63,9 @@ func DjangoSecret(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Secret 
 // MasuAdminSecret builds the Secret holding the shared token for on-prem Masu
 // admin APIs (COST-8059). Injected as MASU_ADMIN_TOKEN on the Masu Deployment.
 // Create-only via ensureSecret so rotations are intentional.
+//
+// Use Data (not StringData) so controller-runtime's fake client round-trips the
+// token for unit tests that validate retained Secrets via getSecret.
 func MasuAdminSecret(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Secret {
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
@@ -74,8 +77,8 @@ func MasuAdminSecret(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Secr
 			Namespace: cfg.Namespace,
 			Labels:    Labels(cfg, "cost-processor"),
 		},
-		StringData: map[string]string{
-			"token": randomPassword(),
+		Data: map[string][]byte{
+			"token": []byte(randomPassword()),
 		},
 	}
 }

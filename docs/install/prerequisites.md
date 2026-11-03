@@ -295,6 +295,10 @@ inherit variables from the port-forward shell). The default Masu
 `API_PATH_PREFIX` is `/api/cost-management`. If your CR overrides it via
 `spec.costManagement.masu.env`, use that prefix in the URLs below instead.
 
+Do **not** set `MASU_ADMIN_TOKEN` in `spec.costManagement.masu.env`. The operator
+always injects that variable from `{cr}-masu-admin-token` / `token` (a literal
+CR value is ignored so the token stays out of etcd CR plaintext).
+
 ```bash
 TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
 BASE="http://127.0.0.1:8000/api/cost-management/v1"
@@ -315,11 +319,20 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 **4. Rotate (optional)**
 
-Delete the Secret and restart Masu so the operator recreate-only path issues a
-new token (pods must remount the new value):
+The operator does **not** watch Secrets. After you delete
+`{cr}-masu-admin-token`, annotate the CMSC so a reconcile recreates it, wait
+until the Secret exists again, then restart Masu so pods remount the new value:
 
 ```bash
 oc -n "$NAMESPACE" delete secret "${CR}-masu-admin-token"
+# Trigger reconcile (Secret informers are intentionally disabled).
+oc -n "$NAMESPACE" annotate cmsc "$CR" \
+  cost-management.openshift.io/masu-admin-token-rotated="$(date +%s)" --overwrite
+for _ in $(seq 1 60); do
+  oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" >/dev/null 2>&1 && break
+  sleep 2
+done
+oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token"
 oc -n "$NAMESPACE" rollout restart deployment/"${CR}-koku-masu"
 ```
 

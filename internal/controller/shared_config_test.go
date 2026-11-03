@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -360,6 +361,77 @@ func TestReconcileSharedConfig_DoesNotOverwriteExistingStorageSecret(t *testing.
 	if string(got.Data["access-key"]) != "real-access" || string(got.Data["secret-key"]) != "real-secret" {
 		t.Errorf("ensureSecret overwrote storage credentials: access=%q secret=%q",
 			got.Data["access-key"], got.Data["secret-key"])
+	}
+}
+
+func TestReconcileSharedConfig_CreatesMasuAdminTokenSecret(t *testing.T) {
+	const ns = "test"
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-masu-admin-1"},
+	}
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClientWithApplySupport(sharedConfigScheme(t)),
+		Recorder: &noopRecorder{},
+	}
+
+	if _, err := r.reconcileSharedConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileSharedConfig: %v", err)
+	}
+
+	sec := &corev1.Secret{}
+	name := resources.NameMasuAdminSecret(cfg)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, sec); err != nil {
+		t.Fatalf("expected masu admin Secret %q: %v", name, err)
+	}
+	if len(sec.Data["token"]) == 0 {
+		t.Error("masu admin Secret missing non-empty data[token]")
+	}
+}
+
+func TestReconcileSharedConfig_RejectsMasuAdminSecretMissingToken(t *testing.T) {
+	const ns = "test"
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-masu-admin-2"},
+	}
+	// Retained create-only Secret with the wrong shape — operator must not
+	// overwrite, but must surface a clear reconcile error.
+	existing := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      resources.NameMasuAdminSecret(cfg),
+			Namespace: ns,
+		},
+		Data: map[string][]byte{
+			"wrong-key": []byte("not-the-token"),
+		},
+	}
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClientWithApplySupport(sharedConfigScheme(t), existing),
+		Recorder: &noopRecorder{},
+	}
+
+	_, err := r.reconcileSharedConfig(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when retained masu admin Secret lacks data[token]")
+	}
+	if !strings.Contains(err.Error(), "masu admin token secret") {
+		t.Errorf("error = %v, want masu admin token secret prefix", err)
+	}
+	if !strings.Contains(err.Error(), "token") {
+		t.Errorf("error = %v, want mention of missing token key", err)
+	}
+
+	got := &corev1.Secret{}
+	if getErr := r.Get(context.Background(),
+		types.NamespacedName{Namespace: ns, Name: existing.Name}, got); getErr != nil {
+		t.Fatalf("get masu admin secret: %v", getErr)
+	}
+	if _, ok := got.Data["token"]; ok {
+		t.Error("ensureSecret must not overwrite retained Secret to add token")
+	}
+	if string(got.Data["wrong-key"]) != "not-the-token" {
+		t.Errorf("retained Secret mutated: %#v", got.Data)
 	}
 }
 

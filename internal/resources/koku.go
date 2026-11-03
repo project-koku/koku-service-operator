@@ -93,10 +93,12 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 		EnvVal("GUNICORN_WORKERS", "2"),
 		EnvVal("PROMETHEUS_MULTIPROC_DIR", "/tmp"),
 		EnvFromFieldRef("POD_CPU_LIMIT", containerName, "limits.cpu"),
-		// Shared secret for on-prem Masu admin endpoints (COST-8059 / koku gate).
-		EnvFromSecret("MASU_ADMIN_TOKEN", NameMasuAdminSecret(cfg), "token"),
 	)
 	env = MergeEnv(env, spec.Env)
+	// Always inject from the operator Secret after MergeEnv so a literal
+	// MASU_ADMIN_TOKEN in spec.costManagement.masu.env cannot replace (or empty)
+	// the secretKeyRef. Tokens belong in Secrets, not the CR.
+	env = SetEnv(env, EnvFromSecret("MASU_ADMIN_TOKEN", NameMasuAdminSecret(cfg), "token"))
 
 	d := deploymentWithContainerName(cfg, NameMasu(cfg), "cost-processor", containerName,
 		image, replicas, ProfileResources(cfg, WorkloadMasu, spec.Resources),

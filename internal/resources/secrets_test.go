@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -61,31 +62,44 @@ func TestMasuAdminSecret(t *testing.T) {
 	if sec.Namespace != cfg.Namespace {
 		t.Errorf("namespace: got %q, want %q", sec.Namespace, cfg.Namespace)
 	}
-	token, ok := sec.StringData["token"]
-	if !ok || token == "" {
+	token, ok := sec.Data["token"]
+	if !ok || len(token) == 0 {
 		t.Errorf("MasuAdminSecret missing non-empty key %q", "token")
 	}
 
-	dep := MasuDeployment(cfg)
-	var found bool
+	assertMasuAdminTokenSecretRef(t, MasuDeployment(cfg))
+
+	// Literal CR override must not win over the operator Secret reference.
+	cfg.Spec.CostManagement.Masu.Env = map[string]string{
+		"MASU_ADMIN_TOKEN": "should-not-appear-as-literal",
+	}
+	assertMasuAdminTokenSecretRef(t, MasuDeployment(cfg))
+}
+
+func assertMasuAdminTokenSecretRef(t *testing.T, dep *appsv1.Deployment) {
+	t.Helper()
+	var count int
 	for _, e := range dep.Spec.Template.Spec.Containers[0].Env {
 		if e.Name != "MASU_ADMIN_TOKEN" {
 			continue
 		}
-		found = true
+		count++
+		if e.Value != "" {
+			t.Fatalf("MASU_ADMIN_TOKEN must not be a literal value, got %q", e.Value)
+		}
 		if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
 			t.Fatalf("MASU_ADMIN_TOKEN expected secretKeyRef, got %#v", e)
 		}
 		ref := e.ValueFrom.SecretKeyRef
-		if ref.Name != NameMasuAdminSecret(cfg) {
-			t.Errorf("MASU_ADMIN_TOKEN secret name = %q, want %q", ref.Name, NameMasuAdminSecret(cfg))
+		if ref.Name != "cost-management-masu-admin-token" {
+			t.Errorf("MASU_ADMIN_TOKEN secret name = %q, want cost-management-masu-admin-token", ref.Name)
 		}
 		if ref.Key != "token" {
 			t.Errorf("MASU_ADMIN_TOKEN secret key = %q, want token", ref.Key)
 		}
 	}
-	if !found {
-		t.Error("MasuDeployment missing MASU_ADMIN_TOKEN env var")
+	if count != 1 {
+		t.Errorf("MasuDeployment MASU_ADMIN_TOKEN occurrences = %d, want 1", count)
 	}
 }
 
