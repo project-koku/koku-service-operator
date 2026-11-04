@@ -291,9 +291,9 @@ oc -n "$NAMESPACE" port-forward "svc/${CR}-koku-masu" 8000:8000
 **3. In another terminal, read the token and call an admin path**
 
 Read `TOKEN` in the **same** shell that runs `curl` (a second terminal does not
-inherit variables from the port-forward shell). The default Masu
-`API_PATH_PREFIX` is `/api/cost-management`. If your CR overrides it via
-`spec.costManagement.masu.env`, use that prefix in the URLs below instead.
+inherit variables from the port-forward shell). The commands below read the
+configured `API_PATH_PREFIX` from the Masu Deployment, so a prefix overridden
+via `spec.costManagement.masu.env` is picked up automatically.
 
 Do **not** set `MASU_ADMIN_TOKEN` in `spec.costManagement.masu.env`. The operator
 always injects that variable from `{cr}-masu-admin-token` / `token` (a literal
@@ -301,7 +301,10 @@ CR value is ignored so the token stays out of etcd CR plaintext).
 
 ```bash
 TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
-BASE="http://127.0.0.1:8000/api/cost-management/v1"
+PREFIX=$(oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list \
+  | sed -n 's/^API_PATH_PREFIX=//p')
+: "${PREFIX:=/api/cost-management}"
+BASE="http://127.0.0.1:8000${PREFIX}/v1"
 
 curl -s -o /dev/null -w '%{http_code}\n' \
   "${BASE}/status/"
