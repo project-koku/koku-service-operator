@@ -1,0 +1,145 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  labels:
+    release.appstudio.openshift.io/author: "rh-ee-dnakabaa"
+  namespace: cost-mgmt-dev-tenant
+  name: koku-ui-onprem-20261104-204458-000-prod-1
+spec:
+  releasePlan: koku-ui-onprem-prod
+  snapshot: koku-ui-onprem-20261104-204458-000
+  data:
+    releaseNotes:
+      type: RHSA
+      topic: "Cost Management Frontend Image version koku-ui-onprem-20261104-204458-000 release."
+      cves:
+        - key: CVE-2026-114406
+          component: koku-ui-onprem
+          packages:
+            - ca-certificates
+        - key: CVE-2026-77214
+          component: koku-ui-onprem
+          packages:
+            - expat
+        - key: CVE-2026-53613
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-53615
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-76642
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-53614
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-78408
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-53612
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-78410
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-97689
+          component: koku-ui-onprem
+          packages:
+            - python3-urllib3
+        - key: CVE-2026-97687
+          component: koku-ui-onprem
+          packages:
+            - python3-urllib3
+        - key: CVE-2026-102633
+          component: koku-ui-onprem
+          packages:
+            - expat
+        - key: CVE-2026-13595
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+        - key: CVE-2026-27456
+          component: koku-ui-onprem
+          packages:
+            - util-linux-core
+            - libfdisk
+            - util-linux
+            - libuuid
+            - libmount
+            - libsmartcols
+            - libblkid
+
+      references:
+        - https://access.redhat.com/security/updates/classification
+        - https://access.redhat.com/security/cve/CVE-2026-114406
+        - https://access.redhat.com/security/cve/CVE-2026-77214
+        - https://access.redhat.com/security/cve/CVE-2026-53613
+        - https://access.redhat.com/security/cve/CVE-2026-53615
+        - https://access.redhat.com/security/cve/CVE-2026-76642
+        - https://access.redhat.com/security/cve/CVE-2026-53614
+        - https://access.redhat.com/security/cve/CVE-2026-78408
+        - https://access.redhat.com/security/cve/CVE-2026-53612
+        - https://access.redhat.com/security/cve/CVE-2026-78410
+        - https://access.redhat.com/security/cve/CVE-2026-97689
+        - https://access.redhat.com/security/cve/CVE-2026-97687
+        - https://access.redhat.com/security/cve/CVE-2026-102633
+        - https://access.redhat.com/security/cve/CVE-2026-13595
+        - https://access.redhat.com/security/cve/CVE-2026-27456
+        - https://access.redhat.com/articles/7148128
+        - https://docs.redhat.com/en/documentation/cost_management_service/1-latest/html/getting_started_with_cost_management/steps-to-cost-management
