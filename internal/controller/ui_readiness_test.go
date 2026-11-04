@@ -124,6 +124,101 @@ func TestReconcileUI_DriftPass_UICrash_ClearsAvailable(t *testing.T) {
 	}
 }
 
+// After Ready, losing a UI configuration gate (OAuth client Secret deleted or
+// emptied, UI Route no longer admitted) stops reconcileEdge. Available must not
+// stay True AllComponentsReady; it carries the same reason as UIReady, and the
+// next core-services pass keeps that reason.
+func TestReconcileUI_DriftPass_ConfigGate_ClearsAvailable(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		break_ func(t *testing.T, c client.Client, cfg *costv1alpha1.CostManagementServiceConfig)
+	}{
+		{"oauth secret deleted", reasonOAuthSecretMissing, func(t *testing.T, c client.Client, cfg *costv1alpha1.CostManagementServiceConfig) {
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: resources.NameUIOAuthClientSecret(cfg), Namespace: testNamespace}}
+			if err := c.Delete(context.Background(), secret); err != nil {
+				t.Fatalf("delete oauth secret: %v", err)
+			}
+		}},
+		{"oauth secret emptied", reasonOAuthSecretInvalid, func(t *testing.T, c client.Client, cfg *costv1alpha1.CostManagementServiceConfig) {
+			secret := &corev1.Secret{}
+			key := client.ObjectKey{Name: resources.NameUIOAuthClientSecret(cfg), Namespace: testNamespace}
+			if err := c.Get(context.Background(), key, secret); err != nil {
+				t.Fatalf("get oauth secret: %v", err)
+			}
+			secret.Data["client-secret"] = nil
+			if err := c.Update(context.Background(), secret); err != nil {
+				t.Fatalf("update oauth secret: %v", err)
+			}
+		}},
+		{"ui route not admitted", reasonRouteNotAdmitted, func(t *testing.T, c client.Client, cfg *costv1alpha1.CostManagementServiceConfig) {
+			route := resources.UIRoute(cfg)
+			if err := c.Get(context.Background(), client.ObjectKeyFromObject(route), route); err != nil {
+				t.Fatalf("get ui route: %v", err)
+			}
+			if err := unstructured.SetNestedSlice(route.Object, []any{
+				map[string]any{
+					"host":       "ui.apps.example.com",
+					"conditions": []any{map[string]any{"type": routeAdmittedType, "status": "False"}},
+				},
+			}, "status", "ingress"); err != nil {
+				t.Fatalf("set ui route status: %v", err)
+			}
+			if err := c.Update(context.Background(), route); err != nil {
+				t.Fatalf("update ui route: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, cfg, c := uiReadyFixture(t)
+			ctx := context.Background()
+
+			// Core services and the UI are up; the pass ends Ready.
+			if _, err := r.reconcileCoreServices(ctx, cfg); err != nil {
+				t.Fatalf("core first pass: %v", err)
+			}
+			for _, name := range []string{
+				resources.NameRBACAPI(cfg), resources.NameRBACWorker(cfg), resources.NameKokuAPI(cfg),
+				resources.NameMasu(cfg), resources.NameListener(cfg),
+			} {
+				markDeploymentReady(t, c, testNamespace, name)
+			}
+			if _, err := r.reconcileUI(ctx, cfg); err != nil {
+				t.Fatalf("ui first pass: %v", err)
+			}
+			markDeploymentReady(t, c, testNamespace, resources.NameUI(cfg))
+			if _, err := r.reconcileUI(ctx, cfg); err != nil {
+				t.Fatalf("ui ready pass: %v", err)
+			}
+			r.markReady(cfg, costv1alpha1.PhaseProgressing, false)
+
+			tc.break_(t, c, cfg)
+			if _, err := r.reconcileUI(ctx, cfg); err != nil {
+				t.Fatalf("drift pass: %v", err)
+			}
+			ui := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionUIReady)
+			if ui == nil || ui.Status != metav1.ConditionFalse || ui.Reason != tc.reason {
+				t.Fatalf("expected UIReady=False %s, got %+v", tc.reason, ui)
+			}
+			avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+			if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != tc.reason {
+				t.Fatalf("expected Available=False %s, got %+v", tc.reason, avail)
+			}
+			since := avail.LastTransitionTime
+
+			// Next pass: core runs first and must keep the UI gate's reason.
+			if _, err := r.reconcileCoreServices(ctx, cfg); err != nil {
+				t.Fatalf("core pass: %v", err)
+			}
+			avail = findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+			if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != tc.reason || !avail.LastTransitionTime.Equal(&since) {
+				t.Fatalf("expected core to keep Available=False %s since %s, got %+v", tc.reason, since, avail)
+			}
+		})
+	}
+}
+
 // A UI wait older than readinessTimeout must survive the core-services pass
 // that runs before Edge (no clock reset) and degrade naming the UI.
 func TestReconcileUI_Timeout_DegradesAcrossCorePass(t *testing.T) {

@@ -74,8 +74,9 @@ Store the credentials in a Secret in the **CR namespace**. Default name:
 | `client-id` | Yes |
 | `client-secret` | Yes |
 
-Until this Secret exists with both keys, `UIReady` stays False
-(`OAuthClientSecretMissing`). Core APIs can still become `Available`.
+Until this Secret exists with both keys, `UIReady` and `Available` stay False
+(`OAuthClientSecretMissing`). Core services can still come up
+(`CoreServicesReady=True`).
 
 Assign the audience client scope (below) and the claim mappers (below) to
 this client.

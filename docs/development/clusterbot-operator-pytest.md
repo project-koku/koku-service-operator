@@ -96,7 +96,7 @@ the whole pipeline succeeds, which requires Keycloak and the UI OAuth Secret.
 
 **Expected to stay False without extra UI work:**
 
-- `UIReady=False` (`OAuthClientSecretMissing`)
+- `UIReady=False` and `Available=False` (`OAuthClientSecretMissing`)
 - `Phase=Progressing` (until `UIReady=True`)
 
 ## Critical rules (read first)
@@ -392,7 +392,7 @@ Example good end state:
 ```text
 SchemaUpToDate=True (MigrationComplete)
 CoreServicesReady=True (CoreServicesAvailable)
-Available=False (WaitingForComponents)
+Available=False (OAuthClientSecretMissing)
 GatewayReady=True (GatewayReady)
 IngressReady=True (IngressReady)
 StorageReady=True (StorageReady)

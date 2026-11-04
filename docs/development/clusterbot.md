@@ -90,8 +90,8 @@ If you already have AMQ Streams Kafka, point
 **Checkpoint (before Keycloak):** `SchemaUpToDate=True` and
 `CoreServicesReady=True` (RBAC API, Koku API, Masu, Listener; Kruize with ROS ready). This is an
 intermediate signal only: `Available` stays `False`
-(`WaitingForComponents`) and `status.phase` stays **`Progressing`** —
-`reconcileEdge` requeues while `UIReady=False` (`OAuthClientSecretMissing`).
+(`OAuthClientSecretMissing`, same as `UIReady`) and `status.phase` stays
+**`Progressing`** — `reconcileEdge` requeues until the UI OAuth Secret exists.
 
 **Success:** `Available=True` (`AllComponentsReady`) and `Phase=Ready`.
 Keycloak is required: deploy it and run `mirror-ui-oauth-secret.sh`

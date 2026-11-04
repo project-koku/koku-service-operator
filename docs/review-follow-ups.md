@@ -115,7 +115,9 @@ Kruize is **not** in this gap — it is on the core wait list and uses
 `notReadyWait`. **UI is resolved** (COST-8103): `reconcileUI` gates
 `UIReady` on the UI Deployment through `notReadyWait` (`WaitingForUI`),
 so a crash-looping oauth2-proxy flips `Available` to False and degrades
-after 5 minutes. Ingress and Envoy remain.
+after 5 minutes; a missing or invalid OAuth client Secret or an unadmitted UI
+Route also sets `Available=False` with the `UIReady` reason. Ingress and Envoy
+remain.
 
 **Impact:** A stuck Ingress/Envoy Deployment leaves `Progressing=True`
 and requeues every 30s indefinitely. On first install `Available` stays

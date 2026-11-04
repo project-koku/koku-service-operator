@@ -7,16 +7,20 @@ gap-analysis notes (for example D11, D18, D20, F3, F4).
 
 ### P1 — Status / lifecycle
 
-#### 1. Ready ignores most workload health [D1] — **closed**
+#### 1. Ready ignores most workload health [D1] — **partially fixed**
 
-Every application Deployment now gates `Available=True` /
-`AllComponentsReady`. Core and worker waits use `notReadyWait` (RBAC API,
-Koku API, Masu, Listener, Kruize, ROS API/Processor — COST-7689 G2,
-COST-7686 G3), Ingress and Envoy have `IngressReady` / `GatewayReady`, the UI
-is gated on its Deployment (`UIReady`, COST-8103), and the final
-`waitForApplicationRollout` phase (COST-7693) checks every application
-Deployment — including Celery beat/workers and the RBAC worker — for target
-images, replicas and terminated old Pods.
+Fixed: core and worker waits use `notReadyWait` (RBAC API, Koku API, Masu,
+Listener, Kruize, ROS API/Processor — COST-7689 G2, COST-7686 G3); the UI is
+gated on its Deployment and on its OAuth client Secret and Route, all of which
+clear `Available` (COST-8103); the final `waitForApplicationRollout` phase
+(COST-7693) checks every application Deployment, including Celery beat/workers
+and the RBAC worker, for target images, replicas and terminated old Pods.
+
+Open: Ingress (`IngressReady`) and Envoy (`GatewayReady`) wait outside
+`notReadyWait` and stop the pass before the final rollout wait, without
+touching `Available`. After Ready, a crash-looping Ingress or Envoy leaves
+`Available=True` / `AllComponentsReady` and never escalates to
+`Degraded=DeploymentNotReady` (review follow-up #12).
 
 #### 2. Progressing status causes a continuous reconcile loop [D2] — **closed**
 

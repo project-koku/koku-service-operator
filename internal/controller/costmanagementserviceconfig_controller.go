@@ -60,6 +60,9 @@ const (
 	reasonWaitingForComponents   = "WaitingForComponents"
 	reasonWaitingForUI           = "WaitingForUI"
 	reasonUIAvailable            = "UIAvailable"
+	reasonOAuthSecretMissing     = "OAuthClientSecretMissing"
+	reasonOAuthSecretInvalid     = "OAuthClientSecretInvalid"
+	reasonRouteNotAdmitted       = "RouteNotAdmitted"
 	reasonDeploymentNotReady     = "DeploymentNotReady"
 	reasonDeploymentReady        = "DeploymentReady"
 	reasonReconcileError         = "ReconcileError"
@@ -1027,7 +1030,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 	}
 	if !routeAdmitted(live) {
 		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
-			"RouteNotAdmitted", "waiting for API Route admission")
+			reasonRouteNotAdmitted, "waiting for API Route admission")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
@@ -1099,15 +1102,13 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 	err := r.Get(ctx, types.NamespacedName{Name: oauthSecretName, Namespace: cfg.Namespace}, &oauthSecret)
 	switch {
 	case errors.IsNotFound(err):
-		r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
-			"OAuthClientSecretMissing",
+		r.uiBlocked(cfg, reasonOAuthSecretMissing,
 			fmt.Sprintf("Secret %q with keys client-id and client-secret is required for the UI", oauthSecretName))
 		return Result{}, nil
 	case err != nil:
 		return Result{}, fmt.Errorf("get ui oauth client secret %s: %w", oauthSecretName, err)
 	case resources.ValidateUIOAuthClientSecret(&oauthSecret) != nil:
-		r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
-			"OAuthClientSecretInvalid",
+		r.uiBlocked(cfg, reasonOAuthSecretInvalid,
 			fmt.Sprintf("Secret %q must contain non-empty keys client-id and client-secret", oauthSecretName))
 		return Result{}, nil
 	}
@@ -1130,8 +1131,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 			return Result{}, fmt.Errorf("get ui route %s: %w", uiRoute.GetName(), err)
 		}
 		if !routeAdmitted(live) {
-			r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse,
-				"RouteNotAdmitted", "waiting for UI Route admission")
+			r.uiBlocked(cfg, reasonRouteNotAdmitted, "waiting for UI Route admission")
 			return Result{}, nil
 		}
 	}
@@ -1155,6 +1155,15 @@ func (r *CostManagementServiceConfigReconciler) reconcileUI(ctx context.Context,
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionTrue, reasonUIAvailable, msgUIAvailable)
 	return Result{}, nil
+}
+
+// uiBlocked records a UI configuration gate (OAuth client Secret, UI Route
+// admission) on both UIReady and Available. reconcileEdge stops the pass while
+// UIReady is False, so a previous Available=True from a Ready pass must not
+// survive it.
+func (r *CostManagementServiceConfigReconciler) uiBlocked(cfg *costv1alpha1.CostManagementServiceConfig, reason, message string) {
+	r.setCondition(cfg, costv1alpha1.ConditionUIReady, metav1.ConditionFalse, reason, message)
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, reason, message)
 }
 
 // -----------------------------------------------------------------------------
@@ -1602,17 +1611,19 @@ type deploymentWait struct {
 }
 
 // holdingWorkerReadinessWait is true when a later phase (ROS workers, UI)
-// already set Available=False for one of its Deployments. Core must not
-// overwrite that wait clock. Keep this reason list in sync with
-// waitForWorkerReadiness and reconcileUI (docs/review-follow-ups.md #12 if
-// Ingress/Envoy are routed through notReadyWait).
+// already set Available=False for one of its Deployments or for a UI
+// configuration gate. Core must not overwrite that reason or wait clock. Keep
+// this reason list in sync with waitForWorkerReadiness and reconcileUI
+// (docs/review-follow-ups.md #12 if Ingress/Envoy are routed through
+// notReadyWait).
 func holdingWorkerReadinessWait(cfg *costv1alpha1.CostManagementServiceConfig) bool {
 	existing := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
 	if existing == nil || existing.Status != metav1.ConditionFalse {
 		return false
 	}
 	switch existing.Reason {
-	case reasonWaitingForROSAPI, reasonWaitingForROSProcessor, reasonWaitingForApplicationRollout, reasonWaitingForUI:
+	case reasonWaitingForROSAPI, reasonWaitingForROSProcessor, reasonWaitingForApplicationRollout, reasonWaitingForUI,
+		reasonOAuthSecretMissing, reasonOAuthSecretInvalid, reasonRouteNotAdmitted:
 		return true
 	default:
 		return false

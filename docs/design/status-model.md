@@ -92,7 +92,7 @@ The table says which stages wait or block, and on what.
 | 5 | `reconcileMigration` (skipped by upgrade rollout/rollback) | `SchemaUpToDate`, `UpgradeFailed=False/MigrationComplete`, `Degraded=False/MigrationSucceeded` | Job running (wait); Job failed or migration image missing (`Stop`, `Phase=Degraded`) | `MigrationStarted`, `MigrationsComplete`, `MigrationFailed` + `UpgradeFailed` (Warning) |
 | 6 | `reconcileCoreServices` | `ROSEnabled`, `RBACWorkerReady`, `RBACReady`, `CoreServicesReady`; `Available=False` with `WaitingForRBAC` / `WaitingForAPI` / `WaitingForMasu` / `WaitingForListener` / `WaitingForKruize`, then `WaitingForComponents` | RBAC API or a core Deployment not ready | — |
 | 7 | `reconcileWorkers` | `IngressReady`; `Available=False/WaitingForROSAPI` / `WaitingForROSProcessor` | Ingress or ROS Deployment not ready | — |
-| 8 | `reconcileEdge` | `GatewayReady`, `UIReady` | Envoy or its Route not ready; UI Deployment not ready (`Available=False/WaitingForUI`). A missing OAuth client Secret or unadmitted UI Route sets `UIReady=False` **without** stopping | — |
+| 8 | `reconcileEdge` | `GatewayReady`, `UIReady` | Envoy or its Route not ready; UI Deployment not ready (`Available=False/WaitingForUI`); UI OAuth client Secret missing or invalid, or UI Route not admitted (`UIReady` and `Available` False with the same reason: `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted`; no 5-minute `Degraded` escalation) | — |
 | 9 | `reconcileMonitoring` | — | API errors only | — |
 | 10 | `waitForApplicationRollout` | `Available=False/WaitingForApplicationRollout` | any application Deployment (UI, Celery, Beat, RBAC worker, Envoy, Ingress, ROS) not rolled out, or old Pods still terminating | — |
 | — | end of pass | `Available=True/AllComponentsReady`, `Degraded=False/ReconcileComplete`, `Progressing=False/ReconcileComplete` | — | `Ready` and `PhaseChanged` (on the transition) |
@@ -145,6 +145,7 @@ stateDiagram-v2
 | Install or change in progress, waiting on a stage | Progressing | False / `Waiting*` (unset before stage 6 on a fresh install) | True / `Reconciling` | unchanged |
 | Steady state | Ready | True / `AllComponentsReady` | False / `ReconcileComplete` | False / `ReconcileComplete` |
 | A wait lasted 5 min (no upgrade) | Degraded | False / `Waiting*` | True / `Reconciling` | True / `DeploymentNotReady` |
+| UI OAuth client Secret missing or invalid, or UI Route not admitted | Progressing | False / `OAuthClientSecretMissing`, `OAuthClientSecretInvalid` or `RouteNotAdmitted` | True / `Reconciling` | unchanged |
 | External DB or cache unreachable | Degraded | False / `DependencyNotReady` | True / `Reconciling` | True / `DependencyUnreachable` |
 | Stage error (API error, missing image) | Degraded | unchanged | True / `Reconciling` | True / `ReconcileError` or `ImageNotSet` |
 | Migration Job failed (no upgrade operation) | Degraded | False / `MigrationFailed` | False / `MigrationFailed` | True / `MigrationFailed` |
@@ -201,7 +202,7 @@ operation ID does (see [application-upgrades.md](application-upgrades.md)).
 
 | Condition | Written by | True reasons | False reasons |
 |-----------|------------|--------------|---------------|
-| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
+| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted` (UI gates), `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
 | `Progressing` | `reconcileStack`, `completeProgressing`, `markPaused`, upgrade | `Reconciling`, `UpgradePlanned`, `UpgradeMaintenance`, `UpgradeRetrying`, `LegacyBaselineAdopted` | `ReconcileComplete`, `Paused`, `MigrationFailed`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `RecoveryRequired`, `RolledBack` |
 | `Degraded` | `reconcileStack` (errors), `notReadyWait`, validation, migration, upgrade, `markReady` | `ReconcileError`, `ImageNotSet`, `DeploymentNotReady`, `DependencyUnreachable`, `MigrationFailed`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeFailed` | `ReconcileComplete`, `MigrationSucceeded`, `DeploymentReady`, `LegacyBaselineAdopted` |
 | `DiscoveryComplete` | discovery | `Discovered` | `ClusterDomainNotFound`, `StorageClassNotFound` |
@@ -230,7 +231,7 @@ of the final rollout wait (stage 10), so it gates `Available=True`.
 | Event | Type | When |
 |-------|------|------|
 | `DiscoveryComplete` | Normal | `DiscoveryComplete` becomes True |
-| `InfrastructureReady` | Normal | `DatabaseReady` and `CacheReady` both become True (after validation) |
+| `InfrastructureReady` | Normal | `DatabaseReady` and `CacheReady` both become True (after validation, in the pipeline or the upgrade migration preflight) |
 | `DependencyFailed` | Warning | an external DB/cache probe fails and the condition was not already False |
 | `MigrationStarted` | Normal | a migration Job is created |
 | `MigrationsComplete` | Normal | `SchemaUpToDate` becomes True |
@@ -248,9 +249,10 @@ of the final rollout wait (stage 10), so it gates `Available=True`.
 - `PhasePending` is never assigned; a new CR shows an empty phase until its
   first pass is patched.
 - The Gateway (stage 8) and Ingress (stage 7) waits set only their own
-  condition and requeue; they do not touch `Available`. A drift pass that
-  stops there shows `Phase=Progressing` while `Available` keeps its previous
-  value (possibly True).
+  condition and requeue; they do not touch `Available` and stop the pass
+  before the final rollout wait. A crash-looping Envoy or Ingress after Ready
+  shows `Phase=Progressing` while `Available` stays True
+  ([code-review-fixmes.md](../code-review-fixmes.md) D1).
 - A stage error leaves `Available` unchanged while setting `Degraded=True` and
   `Phase=Degraded`.
 - `failUpgrade` does not set the phase; the `RollingBack` pass keeps whatever
