@@ -256,10 +256,90 @@ overwrites them on later reconciles.
 | Secret | Keys | Purpose |
 |--------|------|---------|
 | `{cr}-django-secret` | `secret-key` | Django `SECRET_KEY` |
+| `{cr}-masu-admin-token` | `token` | Bearer token for on-prem Masu admin APIs (`MASU_ADMIN_TOKEN`) |
 | `{cr}-ui-cookie-secret` | `session-secret` | oauth2-proxy cookie encryption |
 
 Rotate them yourself if needed; there is no operator annotation to roll them
 yet.
+
+### Runbook: call Masu admin APIs with the shared secret (COST-8059)
+
+On-prem Masu allow-listed admin paths (`/report_data/`, Celery queue helpers,
+`/db-performance/…`, etc.) require `Authorization: Bearer <token>`. The operator
+creates the token automatically; end users never set a username/password. This
+runbook is for **cluster operators / support / QE** (for example after
+`oc port-forward`).
+
+Assume:
+
+- `NAMESPACE` — CR namespace  
+- `CR` — `CostManagementServiceConfig` `metadata.name` (Secret/Service names are `{CR}-…`)
+
+**1. Confirm the Secret and that Masu mounts it**
+
+```bash
+oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d; echo
+oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list | grep MASU_ADMIN_TOKEN
+```
+
+**2. Port-forward Masu HTTP**
+
+```bash
+oc -n "$NAMESPACE" port-forward "svc/${CR}-koku-masu" 8000:8000
+```
+
+**3. In another terminal, read the token and call an admin path**
+
+Read `TOKEN` in the **same** shell that runs `curl` (a second terminal does not
+inherit variables from the port-forward shell). The commands below read the
+configured `API_PATH_PREFIX` from the Masu Deployment, so a prefix overridden
+via `spec.costManagement.masu.env` is picked up automatically.
+
+Do **not** set `MASU_ADMIN_TOKEN` in `spec.costManagement.masu.env`. The operator
+always injects that variable from `{cr}-masu-admin-token` / `token` (a literal
+CR value is ignored so the token stays out of etcd CR plaintext).
+
+```bash
+TOKEN=$(oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" -o jsonpath='{.data.token}' | base64 -d)
+PREFIX=$(oc -n "$NAMESPACE" set env deployment/"${CR}-koku-masu" --list \
+  | sed -n 's/^API_PATH_PREFIX=//p')
+: "${PREFIX:=/api/cost-management}"
+BASE="http://127.0.0.1:8000${PREFIX}/v1"
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "${BASE}/status/"
+# expect 200 — /status/ does not require the token
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "${BASE}/report_data/"
+# expect 401 without Authorization
+
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE}/report_data/"
+# expect not 401 (often 400 if required query params are missing)
+```
+
+**4. Rotate (optional)**
+
+The operator does **not** watch Secrets. After you delete
+`{cr}-masu-admin-token`, annotate the CMSC so a reconcile recreates it, wait
+until the Secret exists again, then restart Masu so pods remount the new value:
+
+```bash
+oc -n "$NAMESPACE" delete secret "${CR}-masu-admin-token"
+# Trigger reconcile (Secret informers are intentionally disabled).
+oc -n "$NAMESPACE" annotate cmsc "$CR" \
+  cost-management.openshift.io/masu-admin-token-rotated="$(date +%s)" --overwrite
+for _ in $(seq 1 60); do
+  oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token" >/dev/null 2>&1 && break
+  sleep 2
+done
+oc -n "$NAMESPACE" get secret "${CR}-masu-admin-token"
+oc -n "$NAMESPACE" rollout restart deployment/"${CR}-koku-masu"
+```
+
+Do **not** commit the token to git, tickets, or public PR text.
 
 ## CR name length
 
