@@ -67,6 +67,8 @@ const (
 // Secrets before the migration gate. DB and Cache failures block the pipeline;
 // Kafka, OIDC, and S3 set conditions without blocking (init containers inside
 // pods handle late-starting infrastructure).
+//
+//nolint:unparam // Pipeline stages share the PhaseFn (Result, error) signature.
 func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	allReady := true
 
