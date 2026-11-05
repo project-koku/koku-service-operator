@@ -177,3 +177,15 @@ func MergeEnv(base []corev1.EnvVar, overrides map[string]string) []corev1.EnvVar
 	}
 	return base
 }
+
+// SetEnv replaces the first entry named e.Name, or appends if absent.
+// Prefer this over append when a value must win after MergeEnv.
+func SetEnv(base []corev1.EnvVar, e corev1.EnvVar) []corev1.EnvVar {
+	for i := range base {
+		if base[i].Name == e.Name {
+			base[i] = e
+			return base
+		}
+	}
+	return append(base, e)
+}

@@ -95,6 +95,10 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 		EnvFromFieldRef("POD_CPU_LIMIT", containerName, "limits.cpu"),
 	)
 	env = MergeEnv(env, spec.Env)
+	// Always inject from the operator Secret after MergeEnv so a literal
+	// MASU_ADMIN_TOKEN in spec.costManagement.masu.env cannot replace (or empty)
+	// the secretKeyRef. Tokens belong in Secrets, not the CR.
+	env = SetEnv(env, EnvFromSecret("MASU_ADMIN_TOKEN", NameMasuAdminSecret(cfg), "token"))
 
 	d := deploymentWithContainerName(cfg, NameMasu(cfg), "cost-processor", containerName,
 		image, replicas, ProfileResources(cfg, WorkloadMasu, spec.Resources),

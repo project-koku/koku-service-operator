@@ -241,6 +241,24 @@ func TestMergeEnvStableOrder(t *testing.T) {
 	}
 }
 
+func TestSetEnvReplacesOrAppends(t *testing.T) {
+	base := []corev1.EnvVar{
+		EnvVal("KEEP", "yes"),
+		EnvVal("REPLACE_ME", "old"),
+	}
+	got := SetEnv(base, EnvFromSecret("REPLACE_ME", "sec", "token"))
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (replace in place)", len(got))
+	}
+	if got[1].Value != "" || got[1].ValueFrom == nil || got[1].ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("REPLACE_ME not secretKeyRef: %#v", got[1])
+	}
+	got = SetEnv(got, EnvVal("NEW", "x"))
+	if len(got) != 3 || got[2].Name != "NEW" {
+		t.Fatalf("append failed: %#v", got)
+	}
+}
+
 func TestMergeEnvOverrideReplacesBase(t *testing.T) {
 	base := []corev1.EnvVar{
 		EnvVal("REDIS_HOST", "operator-default"),
