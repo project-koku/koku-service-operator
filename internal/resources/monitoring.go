@@ -71,30 +71,45 @@ func KruizeServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstru
 	return serviceMonitor(cfg, cfg.Name+"-kruize-metrics", "http", "/q/metrics", []string{"ros-optimization"})
 }
 
-// OperatorServiceMonitor watches the controller-manager metrics endpoint.
-// In-cluster metrics bind to :8443 over HTTP (SecureServing unset); the Service
-// port is still named "https". Scrape with scheme http on that port name.
-func OperatorServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
+// OperatorServiceMonitor watches the controller-manager metrics endpoint from
+// the operator namespace. It is shipped as a singleton with the operator
+// bundle, rather than created once per CMSC.
+func OperatorServiceMonitor(namespace string) *unstructured.Unstructured {
 	sm := &unstructured.Unstructured{}
 	sm.SetGroupVersionKind(serviceMonitorGVK)
-	sm.SetName(cfg.Name + "-operator-metrics")
-	sm.SetNamespace(cfg.Namespace)
-	sm.SetLabels(Labels(cfg, "monitoring"))
+	sm.SetName("controller-manager-metrics-monitor")
+	sm.SetNamespace(namespace)
+	sm.SetLabels(map[string]string{
+		"control-plane":                "controller-manager",
+		"app.kubernetes.io/name":       "koku-service-operator",
+		"app.kubernetes.io/managed-by": "kustomize",
+	})
 
 	_ = unstructured.SetNestedSlice(sm.Object, []any{
 		map[string]any{
-			"port":     "https",
-			"path":     "/metrics",
-			"interval": "30s",
-			"scheme":   "http",
+			"port":            "https",
+			"path":            "/metrics",
+			"interval":        "30s",
+			"scheme":          "http",
+			"bearerTokenFile": "/var/run/secrets/kubernetes.io/serviceaccount/token",
 		},
 	}, "spec", "endpoints")
 	_ = unstructured.SetNestedStringMap(sm.Object, map[string]string{
 		"control-plane":          "controller-manager",
 		"app.kubernetes.io/name": "koku-service-operator",
 	}, "spec", "selector", "matchLabels")
-	_ = unstructured.SetNestedSlice(sm.Object, []any{cfg.Namespace}, "spec", "namespaceSelector", "matchNames")
 
+	return sm
+}
+
+// LegacyOperatorServiceMonitor identifies the per-CMSC ServiceMonitor created
+// by versions before COST-8519. It is retained only so reconciliation can
+// remove objects left behind by an upgrade.
+func LegacyOperatorServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
+	sm := OperatorServiceMonitor(cfg.Namespace)
+	sm.SetName(cfg.Name + "-operator-metrics")
+	sm.SetLabels(Labels(cfg, "monitoring"))
+	_ = unstructured.SetNestedSlice(sm.Object, []any{cfg.Namespace}, "spec", "namespaceSelector", "matchNames")
 	return sm
 }
 
@@ -115,16 +130,13 @@ func RBACServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstruct
 	return serviceMonitor(cfg, cfg.Name+"-rbac-metrics", "http", "/metrics", []string{"rbac-api"})
 }
 
-// PrometheusRules returns UWM-evaluable alert rules (COST-8108 option B gauges +
-// App/operator scrape series). Condition alerts use costmanagement_condition.
-// Deferred until emit paths exist: SecretRotated / DriftCorrected (COST-7694 / G4).
+// PrometheusRules returns the per-CMSC application-metric alerts. Operator
+// metric alerts live in OperatorPrometheusRules, a singleton shipped in the
+// operator namespace, so they can evaluate series for CMSCs in any namespace.
 func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
 	instance := cfg.Name
 	ns := cfg.Namespace
 	kokuAPIService := NameKokuAPI(cfg)
-	cond := func(typ, status string) string {
-		return `costmanagement_condition{namespace="` + ns + `",name="` + instance + `",type="` + typ + `",status="` + status + `"} == 1`
-	}
 	// cr_name avoids overwriting Prometheus's reserved "instance" (scrape target).
 	labels := func(severity string) map[string]any {
 		return map[string]any{
@@ -132,105 +144,123 @@ func PrometheusRules(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 			"cr_name":  instance,
 		}
 	}
+	rules := make([]any, 1, 1+len(celeryBacklogQueues))
+	rules[0] = map[string]any{
+		"alert": "CostManagementAPIDown",
+		"expr": `(up{namespace="` + ns + `",service="` + kokuAPIService + `"} == 0)` +
+			` or (absent(up{namespace="` + ns + `",service="` + kokuAPIService + `"}) == 1)`,
+		"for":    "5m",
+		"labels": labels("critical"),
+		"annotations": map[string]any{
+			"summary":     "Cost Management API metrics endpoint unreachable",
+			"description": "Prometheus cannot scrape /metrics on Service {{ $labels.service }} in namespace {{ $labels.namespace }} (down or absent) for more than 5 minutes.",
+		},
+	}
+	// One Prometheus rule per queue. OpenShift Observe groups by alert name and
+	// does not show labels in the Alerts table, so a shared CostManagementCeleryBacklog
+	// name is indistinguishable across queues (COST-7692).
+	rules = append(rules, celeryBacklogRules(ns, labels)...)
+	return prometheusRules(cfg.Name+"-alerts", cfg.Namespace, Labels(cfg, "monitoring"), rules)
+}
 
-	fixed := []any{
+// OperatorPrometheusRules contains alerts based only on operator-owned metric
+// series. It is intentionally namespace-agnostic: the singleton rule is
+// installed beside the operator metrics Service and matches CMSCs in every
+// namespace. The custom labels avoid collisions with Prometheus target labels.
+func OperatorPrometheusRules() *unstructured.Unstructured {
+	condition := func(typ, status string) string {
+		return `costmanagement_condition{type="` + typ + `",status="` + status + `"} == 1`
+	}
+	labels := func(severity string) map[string]any {
+		return map[string]any{"severity": severity}
+	}
+	rules := []any{
 		map[string]any{
 			"alert":  "CostManagementMigrationFailed",
-			"expr":   `costmanagement_migration_job_failed{namespace="` + ns + `",name="` + instance + `"} == 1`,
+			"expr":   `costmanagement_migration_job_failed == 1`,
 			"for":    "1m",
 			"labels": labels("critical"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management migration job failed",
-				"description": "Migration job {{ $labels.job }} has failed. Schema upgrades are blocked.",
+				"description": "Migration job {{ $labels.migration_job }} has failed for {{ $labels.cr_namespace }}/{{ $labels.name }}. Schema upgrades are blocked.",
 			},
 		},
 		map[string]any{
 			"alert":  "CostManagementMigrationStalled",
-			"expr":   cond("SchemaUpToDate", "False"),
+			"expr":   condition("SchemaUpToDate", "False"),
 			"for":    "10m",
 			"labels": labels("warning"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management schema migration stalled",
-				"description": "Database schema is not up to date for {{ $labels.name }} for more than 10 minutes.",
+				"description": "Database schema is not up to date for {{ $labels.cr_namespace }}/{{ $labels.name }} for more than 10 minutes.",
 			},
 		},
 		map[string]any{
 			"alert":  "CostManagementDegraded",
-			"expr":   cond("Degraded", "True"),
+			"expr":   condition("Degraded", "True"),
 			"for":    "5m",
 			"labels": labels("critical"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management operator is degraded",
-				"description": "The CostManagementServiceConfig {{ $labels.name }} has been in Degraded state for 5 minutes.",
+				"description": "The CostManagementServiceConfig {{ $labels.cr_namespace }}/{{ $labels.name }} has been in Degraded state for 5 minutes.",
 			},
 		},
 		map[string]any{
 			"alert":  "CostManagementDependencyDown",
-			"expr":   `(` + cond("DatabaseReady", "False") + `) or (` + cond("CacheReady", "False") + `)`,
+			"expr":   `(` + condition("DatabaseReady", "False") + `) or (` + condition("CacheReady", "False") + `)`,
 			"for":    "5m",
 			"labels": labels("critical"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management dependency validation failed",
-				"description": "DatabaseReady or CacheReady is False on {{ $labels.name }} for more than 5 minutes.",
+				"description": "DatabaseReady or CacheReady is False on {{ $labels.cr_namespace }}/{{ $labels.name }} for more than 5 minutes.",
 			},
 		},
 		map[string]any{
 			"alert":  "CostManagementPodRestarting",
-			"expr":   `costmanagement_managed_pod_restarts{namespace="` + ns + `",name="` + instance + `"} > 3`,
+			"expr":   `costmanagement_managed_pod_restarts > 3`,
 			"for":    "15m",
 			"labels": labels("warning"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management managed pod restarting",
-				"description": "Pod {{ $labels.pod }} container {{ $labels.container }} has restart count > 3 for 15 minutes.",
+				"description": "Pod {{ $labels.managed_pod }} container {{ $labels.managed_container }} for {{ $labels.cr_namespace }}/{{ $labels.name }} has restart count > 3 for 15 minutes.",
 			},
 		},
 		map[string]any{
 			"alert":  "CostManagementNotAvailable",
-			"expr":   cond("Available", "False"),
+			"expr":   condition("Available", "False"),
 			"for":    "30m",
 			"labels": labels("warning"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management stack is not available",
-				"description": "CostManagementServiceConfig {{ $labels.name }} has Available=False for 30 minutes.",
-			},
-		},
-		map[string]any{
-			"alert": "CostManagementAPIDown",
-			"expr": `(up{namespace="` + ns + `",service="` + kokuAPIService + `"} == 0)` +
-				` or (absent(up{namespace="` + ns + `",service="` + kokuAPIService + `"}) == 1)`,
-			"for":    "5m",
-			"labels": labels("critical"),
-			"annotations": map[string]any{
-				"summary":     "Cost Management API metrics endpoint unreachable",
-				"description": "Prometheus cannot scrape /metrics on Service {{ $labels.service }} in namespace {{ $labels.namespace }} (down or absent) for more than 5 minutes.",
+				"description": "CostManagementServiceConfig {{ $labels.cr_namespace }}/{{ $labels.name }} has Available=False for 30 minutes.",
 			},
 		},
 		map[string]any{
 			// Any reconcile error in the last 15m (for:0m avoids boundary flapping
 			// with increase(...[15m]) and for:15m).
 			"alert":  "CostManagementReconcileFailure",
-			"expr":   `increase(costmanagement_reconcile_errors_total{namespace="` + ns + `",name="` + instance + `"}[15m]) > 0`,
+			"expr":   `increase(costmanagement_reconcile_errors_total[15m]) > 0`,
 			"for":    "0m",
 			"labels": labels("warning"),
 			"annotations": map[string]any{
 				"summary":     "Cost Management reconcile errors",
-				"description": "Operator reconcile errors for {{ $labels.name }} over the last 15 minutes.",
+				"description": "Operator reconcile errors for {{ $labels.cr_namespace }}/{{ $labels.name }} over the last 15 minutes.",
 			},
 		},
 	}
+	return prometheusRules("controller-manager-alerts", "", map[string]string{
+		"control-plane":                "controller-manager",
+		"app.kubernetes.io/name":       "koku-service-operator",
+		"app.kubernetes.io/managed-by": "kustomize",
+	}, rules)
+}
 
-	rules := make([]any, 0, len(fixed)+len(celeryBacklogQueues))
-	rules = append(rules, fixed...)
-	// One Prometheus rule per queue. OpenShift Observe groups by alert name and
-	// does not show labels in the Alerts table, so a shared CostManagementCeleryBacklog
-	// name is indistinguishable across queues (COST-7692).
-	rules = append(rules, celeryBacklogRules(ns, labels)...)
-
+func prometheusRules(name, namespace string, labels map[string]string, rules []any) *unstructured.Unstructured {
 	pr := &unstructured.Unstructured{}
 	pr.SetGroupVersionKind(prometheusRuleGVK)
-	pr.SetName(cfg.Name + "-alerts")
-	pr.SetNamespace(cfg.Namespace)
-	pr.SetLabels(Labels(cfg, "monitoring"))
+	pr.SetName(name)
+	pr.SetNamespace(namespace)
+	pr.SetLabels(labels)
 
 	_ = unstructured.SetNestedSlice(pr.Object, []any{
 		map[string]any{

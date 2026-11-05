@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -38,6 +39,31 @@ func TestSetMigrationJobFailed(t *testing.T) {
 	ClearMigrationJobFailed("ns", "cm", "cm-koku-migrate")
 	if got := testutil.ToFloat64(MigrationJobFailed.WithLabelValues("ns", "cm", "cm-koku-migrate")); got != 0 {
 		t.Fatalf("cleared gauge = %v, want 0", got)
+	}
+}
+
+func TestOperatorMetricLabelsAvoidPrometheusTargetCollisions(t *testing.T) {
+	SetMigrationJobFailed("ns", "cm", "cm-koku-migrate", true)
+	defer ClearMigrationJobFailed("ns", "cm", "cm-koku-migrate")
+
+	err := testutil.CollectAndCompare(MigrationJobFailed, strings.NewReader(`
+# HELP costmanagement_migration_job_failed 1 when a Cost Management schema migration Job has failed
+# TYPE costmanagement_migration_job_failed gauge
+costmanagement_migration_job_failed{cr_namespace="ns",migration_job="cm-koku-migrate",name="cm"} 1
+`))
+	if err != nil {
+		t.Fatalf("migration metric labels: %v", err)
+	}
+
+	ManagedPodRestarts.WithLabelValues("ns", "cm", "managed-pod", "api").Set(4)
+	defer ClearManagedPodRestarts("ns", "cm")
+	err = testutil.CollectAndCompare(ManagedPodRestarts, strings.NewReader(`
+# HELP costmanagement_managed_pod_restarts Container restart count for pods owned by the Cost Management instance
+# TYPE costmanagement_managed_pod_restarts gauge
+costmanagement_managed_pod_restarts{cr_namespace="ns",managed_container="api",managed_pod="managed-pod",name="cm"} 4
+`))
+	if err != nil {
+		t.Fatalf("pod restart metric labels: %v", err)
 	}
 }
 

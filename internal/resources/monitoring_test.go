@@ -45,7 +45,7 @@ func alertNamesFromRules(t *testing.T, pr *unstructured.Unstructured) map[string
 	return names
 }
 
-func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
+func TestPrometheusRules_ApplicationMetricSet(t *testing.T) {
 	pr := PrometheusRules(testMonitoringCFG())
 	if pr.GetName() != "cost-management-alerts" {
 		t.Errorf("name: got %q", pr.GetName())
@@ -57,17 +57,24 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 	names := alertNamesFromRules(t, pr)
 
 	want := []string{
+		"CostManagementAPIDown",
+		"CostManagementCeleryBacklogDownload",
+		"CostManagementCeleryBacklogPriority",
+		"CostManagementCeleryBacklogSummary",
+	}
+
+	for _, a := range []string{
 		"CostManagementMigrationFailed",
 		"CostManagementMigrationStalled",
 		"CostManagementDegraded",
 		"CostManagementDependencyDown",
 		"CostManagementPodRestarting",
 		"CostManagementNotAvailable",
-		"CostManagementAPIDown",
 		"CostManagementReconcileFailure",
-		"CostManagementCeleryBacklogDownload",
-		"CostManagementCeleryBacklogPriority",
-		"CostManagementCeleryBacklogSummary",
+	} {
+		if names[a] {
+			t.Errorf("operator alert %s must be in the singleton rule", a)
+		}
 	}
 	for _, a := range want {
 		if !names[a] {
@@ -93,8 +100,8 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 	}
 }
 
-func TestPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
-	pr := PrometheusRules(testMonitoringCFG())
+func TestOperatorPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
+	pr := OperatorPrometheusRules()
 	expr := prometheusRuleExpr(t, pr, "CostManagementDegraded")
 	if !strings.Contains(expr, `costmanagement_condition{`) || !strings.Contains(expr, `type="Degraded"`) {
 		t.Fatalf("Degraded should use costmanagement_condition gauges: %s", expr)
@@ -102,12 +109,18 @@ func TestPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
 	if strings.Contains(expr, "kube_customresource_status_condition") {
 		t.Fatalf("Degraded must not use kube_customresource_status_condition: %s", expr)
 	}
+	if strings.Contains(expr, `namespace=`) {
+		t.Fatalf("Degraded must match CMSCs in any namespace: %s", expr)
+	}
 }
 
 func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
-	sm := OperatorServiceMonitor(testMonitoringCFG())
-	if sm.GetName() != "cost-management-operator-metrics" {
+	sm := OperatorServiceMonitor("cost-onprem")
+	if sm.GetName() != "controller-manager-metrics-monitor" {
 		t.Errorf("name: got %q", sm.GetName())
+	}
+	if sm.GetNamespace() != "cost-onprem" {
+		t.Errorf("namespace: got %q", sm.GetNamespace())
 	}
 	endpoints, found, err := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
 	if err != nil || !found || len(endpoints) != 1 {
@@ -129,6 +142,23 @@ func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
 	}
 	if sel["app.kubernetes.io/name"] != "koku-service-operator" {
 		t.Errorf("app.kubernetes.io/name: got %q want koku-service-operator", sel["app.kubernetes.io/name"])
+	}
+}
+
+func TestLegacyOperatorServiceMonitor_UsesPerCMSCIdentity(t *testing.T) {
+	sm := LegacyOperatorServiceMonitor(testMonitoringCFG())
+	if sm.GetName() != "cost-management-operator-metrics" {
+		t.Errorf("name: got %q", sm.GetName())
+	}
+	if sm.GetNamespace() != "cost-onprem" {
+		t.Errorf("namespace: got %q", sm.GetNamespace())
+	}
+	matchNames, found, err := unstructured.NestedStringSlice(sm.Object, "spec", "namespaceSelector", "matchNames")
+	if err != nil || !found {
+		t.Fatalf("namespaceSelector.matchNames: found=%v err=%v", found, err)
+	}
+	if len(matchNames) != 1 || matchNames[0] != "cost-onprem" {
+		t.Errorf("namespaceSelector.matchNames: got %v", matchNames)
 	}
 }
 
@@ -171,7 +201,7 @@ func TestKruizeServiceMonitor_QuarkusMetricsEndpoint(t *testing.T) {
 }
 
 func TestPrometheusRules_ReconcileFailureFiresOnAnyRecentError(t *testing.T) {
-	pr := PrometheusRules(testMonitoringCFG())
+	pr := OperatorPrometheusRules()
 	groups, _, _ := unstructured.NestedSlice(pr.Object, "spec", "groups")
 	group := groups[0].(map[string]any)
 	for _, r := range group["rules"].([]any) {
