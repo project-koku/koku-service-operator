@@ -269,12 +269,12 @@ func RBACWorkerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1
 }
 
 func rbacWorkerReadiness() *corev1.Probe {
-	// The operand image provides Python/Celery, but no grep or other shell
-	// utilities. Address this worker explicitly and require a successful pong.
+	// With --pool=solo, a Celery control ping is handled by the same process
+	// that runs tasks and can time out while a task is executing. Probe the
+	// local worker process instead; broker health is checked by dependency
+	// validation and must not make this process probe block a rollout.
 	return &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{
-		"python", "-c", "import os; from rbac.celery import app; " +
-			"node='celery@'+os.environ['HOSTNAME']; " +
-			"reply=app.control.inspect(destination=[node],timeout=3).ping() or {}; " +
-			"raise SystemExit(reply.get(node,{}).get('ok')!='pong')",
+		"python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_bytes(); " +
+			"sys.exit(0 if b'celery' in cmd else 1)",
 	}}}, InitialDelaySeconds: 15, PeriodSeconds: 30, TimeoutSeconds: 10, FailureThreshold: 3}
 }

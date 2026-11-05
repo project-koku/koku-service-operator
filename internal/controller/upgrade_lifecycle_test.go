@@ -108,12 +108,12 @@ func TestUpgradePlanPersistsBeforeMutation(t *testing.T) {
 		t.Fatalf("unexpected stage %s", restored.Status.Upgrade.Operation.Stage)
 	}
 }
-func TestUpgradeRollbackRestoresImagesWithoutStartingOldWriters(t *testing.T) {
+func TestMigrationFailureRetainsTargetImagesWithWritersStopped(t *testing.T) {
 	r, cfg, c := upgradeFixture(t)
+	cfg.Spec.CostManagement.API.Image.Tag = "v2"
 	attachUpgrade(cfg, "RollingBack", true)
 	for _, d := range resources.ApplicationDeployments(cfg) {
 		setOwnerRef(cfg, d)
-		d.Spec.Template.Spec.Containers[0].Image = "quay.io/target/app:v2"
 		if err := c.Create(context.Background(), d); err != nil {
 			t.Fatal(err)
 		}
@@ -121,27 +121,43 @@ func TestUpgradeRollbackRestoresImagesWithoutStartingOldWriters(t *testing.T) {
 	// Use the existing SSA fake for actual source-image restoration.
 	r.Client = fakeClientWithApplySupport(r.Scheme)
 	r.APIReader = r.Client
+	var target cost.CostManagementServiceConfigSpec
+	if err := json.Unmarshal(cfg.Status.Upgrade.Operation.Target.Spec.Raw, &target); err != nil {
+		t.Fatal(err)
+	}
+	requested := cfg.Spec
+	cfg.Spec = target
 	for _, d := range resources.ApplicationDeployments(cfg) {
 		setOwnerRef(cfg, d)
-		d.Spec.Template.Spec.Containers[0].Image = "quay.io/target/app:v2"
 		if err := r.Create(context.Background(), d); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
-		t.Fatal(err)
+	cfg.Spec = requested
+	for range 3 {
+		if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Status.Upgrade.Operation.Stage == cost.UpgradeStageRecoveryRequired {
+			break
+		}
 	}
 	if cfg.Status.Upgrade.Operation.Stage != "RecoveryRequired" {
 		t.Fatal("unknown schema incorrectly resumed previous release")
 	}
+	cfg.Spec = target
 	for _, want := range resources.ApplicationDeployments(cfg) {
 		live := &appsv1.Deployment{}
 		if err := r.Get(context.Background(), client.ObjectKeyFromObject(want), live); err != nil {
 			t.Fatal(err)
 		}
 		if *live.Spec.Replicas != 0 || live.Spec.Template.Spec.Containers[0].Image != want.Spec.Template.Spec.Containers[0].Image {
-			t.Errorf("%s did not restore source image at zero replicas", want.Name)
+			t.Errorf("%s did not retain the failed target image at zero replicas", want.Name)
 		}
+	}
+	cfg.Spec = requested
+	if cfg.Spec.CostManagement.API.Image.Tag != "v2" {
+		t.Fatal("recovery hold changed the user's requested target image pin")
 	}
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionRecoveryRequired) {
 		t.Fatal("recovery condition missing")
@@ -196,6 +212,170 @@ func TestUpgradeRecoveryRequiresBoundRequest(t *testing.T) {
 	}
 }
 
+func TestImageOnlyRecoveryRetrySkipsQuiesceAndMigration(t *testing.T) {
+	r, cfg, c := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageRecoveryRequired, false)
+	op := cfg.Status.Upgrade.Operation
+	cfg.Spec.UI.App.Image.Tag = "ui-retry"
+	for _, job := range migrationJobs(cfg) {
+		if err := c.Create(t.Context(), job); err != nil {
+			t.Fatal(err)
+		}
+		markJobComplete(t, c, cfg.Namespace, job.Name)
+	}
+	cfg.Spec.Upgrade.Recovery = &cost.UpgradeRecoveryRequest{OperationID: op.ID, RequestID: "ui-retry", Action: cost.RecoveryRetry}
+	handled, err := r.acceptUpgradeRecovery(t.Context(), cfg, cfg, mustCurrentReleaseBundle(), nil)
+	if err != nil || !handled {
+		t.Fatalf("recovery request: handled=%v err=%v", handled, err)
+	}
+	if op.Stage != cost.UpgradeStageRollingOut || op.SchemaMutationPossible {
+		t.Fatalf("image-only recovery should proceed directly to rollout: stage=%s schema-risk=%v", op.Stage, op.SchemaMutationPossible)
+	}
+	if countJobs(c, cfg.Namespace) != len(migrationJobs(cfg)) {
+		t.Fatal("image-only recovery changed migration receipts")
+	}
+}
+
+func TestRecoveryToSourceChecksFailedReceipt(t *testing.T) {
+	r, cfg, c := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageRolledBack, false)
+	op := cfg.Status.Upgrade.Operation
+	cfg.Spec.Upgrade.Recovery = &cost.UpgradeRecoveryRequest{OperationID: op.ID, RequestID: "accept-source", Action: cost.RecoveryRetry}
+	job := resources.MigrationJob(cfg, cfg.Spec.CostManagement.API.Image.Tag)
+	if err := c.Create(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	markJobFailed(t, c, cfg.Namespace, job.Name)
+	if _, err := r.acceptUpgradeRecovery(t.Context(), cfg, cfg, mustCurrentReleaseBundle(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if op.Stage != cost.UpgradeStageRecovering {
+		t.Fatal("retry must clear the retained failed receipt before claiming the source target complete")
+	}
+}
+
+func TestRollbackDeadlineRequiresExplicitRecovery(t *testing.T) {
+	r, cfg, c := upgradeFixture(t)
+	cfg.Spec.CostManagement.API.Image.Tag = "v2"
+	attachUpgrade(cfg, cost.UpgradeStageRollingBack, true)
+	cfg.Status.Upgrade.Operation.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	for _, d := range resources.ApplicationDeployments(cfg) {
+		setOwnerRef(cfg, d)
+		d.Spec.Replicas = new(int32(1))
+		if err := c.Create(context.Background(), d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.reconcile(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRecoveryRequired ||
+		!apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionRecoveryRequired) {
+		t.Fatal("an expired rollback must stop retrying automatically and expose RecoveryRequired")
+	}
+	for _, desired := range resources.ApplicationDeployments(cfg) {
+		live := &appsv1.Deployment{}
+		if err := c.Get(context.Background(), client.ObjectKeyFromObject(desired), live); err != nil {
+			t.Fatal(err)
+		}
+		if live.Spec.Replicas == nil || *live.Spec.Replicas != 0 {
+			t.Errorf("expired rollback did not hold %s at zero replicas", desired.Name)
+		}
+	}
+}
+
+func TestRecoveryRequiredWithoutSchemaRiskWaitsForNewRequest(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageRecoveryRequired, false)
+	var sourceReconciled bool
+	r.phasesOverride = func(_ context.Context, _ *cost.CostManagementServiceConfig) []PhaseFn {
+		sourceReconciled = true
+		return []PhaseFn{func() (Result, error) { return Result{}, nil }}
+	}
+	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if sourceReconciled || cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRecoveryRequired {
+		t.Fatal("RecoveryRequired resumed the source without a new explicit request")
+	}
+}
+
+func TestRollbackDeadlineIncludesSourceReconcileErrors(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageResumingPrevious, false)
+	cfg.Status.Upgrade.Operation.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	r.phasesOverride = func(context.Context, *cost.CostManagementServiceConfig) []PhaseFn {
+		return []PhaseFn{func() (Result, error) { return Result{}, errors.New("source apply rejected") }}
+	}
+	if _, err := r.rollbackUpgrade(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRecoveryRequired {
+		t.Fatal("persistent source reconcile errors bypassed the rollback deadline")
+	}
+}
+
+func TestInstalledBaselineUsesAvailabilityCondition(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	cfg.Status.Upgrade.Installed = nil
+	cfg.Status.Phase = ""
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "")
+	if _, err := r.reconcileInitial(context.Background(), cfg, mustCurrentReleaseBundle()); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Status.Upgrade.Installed == nil {
+		t.Fatal("a previously available installation should establish its upgrade baseline independent of Phase")
+	}
+}
+
+func TestUpgradeConfigErrorPreservesServingAvailability(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "")
+	if _, err := r.upgradeConfigError(cfg, errors.New("rejected target")); err == nil {
+		t.Fatal("expected configuration error")
+	}
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionAvailable) ||
+		!apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionDegraded) {
+		t.Fatal("rejected target should preserve installed availability while reporting Degraded")
+	}
+}
+
+func TestRejectedTargetStillReconcilesInstalledRevision(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	installed := cfg.Status.Upgrade.Installed
+	var reconciledImage string
+	r.phasesOverride = func(_ context.Context, effective *cost.CostManagementServiceConfig) []PhaseFn {
+		reconciledImage, _ = resources.ImageRef(effective.Spec.CostManagement.API.Image)
+		return []PhaseFn{func() (Result, error) { return Result{}, nil }}
+	}
+	cfg.Spec.CostManagement.API.Image.Tag = "invalid-target"
+	if _, err := r.rejectUpgradeTarget(context.Background(), cfg, errors.New("rejected target")); err == nil {
+		t.Fatal("expected rejected target error")
+	}
+	if reconciledImage != installed.Images["koku"] {
+		t.Fatalf("reconciled image %q, want installed image %q", reconciledImage, installed.Images["koku"])
+	}
+	if cfg.Spec.CostManagement.API.Image.Tag != "invalid-target" {
+		t.Fatal("rejected target was not preserved in the CMSC")
+	}
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionAvailable) ||
+		!apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionDegraded) {
+		t.Fatal("the installed revision should stay Available while the requested target is reported Degraded")
+	}
+}
+
+func TestUpgradeFailureEventIsDeduplicatedByCondition(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageMigrating, true)
+	message := "migration failed"
+	r.failUpgrade(cfg, message)
+	r.failUpgrade(cfg, message)
+	events := drainEvents(r)
+	if got := countEvents(events, "UpgradeFailed"); got != 1 {
+		t.Fatalf("duplicate reconciliation emitted %d UpgradeFailed events, want one", got)
+	}
+}
+
 func TestUpgradeRecoveryRejectsUnboundOrConsumedRequests(t *testing.T) {
 	for name, request := range map[string]*cost.UpgradeRecoveryRequest{
 		"absent":           nil,
@@ -211,7 +391,7 @@ func TestUpgradeRecoveryRejectsUnboundOrConsumedRequests(t *testing.T) {
 			targetID := op.Target.ID
 			cfg.Spec.Upgrade.Recovery = request
 			cfg.Spec.CostManagement.API.Image.Tag = "unaccepted-target"
-			handled, err := r.acceptUpgradeRecovery(cfg, cfg, mustCurrentReleaseBundle(), nil)
+			handled, err := r.acceptUpgradeRecovery(t.Context(), cfg, cfg, mustCurrentReleaseBundle(), nil)
 			if err != nil || handled || op.Stage != cost.UpgradeStageRecoveryRequired || op.Target.ID != targetID {
 				t.Fatal("unbound/consumed recovery request changed the operation")
 			}
@@ -594,6 +774,7 @@ func TestLegacyUpgradeBaseline(t *testing.T) {
 	}
 	cfg.Status.Upgrade = cost.UpgradeStatus{}
 	cfg.Status.Phase = cost.PhaseReady
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "")
 	if _, err := r.reconcile(context.Background(), cfg); err == nil {
 		t.Fatal("unknown baseline must block before replacing children")
 	}
@@ -606,6 +787,7 @@ func TestLegacyBaselineMissingMigrationJobPlansQuiescedRecovery(t *testing.T) {
 	r, cfg, c := upgradeFixture(t)
 	cfg.Status.Upgrade.Installed = nil
 	cfg.Status.Phase = cost.PhaseReady
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "")
 	cfg.Spec.Global.ClusterDomain = "apps.example.com"
 	cfg.Spec.Global.StorageClass = "standard"
 	for _, deployment := range resources.ApplicationDeployments(cfg) {
@@ -893,21 +1075,53 @@ func TestApplicationCompletionIncludesAllTargetsAndOldPods(t *testing.T) {
 	if err != nil || !result.IsZero() {
 		t.Fatalf("rollout did not complete after old Pod stopped: %v", err)
 	}
+	// The stable-state watch cache is sufficient; uncached API reads are
+	// reserved for a persisted upgrade operation.
+	r.APIReader = rejectingReader{Reader: c}
+	result, err = r.waitForApplicationRollout(context.Background(), cfg)
+	if err != nil || !result.IsZero() {
+		t.Fatalf("steady-state readiness unexpectedly used APIReader: %+v %v", result, err)
+	}
+}
+
+type rejectingReader struct{ client.Reader }
+
+func (rejectingReader) Get(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error {
+	return errors.New("uncached read was not expected")
+}
+func (rejectingReader) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return errors.New("uncached list was not expected")
+}
+
+func TestSteadyStatePhasesDoNotRepeatDiscovery(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	withDiscovery := r.phases(context.Background(), cfg, true)
+	withoutDiscovery := r.phasesWithDiscovery(context.Background(), cfg, true, true)
+	if len(withDiscovery) != len(withoutDiscovery)+1 {
+		t.Fatalf("skipping completed discovery removed %d phases, want one", len(withDiscovery)-len(withoutDiscovery))
+	}
 }
 func TestUpgradeQuiescenceCoversScheduledAndMigrationWriters(t *testing.T) {
 	r, cfg, c := upgradeFixture(t)
 	cron := resources.KeycloakSyncCronJob(cfg)
 	setOwnerRef(cfg, cron)
+	cron.UID = "cron"
 	if err := c.Create(context.Background(), cron); err != nil {
 		t.Fatal(err)
 	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "scheduled-work", Namespace: cfg.Namespace, Labels: resources.Labels(cfg, "rbac-sync"), OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "CronJob", Name: cron.Name, UID: "cron", Controller: new(true)}}}}
+	// CronJob-created Jobs do not reliably inherit the operator's selector
+	// labels. Quiescence must use the CronJob owner relationship instead.
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "scheduled-work", Namespace: cfg.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: cronJobKind, Name: cron.Name, UID: "cron", Controller: new(true)}}}}
 	if err := c.Create(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
 	quiet, err := r.quiesceApplications(context.Background(), cfg)
 	if err != nil || quiet {
-		t.Fatal("scheduled active Job was ignored")
+		t.Fatal("CronJob suspension did not require a follow-up drain check")
+	}
+	quiet, err = r.quiesceApplications(context.Background(), cfg)
+	if err != nil || quiet {
+		t.Fatal("active CronJob child Job without operator labels was ignored after its CronJob was suspended")
 	}
 	markJobComplete(t, c, cfg.Namespace, job.Name)
 	p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "migration-survivor", Namespace: cfg.Namespace, Labels: resources.Labels(cfg, "cost-management-migration"), OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: resources.NameKokuMigration(cfg), UID: "deleted", Controller: new(true)}}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
@@ -921,6 +1135,51 @@ func TestUpgradeQuiescenceCoversScheduledAndMigrationWriters(t *testing.T) {
 	quiet, err = r.quiesceApplications(context.Background(), cfg)
 	if err != nil || !quiet {
 		t.Fatal("application drain incorrectly treats migration writer as an application")
+	}
+}
+
+func TestExplicitRecoveryDoesNotResumeSourceBeforeScheduledWritersDrain(t *testing.T) {
+	r, cfg, c := upgradeFixture(t)
+	attachUpgrade(cfg, cost.UpgradeStageRollingBack, true)
+	op := cfg.Status.Upgrade.Operation
+	op.SchemaMutationPossible = false
+	op.RecoveryRequestID = "resume-previous"
+	cron := resources.KeycloakSyncCronJob(cfg)
+	setOwnerRef(cfg, cron)
+	cron.UID = "cron"
+	if err := c.Create(context.Background(), cron); err != nil {
+		t.Fatal(err)
+	}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "scheduled-work", Namespace: cfg.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: cronJobKind, Name: cron.Name, UID: cron.UID, Controller: new(true)}}}}
+	if err := c.Create(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	var sourceResumed bool
+	r.phasesOverride = func(_ context.Context, effective *cost.CostManagementServiceConfig) []PhaseFn {
+		image, _ := resources.ImageRef(effective.Spec.CostManagement.API.Image)
+		if image == op.Source.Images["koku"] {
+			sourceResumed = true
+		}
+		return []PhaseFn{func() (Result, error) { return Result{}, nil }}
+	}
+	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if sourceResumed {
+		t.Fatal("source revision resumed while an active CronJob child Job remained")
+	}
+	markJobComplete(t, c, cfg.Namespace, job.Name)
+	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if op.Stage != cost.UpgradeStageResumingPrevious || sourceResumed {
+		t.Fatal("source resume must begin only after the completed drain barrier is checkpointed")
+	}
+	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !sourceResumed {
+		t.Fatal("source revision did not resume after the scheduled Job completed")
 	}
 }
 
@@ -990,13 +1249,12 @@ func TestMalformedFrozenRevisionsFailClosed(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			r, cfg, c := upgradeFixture(t)
 			attachUpgrade(cfg, stage, true)
-			if stage == cost.UpgradeStageRollingBack {
-				cfg.Status.Upgrade.Operation.Source.Spec.Raw = []byte(`{}`)
-			} else {
-				cfg.Status.Upgrade.Operation.Target.Spec.Raw = []byte(`{}`)
-			}
-			if _, err := r.reconcile(context.Background(), cfg); err == nil {
+			cfg.Status.Upgrade.Operation.Target.Spec.Raw = []byte(`{`)
+			if _, err := r.reconcile(context.Background(), cfg); err == nil && stage != cost.UpgradeStageRollingBack {
 				t.Fatal("incomplete saved revision must block mutation")
+			}
+			if stage == cost.UpgradeStageRollingBack && cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRecoveryRequired {
+				t.Fatal("an incomplete failed target must leave the operation in RecoveryRequired")
 			}
 			if countJobs(c, cfg.Namespace) != 0 {
 				t.Fatal("incomplete saved revision launched a migration")

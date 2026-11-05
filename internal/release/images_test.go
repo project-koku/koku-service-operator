@@ -157,8 +157,9 @@ func TestAutomaticReleaseEdges(t *testing.T) {
 		t.Fatalf("missing target image diagnostic = %v", err)
 	}
 	source.ReleaseManaged = false
-	if err := next.ValidateTransition(original, source, target); err == nil {
-		t.Fatal("custom source accepted as a certified release")
+	err = next.ValidateTransition(original, source, target)
+	if err == nil || !strings.Contains(err.Error(), "do not match declared release") {
+		t.Fatalf("custom source should explain that its images do not match the declared release: %v", err)
 	}
 	source.ReleaseManaged = true
 	source.ReleaseID = "unknown"

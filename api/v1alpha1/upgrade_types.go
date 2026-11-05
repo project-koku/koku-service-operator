@@ -18,6 +18,7 @@ const (
 	UpgradeStageRecoveryRequired = "RecoveryRequired"
 	UpgradeStageRolledBack       = "RolledBack"
 	UpgradeStageRecovering       = "Recovering"
+	UpgradeStageResumingPrevious = "ResumingPrevious"
 )
 
 // UpgradePolicy controls application image ownership and explicit recovery.
@@ -74,7 +75,7 @@ type UpgradeOperation struct {
 	TargetGeneration int64                `json:"targetGeneration"`
 	Source           *ApplicationRevision `json:"source,omitempty"`
 	Target           ApplicationRevision  `json:"target"`
-	// +kubebuilder:validation:Enum=Quiescing;Migrating;RollingOut;RollingBack;RecoveryRequired;RolledBack;Recovering
+	// +kubebuilder:validation:Enum=Quiescing;Migrating;RollingOut;RollingBack;RecoveryRequired;RolledBack;Recovering;ResumingPrevious
 	Stage          string      `json:"stage"`
 	StartedAt      metav1.Time `json:"startedAt"`
 	StageStartedAt metav1.Time `json:"stageStartedAt"`

@@ -3193,6 +3193,7 @@ spec:
                         - RecoveryRequired
                         - RolledBack
                         - Recovering
+                        - ResumingPrevious
                         type: string
                       stageStartedAt:
                         format: date-time

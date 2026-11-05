@@ -52,9 +52,9 @@ The execution sequence is:
 
 ```text
 Plan -> [Quiesce -> Migrate] -> Rollout -> Ready
-                      failure -> Restore source images
+                      failure -> Restore source if schema is untouched
                                 -> RolledBack (safe to resume)
-                                -> RecoveryRequired (writers remain stopped)
+                                -> RecoveryRequired (failed target held at zero)
 ```
 
 UI-only changes and other updates with matching migration receipts use rolling
@@ -81,19 +81,24 @@ the replacement operator's inputs.
 Before creating a migration, status records that schema mutation is possible.
 This marker survives Job deletion, missing Pod logs and controller restart.
 
-On failure, the operator restores the previous application image/configuration
-references without changing the requested CMSC pins. Subsequent reconciles keep
-that restored state, rather than immediately reapplying the failed target.
+On failure, the operator preserves the requested CMSC pins. Subsequent
+reconciles keep the failed target image/configuration on stopped Deployments
+when schema mutation may have occurred; they do not silently replace the target
+with the source revision.
 
 - If no migration could have executed, the operator resumes and verifies the
   previous release automatically. `Available=True` can coexist with
   `UpgradeFailed=True`: the source works, but the requested target failed.
-- If a migration may have committed changes, previous images are restored with
-  replicas held at zero. `RecoveryRequired=True` prevents old processes from
-  running against an unknown schema. Reverting image tags is not schema recovery.
+- If a migration may have committed changes, target images are retained with
+  replicas held at zero. `RecoveryRequired=True` prevents either old or target
+  processes from running against an unknown schema. The source revision remains
+  in operation status for an explicit `ResumePrevious`; image tags do not
+  restore database schema.
 
-After inspecting/repairing the database, submit a recovery request bound to the
-failed operation. Use a new request ID for each deliberate attempt:
+Maintain and verify daily database backups, and confirm the restore procedure
+before starting an upgrade. After inspecting or restoring the database, submit
+a recovery request bound to the failed operation. Use a new request ID for each
+deliberate attempt:
 
 ```yaml
 spec:
@@ -115,12 +120,21 @@ endpoint with different bindings can instead be supplied as an explicit Retry
 target. An image edit or operator restart alone never clears a rollback or
 recovery hold; submit Retry when ready to attempt another target.
 
+For customer recovery steps, including first-install migration failures, see the
+[application upgrade recovery runbook](../operations/application-upgrade-recovery.md).
+
 `spec.upgrade.timeoutSeconds` defaults to 7200. Expiry requests rollback, but
-never force-deletes active migrations or terminating Pods. Inspect remaining
-writers if rollback is waiting. This deadline covers drain and rollout readiness;
-the ordinary readiness timeout does not prematurely abort a journaled upgrade.
-First-install migration failure retains its Job;
-there is no previous installed application revision to restore.
+never force-deletes active migrations or terminating Pods. If rollback itself
+cannot finish before its deadline, the operator enters `RecoveryRequired` and
+waits for an explicit recovery request. Inspect remaining writers if rollback
+is waiting. This deadline covers drain and rollout readiness; the ordinary
+readiness timeout does not prematurely abort a journaled upgrade or a graceful
+old-Pod shutdown; a steady-state old Pod becomes Degraded only after its
+one-hour termination budget plus the five-minute readiness margin.
+First-install migration failure retains its Job and sets
+`RecoveryRequired=True`; there is no previous installed application revision to
+restore. After the database is repaired, explicitly remove the failed Job to
+retry the current CMSC image pins.
 
 ## Rollout and completion
 
@@ -138,8 +152,14 @@ stop-before-start behavior beyond rollout percentages alone.
 The listener installs a SIGTERM handler that uses its normal Python interrupt
 shutdown path; Python running as PID 1 would otherwise ignore the default signal.
 
-Readiness uses application endpoints where available, targeted Celery ping for
-RBAC workers, and process startup checks for services without a health endpoint.
+Readiness uses application endpoints where available, a local process check for
+the RBAC `--pool=solo` worker (a Celery ping can be blocked while it runs a task),
+and the Listener's `/livez` endpoint so Kafka outages do not stall an image
+rollout. `/livez` checks the listener consumer thread after startup but returns
+success before the application reports ready, so it is not a full startup
+readiness signal. A dependency-independent listener startup-readiness endpoint
+and a verified RBAC worker readiness contract remain open application-image
+integration work.
 Completion checks every enabled application Deployment, including UI, workers,
 Beat and optional ROS: target images, intended replica count, observed generation,
 updated/ready/available replicas and old ReplicaSet Pod termination. Zero-replica

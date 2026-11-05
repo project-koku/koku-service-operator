@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cost "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -22,6 +23,7 @@ import (
 const (
 	reasonWaitingForApplicationRollout = "WaitingForApplicationRollout"
 	replicaSetKind                     = "ReplicaSet"
+	cronJobKind                        = "CronJob"
 	// Bundled infrastructure components (dev/CI) are never application writers.
 	componentCache    = "cache"
 	componentDatabase = "database"
@@ -78,14 +80,16 @@ func (r *CostManagementServiceConfigReconciler) quiesceApplications(ctx context.
 func (r *CostManagementServiceConfigReconciler) suspendApplicationSchedules(ctx context.Context, cfg *cost.CostManagementServiceConfig) (bool, error) {
 	quiet := true
 	cronjobs := &batchv1.CronJobList{}
-	if err := r.safetyReader().List(ctx, cronjobs, client.InNamespace(cfg.Namespace), applicationSelector(cfg)); err != nil {
+	if err := r.safetyReader().List(ctx, cronjobs, client.InNamespace(cfg.Namespace)); err != nil {
 		return false, err
 	}
+	managedCronJobs := make(map[string]types.UID)
 	for i := range cronjobs.Items {
 		j := &cronjobs.Items[i]
 		if !ownedByConfig(j, cfg) {
 			continue
 		}
+		managedCronJobs[j.Name] = j.UID
 		if j.Spec.Suspend == nil || !*j.Spec.Suspend {
 			before := j.DeepCopy()
 			j.Spec.Suspend = new(true)
@@ -96,13 +100,13 @@ func (r *CostManagementServiceConfigReconciler) suspendApplicationSchedules(ctx 
 		}
 	}
 	jobs := &batchv1.JobList{}
-	if err := r.safetyReader().List(ctx, jobs, client.InNamespace(cfg.Namespace), applicationSelector(cfg)); err != nil {
+	if err := r.safetyReader().List(ctx, jobs, client.InNamespace(cfg.Namespace)); err != nil {
 		return false, err
 	}
 	for i := range jobs.Items {
 		j := &jobs.Items[i]
 		owner := metav1.GetControllerOf(j)
-		if owner != nil && owner.Kind == "CronJob" && !isJobComplete(j) && !isJobFailed(j) {
+		if owner != nil && owner.Kind == cronJobKind && managedCronJobs[owner.Name] == owner.UID && !isJobComplete(j) && !isJobFailed(j) {
 			quiet = false
 		}
 	}
@@ -138,7 +142,11 @@ func podTerminal(p *corev1.Pod) bool {
 // Failed Jobs are retained evidence, not active writers. This separate check
 // lets rollback restore images while still refusing overlap with any live writer.
 func (r *CostManagementServiceConfigReconciler) migrationWritersStopped(ctx context.Context, cfg *cost.CostManagementServiceConfig) (bool, error) {
-	for _, name := range migrationNames(cfg) {
+	return r.migrationWritersStoppedFor(ctx, cfg, migrationNames(cfg))
+}
+
+func (r *CostManagementServiceConfigReconciler) migrationWritersStoppedFor(ctx context.Context, cfg *cost.CostManagementServiceConfig, names []string) (bool, error) {
+	for _, name := range names {
 		job := &batchv1.Job{}
 		err := r.safetyReader().Get(ctx, client.ObjectKey{Namespace: cfg.Namespace, Name: name}, job)
 		if apierrors.IsNotFound(err) {
@@ -158,7 +166,7 @@ func (r *CostManagementServiceConfigReconciler) migrationWritersStopped(ctx cont
 	for i := range pods.Items {
 		p := &pods.Items[i]
 		owner := metav1.GetControllerOf(p)
-		if !podTerminal(p) && owner != nil && owner.Kind == migrationJobKind && knownMigration(cfg, owner.Name) {
+		if !podTerminal(p) && owner != nil && owner.Kind == migrationJobKind && slices.Contains(names, owner.Name) {
 			return false, nil
 		}
 	}
@@ -203,24 +211,32 @@ func (r *CostManagementServiceConfigReconciler) applyBeat(ctx context.Context, d
 // waitForApplicationRollout checks every enabled target, not only the API. It
 // includes workers, Beat, UI, optional ROS and deliberately disabled queues.
 func (r *CostManagementServiceConfigReconciler) waitForApplicationRollout(ctx context.Context, cfg *cost.CostManagementServiceConfig) (Result, error) {
+	reader := client.Reader(r.Client)
+	if cfg.Status.Upgrade.Operation != nil {
+		// During a journaled upgrade use uncached reads before declaring the
+		// frozen target complete. Steady-state drift checks use the controller
+		// cache to avoid an API read for every component on every reconcile.
+		reader = r.safetyReader()
+	}
 	for _, desired := range resources.ApplicationDeployments(cfg) {
 		live := &appsv1.Deployment{}
-		if err := r.safetyReader().Get(ctx, client.ObjectKeyFromObject(desired), live); err != nil {
+		if err := reader.Get(ctx, client.ObjectKeyFromObject(desired), live); err != nil {
 			if apierrors.IsNotFound(err) {
 				return r.notReadyWait(cfg, reasonWaitingForApplicationRollout, "waiting for "+desired.Name, desired.Name), nil
 			}
 			return Result{}, err
 		}
-		ready := deploymentMatchesTarget(live, desired)
-		if !ready {
-			return r.notReadyWait(cfg, reasonWaitingForApplicationRollout, "waiting for target rollout of "+desired.Name, desired.Name), nil
-		}
-		stopped, err := r.oldApplicationPodsStopped(ctx, cfg, live, desired)
+		// Recreate and stop-before-start rollouts cannot become ready until
+		// old Pods finish their graceful shutdown. Preserve that longer budget.
+		stopped, err := r.oldApplicationPodsStopped(ctx, cfg, live, desired, reader)
 		if err != nil {
 			return Result{}, err
 		}
 		if !stopped {
-			return r.notReadyWait(cfg, reasonWaitingForApplicationRollout, "waiting for old Pods of "+desired.Name+" to terminate", desired.Name), nil
+			return r.notReadyWait(cfg, reasonWaitingForOldPods, "waiting for old Pods of "+desired.Name+" to terminate", desired.Name), nil
+		}
+		if !deploymentMatchesTarget(live, desired) {
+			return r.notReadyWait(cfg, reasonWaitingForApplicationRollout, "waiting for target rollout of "+desired.Name, desired.Name), nil
 		}
 	}
 	return Result{}, nil
@@ -244,10 +260,10 @@ func deploymentMatchesTarget(live, desired *appsv1.Deployment) bool {
 	return ready
 }
 
-func (r *CostManagementServiceConfigReconciler) oldApplicationPodsStopped(ctx context.Context, cfg *cost.CostManagementServiceConfig, live, desired *appsv1.Deployment) (bool, error) {
+func (r *CostManagementServiceConfigReconciler) oldApplicationPodsStopped(ctx context.Context, cfg *cost.CostManagementServiceConfig, live, desired *appsv1.Deployment, reader client.Reader) (bool, error) {
 	want := *desired.Spec.Replicas
 	pods := &corev1.PodList{}
-	if err := r.safetyReader().List(ctx, pods, client.InNamespace(cfg.Namespace), client.MatchingLabels(desired.Spec.Selector.MatchLabels)); err != nil {
+	if err := reader.List(ctx, pods, client.InNamespace(cfg.Namespace), client.MatchingLabels(desired.Spec.Selector.MatchLabels)); err != nil {
 		return false, err
 	}
 	for i := range pods.Items {
@@ -255,7 +271,7 @@ func (r *CostManagementServiceConfigReconciler) oldApplicationPodsStopped(ctx co
 		if podTerminal(p) {
 			continue
 		}
-		if want == 0 {
+		if want == 0 || !p.DeletionTimestamp.IsZero() {
 			return false, nil
 		}
 		owner := metav1.GetControllerOf(p)
@@ -263,6 +279,8 @@ func (r *CostManagementServiceConfigReconciler) oldApplicationPodsStopped(ctx co
 			continue
 		}
 		rs := &appsv1.ReplicaSet{}
+		// ReplicaSets grant only named get access. A cached Get would start
+		// an informer requiring list/watch and block reconciliation.
 		if err := r.safetyReader().Get(ctx, client.ObjectKey{Namespace: cfg.Namespace, Name: owner.Name}, rs); err != nil {
 			if apierrors.IsNotFound(err) {
 				// An old ReplicaSet pruned mid-rollout leaves its Pod for garbage
