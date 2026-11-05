@@ -42,6 +42,15 @@ func TestRBACAPIDeployment_PrincipalProfileSidecar(t *testing.T) {
 			envMap[e.Name] = e.Value
 		}
 	}
+	if envMap["PRINCIPAL_PROFILE_ADDR"] != principalProfileAddr {
+		t.Fatalf("sidecar addr = %q, want %q", envMap["PRINCIPAL_PROFILE_ADDR"], principalProfileAddr)
+	}
+	if profile.ReadinessProbe == nil || profile.ReadinessProbe.Exec == nil {
+		t.Fatal("readiness probe must be Exec --healthcheck (loopback bind)")
+	}
+	if got := profile.ReadinessProbe.Exec.Command; len(got) != 2 || got[0] != "/principal-profile" || got[1] != "--healthcheck" {
+		t.Fatalf("readiness exec = %#v", got)
+	}
 	if envMap["KEYCLOAK_URL"] == "" || envMap["KEYCLOAK_CLIENT_ID"] == "" {
 		t.Fatalf("sidecar missing Keycloak env: %#v", envMap)
 	}

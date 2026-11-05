@@ -3,14 +3,15 @@ package resources
 import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/intstr"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
 const (
-	principalProfilePort     = int32(8099)
-	principalProfileAddr     = ":8099"
+	principalProfilePort = int32(8099)
+	// Loopback only: RBAC API talks over the pod network namespace; kubelet
+	// probes use --healthcheck (HTTP probes hit the pod IP and would fail).
+	principalProfileAddr     = "127.0.0.1:8099"
 	principalProfileURLLocal = "http://127.0.0.1:8099"
 )
 
@@ -56,11 +57,13 @@ func principalProfileContainer(cfg *costv1alpha1.CostManagementServiceConfig) co
 	}
 	cpu := resource.MustParse("50m")
 	mem := resource.MustParse("64Mi")
+	healthcheck := []string{"/principal-profile", "--healthcheck"}
 	return corev1.Container{
 		Name:            "principal-profile",
 		Image:           OperatorImage,
 		ImagePullPolicy: pullPolicy(cfg),
 		Command:         []string{"/principal-profile"},
+		// Port is documented for operators; the process binds loopback only.
 		Ports: []corev1.ContainerPort{
 			{Name: "profile", ContainerPort: principalProfilePort, Protocol: corev1.ProtocolTCP},
 		},
@@ -72,13 +75,13 @@ func principalProfileContainer(cfg *costv1alpha1.CostManagementServiceConfig) co
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("profile")},
+				Exec: &corev1.ExecAction{Command: healthcheck},
 			},
 			InitialDelaySeconds: 3, PeriodSeconds: 10, TimeoutSeconds: 3, FailureThreshold: 3,
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("profile")},
+				Exec: &corev1.ExecAction{Command: healthcheck},
 			},
 			InitialDelaySeconds: 10, PeriodSeconds: 20, TimeoutSeconds: 3, FailureThreshold: 5,
 		},

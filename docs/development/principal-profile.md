@@ -41,19 +41,25 @@ GET /v1/orgs/{org_id}/profiles
 ## Local stub (no Keycloak)
 
 ```bash
-make run-principal-profile-spike
+make run-principal-profile
 export PRINCIPAL_PROFILE_SERVICE_URL=http://127.0.0.1:8099
 ```
 
 When `KEYCLOAK_*` is unset, the binary serves fixture users (`admin` / `alice` / `bob`).
+The process binds `127.0.0.1:8099` by default (loopback only).
 
 ## Operator wiring
 
 When `spec.rbac.keycloakSync.enabled` is true, `RBACAPIDeployment` adds:
 
 - Sidecar `principal-profile` using `OperatorImage` + command `/principal-profile`
+- Listen address `127.0.0.1:8099` (not the pod IP); probes use `/principal-profile --healthcheck`
 - Keycloak Admin env/secret/CA on the **sidecar only**
 - `PRINCIPAL_PROFILE_SERVICE_URL=http://127.0.0.1:8099` on the RBAC API container
+
+Keycloak sync creates/preserves Principals for disabled Keycloak users so the
+Users table can show them as Inactive via profile enrichment; they are not
+treated as prune orphans.
 
 ## insights-rbac
 

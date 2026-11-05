@@ -177,7 +177,11 @@ def sync(org_id, account_number, kc_users, prune_orphans):
     if created:
         log.info("[%s] Created tenant", org_id)
 
-    counters = {"created": 0, "updated": 0, "unchanged": 0, "pruned": 0, "skipped_disabled": 0}
+    # Disabled Keycloak users must still become/remain Principals. COST-8167
+    # enrichment reports enabled=false so the Users table can show Inactive;
+    # skipping them here would leave them out of synced_usernames and prune
+    # them as orphans when pruneOrphans is true (the default).
+    counters = {"created": 0, "updated": 0, "unchanged": 0, "pruned": 0, "disabled": 0}
     synced_usernames = set()
 
     with transaction.atomic():
@@ -186,10 +190,10 @@ def sync(org_id, account_number, kc_users, prune_orphans):
             if not username or username.startswith("service-account-"):
                 continue
 
-            if not kc_user.get("enabled", True):
-                counters["skipped_disabled"] += 1
-                log.info("[%s] AUDIT action=skip_disabled user=\"%s\" reason=keycloak_disabled", org_id, username)
-                continue
+            enabled = kc_user.get("enabled", True)
+            if not enabled:
+                counters["disabled"] += 1
+                log.info("[%s] AUDIT action=sync_disabled user=\"%s\" reason=keycloak_disabled", org_id, username)
 
             synced_usernames.add(username)
             _, was_created = Principal.objects.get_or_create(
@@ -199,7 +203,7 @@ def sync(org_id, account_number, kc_users, prune_orphans):
 
             if was_created:
                 counters["created"] += 1
-                log.info("[%s] AUDIT action=created user=\"%s\"", org_id, username)
+                log.info("[%s] AUDIT action=created user=\"%s\" enabled=%s", org_id, username, enabled)
             else:
                 counters["unchanged"] += 1
 
@@ -234,10 +238,10 @@ def sync(org_id, account_number, kc_users, prune_orphans):
     elapsed = time.monotonic() - t0
     log.info(
         "[%s] SYNC COMPLETE: members=%d, synced=%d, created=%d, updated=%d, "
-        "unchanged=%d, pruned=%d, skipped_disabled=%d, elapsed=%.1fs",
+        "unchanged=%d, pruned=%d, disabled=%d, elapsed=%.1fs",
         org_id, len(kc_users), len(synced_usernames), counters["created"],
         counters["updated"], counters["unchanged"], counters["pruned"],
-        counters["skipped_disabled"], elapsed,
+        counters["disabled"], elapsed,
     )
     return True
 

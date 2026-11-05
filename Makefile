@@ -213,13 +213,13 @@ run: manifests generate fmt vet ## Run a controller from your host (pins cache v
 	# Pass both pins through; resolveWatchNamespace() accepts either (WATCH_NAMESPACE wins).
 	NAMESPACE=$(NAMESPACE) WATCH_NAMESPACE=$(WATCH_NAMESPACE) go run ./cmd/main.go --dev --operator-image=$(IMG)
 
-.PHONY: run-principal-profile-spike
-run-principal-profile-spike: ## COST-8167 spike: Cost-owned principal profile stub (:8099).
+.PHONY: run-principal-profile
+run-principal-profile: ## COST-8167: run Cost-owned principal profile service (127.0.0.1:8099).
 	go run ./cmd/principal-profile
 
-.PHONY: test-principal-profile-spike
-test-principal-profile-spike: ## Unit tests for the principal-profile spike stub.
-	go test ./cmd/principal-profile/ -count=1
+.PHONY: test-principal-profile
+test-principal-profile: ## Unit tests for the principal-profile package and entrypoint.
+	go test ./cmd/principal-profile/ ./internal/principalprofile/ -count=1
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
