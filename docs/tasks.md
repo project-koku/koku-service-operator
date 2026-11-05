@@ -21,7 +21,7 @@ Last audited: 2026-08-19.
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7680](https://redhat.atlassian.net/browse/COST-7680) | Implement phase-gated reconciler skeleton | 🔄 | `runPhases()` + `PhaseError` pattern ✅, 9-stage pipeline ✅, Kubernetes Events (Ready/MigrationStarted/Complete/Failed/ReconcileError) ✅, pause/resume via `…/pause=true` annotation + `Paused` condition ✅. Remaining: wait-path exponential backoff (G2). |
+| [COST-7680](https://redhat.atlassian.net/browse/COST-7680) | Implement phase-gated reconciler skeleton | 🔄 | `runPhases()` + `PhaseError` pattern ✅, 9-stage pipeline ✅, Kubernetes Events (Ready/MigrationStarted/Complete/Failed/ReconcileError) ✅ — success Events transition-only, `Available` set only at pipeline end, `CoreServicesReady` condition ([COST-8103](https://redhat.atlassian.net/browse/COST-8103)) ✅, pause/resume via `…/pause=true` annotation + `Paused` condition ✅. Remaining: wait-path exponential backoff (G2). |
 | [COST-7681](https://redhat.atlassian.net/browse/COST-7681) | Implement Server-Side Apply and ownership model | ✅ | SSA with `ForceOwnership` ✅, `Controller: true` + `BlockOwnerDeletion: true` on ownerRefs ✅, finalizer `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` ✅, `reconcileDelete()` removes ConsoleLink + Kruize ClusterRole/Binding ✅, drift correction 5-min requeue ✅. |
 | [COST-7682](https://redhat.atlassian.net/browse/COST-7682) | Implement cluster discovery | ✅ | Cluster domain from `config.openshift.io/v1/Ingress/cluster` ✅, default StorageClass by annotation ✅, `DiscoveryComplete` condition ✅, `status.discoveredConfig` populated ✅, user override via `spec.global.*` ✅. Tests: 11 unit tests with fake client. |
 | [COST-7683](https://redhat.atlassian.net/browse/COST-7683) | Implement S3 backend auto-detection | ✅ | Three-path resolution: user `secretName` → Bound OBC → NooBaa ✅. Sets `StorageReady` condition + `status.discoveredConfig.s3` ✅. Copies OBC/NooBaa credentials into `<cr>-storage-credentials` Secret ✅. Failure does not block the pipeline. |
@@ -96,7 +96,6 @@ Short version: bundled infra is dev-only (intentional), profile-based sizing for
 | Ticket | Summary | Notes |
 |--------|---------|-------|
 | [COST-8095](https://redhat.atlassian.net/browse/COST-8095) | `spec.profile` sizing maps | ✅ Done. Validated `small|medium|large|xlarge` sizing tiers for Cost workloads (resources, replicas, ingress limits, Envoy/HAProxy timeouts); explicit CR fields override; `status.profile` reports the tier whose sized workloads were applied for the current generation. ROS/Kruize rows stay with COST-8054. See [design](design/profile-sizing-maps.md). See [jira snapshot](jira/COST-8095.md). |
-| [COST-8103](https://redhat.atlassian.net/browse/COST-8103) | `CoreServicesAvailable` / mid-pipeline `Available` | Sparse success Events (`Ready`); stop treating Koku-API-up as product-available. See [jira snapshot](jira/COST-8103.md). |
 | [COST-8125](https://redhat.atlassian.net/browse/COST-8125) | GA install/config guide remainder | Certified versions, full-stack sizing-profile docs, backup, complete NP/monitoring, OperatorHub, confirmed CMMO contract. Parent [COST-7700](jira/COST-7700.md). See [jira snapshot](jira/COST-8125.md). |
 
 ---

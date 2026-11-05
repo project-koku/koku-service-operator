@@ -235,9 +235,9 @@ Redirect URI the client must allow:
 
 `https://{cr-name}-ui-{namespace}.{apps-domain}/oauth2/callback`
 
-Until this Secret exists with both keys, `UIReady` stays False
-(`OAuthClientSecretMissing`) and `status.phase` stays `Progressing`. Core APIs
-can still become `Available`.
+Until this Secret exists with both keys, `UIReady` and `Available` stay False
+(`OAuthClientSecretMissing`) and `status.phase` stays `Progressing`. Core
+services can still come up (`CoreServicesReady=True`).
 
 ```bash
 kubectl -n "$NAMESPACE" create secret generic cost-management-minimal-ui-oauth-client \
