@@ -750,6 +750,47 @@ func TestUnreachableDatabaseDuringRolloutRequeuesWithoutRollback(t *testing.T) {
 	}
 }
 
+// A DB outage that ends while the operation is Migrating is announced once by
+// the migration preflight, like the regular pipeline does.
+func TestMigrationPreflightEmitsInfrastructureReadyOnRecovery(t *testing.T) {
+	r, cfg, _ := upgradeFixture(t)
+	r.Recorder = record.NewFakeRecorder(100)
+	for _, item := range []struct {
+		setHost func(string)
+		setPort func(int32)
+	}{
+		{func(host string) { cfg.Spec.Database.Host = host }, func(port int32) { cfg.Spec.Database.Port = port }},
+		{func(host string) { cfg.Spec.Cache.Host = host }, func(port int32) { cfg.Spec.Cache.Port = port }},
+	} {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = listener.Close() })
+		item.setHost("127.0.0.1")
+		item.setPort(int32(listener.Addr().(*net.TCPAddr).Port))
+	}
+	cfg.Spec.Database.Deploy = new(false)
+	cfg.Spec.Cache.Deploy = new(false)
+	attachUpgrade(cfg, cost.UpgradeStageMigrating, true)
+	// The previous pass saw the database down.
+	r.setCondition(cfg, cost.ConditionDatabaseReady, metav1.ConditionFalse, reasonDatabaseUnreachable, "TCP probe failed")
+	r.setCondition(cfg, cost.ConditionCacheReady, metav1.ConditionTrue, "CacheReachable", "")
+
+	for pass := 1; pass <= 2; pass++ {
+		if _, err := r.migrateUpgrade(context.Background(), cfg); err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
+		}
+	}
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionDatabaseReady) {
+		t.Fatal("preflight did not record the recovered database")
+	}
+	events := drainEvents(r)
+	if got := countEvents(events, "InfrastructureReady"); got != 1 {
+		t.Fatalf("InfrastructureReady events = %d, want 1 (on recovery only): %v", got, events)
+	}
+}
+
 func TestUnreachableDatabaseDuringMigrationRequeuesWithoutRollback(t *testing.T) {
 	r, cfg, _ := upgradeFixture(t)
 	for _, item := range []struct {

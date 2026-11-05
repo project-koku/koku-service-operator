@@ -196,7 +196,7 @@ func TestReconcileUI_ValidOAuthSecret(t *testing.T) {
 		Recorder: &noopRecorder{},
 	}
 
-	if err := r.reconcileUI(context.Background(), cfg); err != nil {
+	if _, err := r.reconcileUI(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileUI: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestReconcileUI_InvalidOAuthSecret(t *testing.T) {
 		Recorder: &noopRecorder{},
 	}
 
-	if err := r.reconcileUI(context.Background(), cfg); err != nil {
+	if _, err := r.reconcileUI(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileUI should not error on invalid secret: %v", err)
 	}
 
@@ -424,11 +424,19 @@ func TestReconcileUI_AdmittedRoute_SetsUIReady(t *testing.T) {
 		Scheme:   scheme,
 		Recorder: &noopRecorder{},
 	}
-	if err := r.reconcileUI(context.Background(), cfg); err != nil {
+	if _, err := r.reconcileUI(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileUI: %v", err)
 	}
+	// Route admitted, Deployment not ready yet: UIReady waits on the Deployment.
+	if ui := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionUIReady); ui == nil || ui.Reason != reasonWaitingForUI {
+		t.Fatalf("expected UIReady=False %s until the UI Deployment is ready, got %+v", reasonWaitingForUI, ui)
+	}
+	markDeploymentReady(t, r.Client, testNamespace, resources.NameUI(cfg))
+	if _, err := r.reconcileUI(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileUI after UI ready: %v", err)
+	}
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionUIReady) {
-		t.Fatalf("expected UIReady=True after UI Route admission, got %+v",
+		t.Fatalf("expected UIReady=True after UI Route admission and Deployment ready, got %+v",
 			findCondition(cfg.Status.Conditions, costv1alpha1.ConditionUIReady))
 	}
 	cl := &unstructured.Unstructured{}

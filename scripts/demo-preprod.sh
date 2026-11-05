@@ -636,7 +636,7 @@ rm -f "$CR_TMP"
 ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"
-echo "  watching ${NAMESPACE}/${CR_NAME} (UIReady is the OAuth Secret; we wait for the UI rollout)…"
+echo "  watching ${NAMESPACE}/${CR_NAME} (UIReady includes the UI rollout)…"
 deadline=$((SECONDS + 900))
 while (( SECONDS < deadline )); do
   "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='phase={.status.phase}{"\n"}{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true

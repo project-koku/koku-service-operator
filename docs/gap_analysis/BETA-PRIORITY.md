@@ -40,7 +40,7 @@ Several paths report success while the underlying dependency is wrong or while a
 | External DB secret validation omits `kruize-user` / `kruize-password` | [7684 R3](COST-7684.md) | **Closed** — required when `ros.enabled=true` |
 | External DB secret validation always requires `ros-user` / `ros-password` | [7684](COST-7684.md), [8054](../jira/COST-8054.md) | **Closed** — Cost-only BYOI may omit `ros-*` / `kruize-*` |
 | RBAC Deployments applied but never gated; no `RBACReady` | [7689 G2](COST-7689.md) | **Closed** — `RBACReady` gates on the RBAC API before `Available` |
-| `UIReady` / Celery workers not truly readiness-gated | [7690 R2](COST-7690.md), [7687](COST-7687.md) | Ingress is gated (`IngressReady`, COST-7688 R4 closed); UI/Celery still weaker than RBAC/S3 |
+| `UIReady` / Celery workers not truly readiness-gated | [7690 R2](COST-7690.md), [7687](COST-7687.md) | Ingress is gated (`IngressReady`, COST-7688 R4 closed); UI gated on Deployment readiness (COST-8103); Celery still weaker than RBAC/S3 |
 
 **Beta minimum:** S3 secret-key check + tighten OIDC success. RBAC readiness gate is closed ([7689 G2](COST-7689.md)). Auth condition collision closed under COST-7688.
 
@@ -242,7 +242,7 @@ S3/OBC items stay relevant either way — Ingress/uploads still need object stor
 | [COST-7687](COST-7687.md) | Not fully done | SaaS queue exclusion (P0); ROS/Kruize workloads gated when disabled; sizing → [COST-8054](../jira/COST-8054.md) |
 | [COST-7688](COST-7688.md) | Largely done | Auth condition collision (P0) |
 | [COST-7689](COST-7689.md) | Done | Readiness closed; sizing → [COST-8095](../jira/COST-8095.md) |
-| [COST-7690](COST-7690.md) | Not fully done | UI profile sizing done; remaining maps → [COST-8095](../jira/COST-8095.md) **P2**; Related `UIReady` ≠ pods Ready (T1 trust) |
+| [COST-7690](COST-7690.md) | Not fully done | UI profile sizing done; remaining maps → [COST-8095](../jira/COST-8095.md) **P2**; `UIReady` now includes UI Deployment readiness (COST-8103) |
 | [COST-7691](COST-7691.md) | Not done | CA merge + core NPs (P1); ROS/Kruize SA/NP → [COST-8054](../jira/COST-8054.md) |
 | [COST-7692](COST-7692.md) | Not done | Monitoring completeness (P2); Kruize SM is **not** ROS-gated on apply ([COST-7686](COST-7686.md) G1 leftover); ROS/Kruize SM → [COST-8054](../jira/COST-8054.md) |
 | [COST-8054](../jira/COST-8054.md) | In progress (partial) | Conditional Validation keys; independent Kruize; day-2; hardening gaps |

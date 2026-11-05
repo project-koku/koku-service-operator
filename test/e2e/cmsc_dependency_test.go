@@ -45,7 +45,7 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 			restore()
 			waitCMSCCondition(
 				costv1alpha1.ConditionDatabaseReady, string(metav1.ConditionTrue), cmscMigrationWait,
-				"DatabaseAvailable", "DatabaseReachable", "ExternalDatabase",
+				"DatabaseAvailable", "DatabaseReachable",
 			)
 			waitCMSCHealthyAfterDependencyRestore(cmscMigrationWait)
 		}()
@@ -65,7 +65,7 @@ var _ = Describe("CMSC dependency failure conditions", Label("cmsc", "dependency
 			restore()
 			waitCMSCCondition(
 				costv1alpha1.ConditionCacheReady, string(metav1.ConditionTrue), cmscMigrationWait,
-				"CacheAvailable", "CacheReachable", "ExternalCache",
+				"CacheAvailable", "CacheReachable",
 			)
 			waitCMSCHealthyAfterDependencyRestore(cmscMigrationWait)
 		}()

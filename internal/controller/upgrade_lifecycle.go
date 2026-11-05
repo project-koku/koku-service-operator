@@ -413,11 +413,12 @@ func (r *CostManagementServiceConfigReconciler) migrateUpgrade(ctx context.Conte
 	if !quiet {
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
-	for _, phase := range []PhaseFn{
+	// infrastructurePhases emits InfrastructureReady when a DB/cache outage
+	// ends during the preflight, as it does in the regular pipeline.
+	preflight := append([]PhaseFn{
 		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
-		func() (Result, error) { return r.reconcileInfrastructure(ctx, cfg) },
-		func() (Result, error) { return r.reconcileValidation(ctx, cfg) },
-	} {
+	}, r.infrastructurePhases(ctx, cfg)...)
+	for _, phase := range preflight {
 		result, err := phase()
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -517,8 +518,8 @@ func transientDatabaseOrCacheDependency(cfg *cost.CostManagementServiceConfig) (
 		conditionType string
 		reason        string
 	}{
-		{cost.ConditionDatabaseReady, "DatabaseUnreachable"},
-		{cost.ConditionCacheReady, "CacheUnreachable"},
+		{cost.ConditionDatabaseReady, reasonDatabaseUnreachable},
+		{cost.ConditionCacheReady, reasonCacheUnreachable},
 	} {
 		condition := apimeta.FindStatusCondition(cfg.Status.Conditions, item.conditionType)
 		if condition != nil && condition.Status == metav1.ConditionFalse && condition.Reason == item.reason {

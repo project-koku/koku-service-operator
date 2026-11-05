@@ -56,10 +56,19 @@ func requiredDBSecretKeys(cfg *costv1alpha1.CostManagementServiceConfig) []strin
 	return keys
 }
 
+// Reasons for a failed TCP probe of an external database or cache. The upgrade
+// lifecycle treats these as transient (transientDatabaseOrCacheDependency).
+const (
+	reasonDatabaseUnreachable = "DatabaseUnreachable"
+	reasonCacheUnreachable    = "CacheUnreachable"
+)
+
 // reconcileValidation probes all external dependencies and validates referenced
 // Secrets before the migration gate. DB and Cache failures block the pipeline;
 // Kafka, OIDC, and S3 set conditions without blocking (init containers inside
 // pods handle late-starting infrastructure).
+//
+//nolint:unparam // Pipeline stages share the PhaseFn (Result, error) signature.
 func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	allReady := true
 
@@ -76,7 +85,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 			msg := fmt.Sprintf("TCP probe %s: %v", addr, err)
 			r.emitDependencyFailed(cfg, costv1alpha1.ConditionDatabaseReady, msg)
 			r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
-				"DatabaseUnreachable", msg)
+				reasonDatabaseUnreachable, msg)
 			allReady = false
 		} else {
 			// Validate secret keys when the user provided their own secret.
@@ -108,7 +117,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileValidation(ctx context.
 			msg := fmt.Sprintf("TCP probe %s: %v", addr, err)
 			r.emitDependencyFailed(cfg, costv1alpha1.ConditionCacheReady, msg)
 			r.setCondition(cfg, costv1alpha1.ConditionCacheReady, metav1.ConditionFalse,
-				"CacheUnreachable", msg)
+				reasonCacheUnreachable, msg)
 			allReady = false
 		} else {
 			if cfg.Spec.Cache.Auth.SecretName != "" {

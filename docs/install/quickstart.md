@@ -157,10 +157,11 @@ oc -n "$NAMESPACE" describe cmsc cost-management-minimal
 | `StorageReady`, `KafkaReady` | True for a working upload path |
 | `SchemaUpToDate` | True (migrations finished) |
 | `RBACReady`, `IngressReady`, `GatewayReady` | True |
-| `Available` | True (`KokuAvailable`) — **success for this quickstart** |
+| `CoreServicesReady` | True (`CoreServicesAvailable`) — core Deployments up; checkpoint only |
+| `Available` | True (`AllComponentsReady`) — **success for this quickstart**; set only after workers, gateway and UI are ready |
 | `ROSEnabled` | False |
 | `AuthenticationReady` | True once JWKS is reachable at `spec.auth.keycloak.url` |
-| `UIReady` | True after the UI OAuth Secret exists — **not** proof UI pods are healthy (see [keycloak.md](keycloak.md#ui-login-troubleshooting)) |
+| `UIReady` | True once the UI OAuth Secret is valid, the UI Route is admitted and the UI Deployment is Ready (see [keycloak.md](keycloak.md#ui-login-troubleshooting)) |
 
 If `DatabaseReady` or `CacheReady` is False, fix the Secret keys or network
 path before waiting on Deployments.
@@ -193,8 +194,8 @@ ConsoleLink when the UI Route exists.
 | `DatabaseSecretInvalid` / `CacheSecretInvalid` | Wrong Secret keys — see [prerequisites](prerequisites.md) (`redis-password`; `koku-*` and `rbac-*`, plus `ros-*` / `kruize-*` only if ROS is on) |
 | `DatabaseUnreachable` | Host/port not reachable from the operator pod (NetworkPolicy, wrong Service DNS) |
 | `SchemaUpToDate` never True | Migration Job failed. List Jobs, then logs for the failed one: `oc -n "$NAMESPACE" get jobs` then `oc -n "$NAMESPACE" logs job/<cr>-koku-migrate` (beta Cost-only; RBAC is `{cr}-rbac-migrate`) |
-| `Available` True but `UIReady` False | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
-| `UIReady` True but UI Route unavailable | oauth-proxy TLS/OIDC failure — often missing `auth.keycloak.tls.caCertSecretName` when `issuerURL` is a public Route ([keycloak.md](keycloak.md#ui-login-troubleshooting)) |
+| `UIReady` False, reason `OAuthClientSecretMissing` | Missing `{cr}-ui-oauth-client` with `client-id` / `client-secret` |
+| `UIReady` False, reason `WaitingForUI` | UI pod not Ready — usually an oauth-proxy TLS/OIDC failure, often a missing `auth.keycloak.tls.caCertSecretName` when `issuerURL` is a public Route ([keycloak.md](keycloak.md#ui-login-troubleshooting)) |
 | `StorageReady` False | Missing `access-key` / `secret-key`, or bucket does not exist |
 | Uploads return 500 | Bucket in `spec.objectStorage.buckets.koku` was never created |
 
