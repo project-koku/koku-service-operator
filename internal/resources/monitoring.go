@@ -87,11 +87,10 @@ func OperatorServiceMonitor(namespace string) *unstructured.Unstructured {
 
 	_ = unstructured.SetNestedSlice(sm.Object, []any{
 		map[string]any{
-			"port":            "https",
-			"path":            "/metrics",
-			"interval":        "30s",
-			"scheme":          "http",
-			"bearerTokenFile": "/var/run/secrets/kubernetes.io/serviceaccount/token",
+			"port":     "https",
+			"path":     "/metrics",
+			"interval": "30s",
+			"scheme":   "http",
 		},
 	}, "spec", "endpoints")
 	_ = unstructured.SetNestedStringMap(sm.Object, map[string]string{

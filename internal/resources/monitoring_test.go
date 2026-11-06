@@ -1,11 +1,14 @@
 package resources
 
 import (
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -133,6 +136,12 @@ func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
 	if ep["port"] != "https" {
 		t.Errorf("port name: got %v want https (Service port name)", ep["port"])
 	}
+	if ep["path"] != "/metrics" || ep["interval"] != "30s" {
+		t.Errorf("scrape configuration: got %v", ep)
+	}
+	if _, found := ep["bearerTokenFile"]; found {
+		t.Error("unauthenticated metrics must not require file-based credentials")
+	}
 	sel, found, err := unstructured.NestedStringMap(sm.Object, "spec", "selector", "matchLabels")
 	if err != nil || !found {
 		t.Fatalf("selector.matchLabels: found=%v err=%v", found, err)
@@ -142,6 +151,47 @@ func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
 	}
 	if sel["app.kubernetes.io/name"] != "koku-service-operator" {
 		t.Errorf("app.kubernetes.io/name: got %q want koku-service-operator", sel["app.kubernetes.io/name"])
+	}
+}
+
+func TestShippedOperatorMonitoringManifests(t *testing.T) {
+	rules := OperatorPrometheusRules()
+	rules.SetNamespace("system")
+	bundleMonitor := OperatorServiceMonitor("")
+	bundleMonitor.SetName("koku-service-operator-controller-manager-metrics-monitor")
+	bundleRules := OperatorPrometheusRules()
+	bundleRules.SetName("koku-service-operator-controller-manager-alerts")
+
+	for _, tt := range []struct {
+		path string
+		want *unstructured.Unstructured
+	}{
+		{"../../config/prometheus/monitor.yaml", OperatorServiceMonitor("system")},
+		{"../../config/prometheus/operator_alerts.yaml", rules},
+		{"../../bundle/manifests/koku-service-operator-controller-manager-metrics-monitor_monitoring.coreos.com_v1_servicemonitor.yaml", bundleMonitor},
+		{"../../bundle/manifests/koku-service-operator-controller-manager-alerts_monitoring.coreos.com_v1_prometheusrule.yaml", bundleRules},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			data, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got unstructured.Unstructured
+			if err := yaml.Unmarshal(data, &got); err != nil {
+				t.Fatalf("decode Kubernetes monitoring resource: %v", err)
+			}
+			if got.GroupVersionKind() != tt.want.GroupVersionKind() || got.GetName() != tt.want.GetName() || got.GetNamespace() != tt.want.GetNamespace() {
+				t.Errorf("resource identity: got %s %s/%s, want %s %s/%s", got.GroupVersionKind(), got.GetNamespace(), got.GetName(), tt.want.GroupVersionKind(), tt.want.GetNamespace(), tt.want.GetName())
+			}
+			if diff := cmp.Diff(tt.want.GetLabels(), got.GetLabels()); diff != "" {
+				t.Errorf("labels mismatch (-want +got):\n%s", diff)
+			}
+			// Compare parsed fields and their types, including every endpoint,
+			// alert name, expression, duration, label, and annotation.
+			if diff := cmp.Diff(tt.want.Object["spec"], got.Object["spec"]); diff != "" {
+				t.Errorf("monitoring spec mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 

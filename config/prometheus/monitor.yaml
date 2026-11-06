@@ -16,7 +16,6 @@ spec:
       # the scaffolded "https" name for compatibility.
       scheme: http
       interval: 30s
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
   selector:
     matchLabels:
       control-plane: controller-manager
