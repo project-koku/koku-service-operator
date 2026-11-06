@@ -360,6 +360,11 @@ func (r *CostManagementServiceConfigReconciler) markProfileApplied(cfg *costv1al
 	cfg.Status.Profile = resources.EffectiveProfile(cfg)
 }
 
+type stackOptions struct {
+	discoveryAlreadyRun    bool
+	preserveUpgradeFailure bool
+}
+
 // reconcileStack drives the ordered, staged rollout:
 //  0. Workload images (spec.*.image required; no operator catalog default)
 //  1. Discovery (cluster domain, StorageClass, S3)
@@ -370,7 +375,11 @@ func (r *CostManagementServiceConfigReconciler) markProfileApplied(cfg *costv1al
 //  6. Core services (Koku API, Masu, Listener)
 //  7. Workers (Celery, ROS, Kruize)
 //  8. Edge (Envoy gateway, UI, Route)
-func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations bool, discoveryAlreadyRun ...bool) (ctrl.Result, error) {
+func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations bool, options ...stackOptions) (ctrl.Result, error) {
+	var opts stackOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
 	priorPhase := cfg.Status.Phase
@@ -386,8 +395,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 	cfg.Status.Phase = costv1alpha1.PhaseProgressing
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
-	discoveryDone := len(discoveryAlreadyRun) > 0 && discoveryAlreadyRun[0]
-	result, err := runPhases(r.phasesWithDiscovery(ctx, cfg, migrations, discoveryDone))
+	result, err := runPhases(r.phasesWithDiscovery(ctx, cfg, migrations, opts.discoveryAlreadyRun))
 
 	if err != nil {
 		// applyPhaseError handles structured PhaseError (condition + phase from err).
@@ -412,7 +420,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 		return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 	}
 
-	r.markReady(cfg, priorPhase, rollbackHold)
+	r.markReady(cfg, priorPhase, rollbackHold || opts.preserveUpgradeFailure)
 	r.completeProgressing(cfg, priorProgressing)
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
@@ -422,19 +430,19 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 // markReady publishes the success state at the end of a full pipeline pass.
 // priorPhase is the phase read at the start of the pass (before reconcileStack
 // reset it to Progressing); the Ready event fires only on a genuine
-// non-Ready → Ready transition. During a rollback hold rollbackUpgrade owns
-// Degraded and the phase-change announcement, so neither Ready nor
-// PhaseChanged is emitted and Degraded is left as is.
-func (r *CostManagementServiceConfigReconciler) markReady(cfg *costv1alpha1.CostManagementServiceConfig, priorPhase costv1alpha1.Phase, rollbackHold bool) {
-	if priorPhase != costv1alpha1.PhaseReady && !rollbackHold {
+// non-Ready → Ready transition. When serving a source after rollback or target
+// rejection, the caller owns the upgrade failure: preserve Degraded and suppress
+// success Events while still recording the source's current availability.
+func (r *CostManagementServiceConfigReconciler) markReady(cfg *costv1alpha1.CostManagementServiceConfig, priorPhase costv1alpha1.Phase, preserveUpgradeFailure bool) {
+	if priorPhase != costv1alpha1.PhaseReady && !preserveUpgradeFailure {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
-	if !rollbackHold {
+	if !preserveUpgradeFailure {
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	}
 	cfg.Status.Phase = costv1alpha1.PhaseReady
-	if !rollbackHold {
+	if !preserveUpgradeFailure {
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
 	}
 }
@@ -1663,6 +1671,15 @@ func (r *CostManagementServiceConfigReconciler) waitForDeployments(
 			return Result{}, err
 		}
 		if !ready {
+			if w.reason == reasonWaitingForListener {
+				draining, err := r.listenerDrainInProgress(ctx, cfg)
+				if err != nil {
+					return Result{}, err
+				}
+				if draining {
+					return r.notReadyWait(cfg, reasonWaitingForOldPods, "waiting for old listener Pods to terminate", w.component), nil
+				}
+			}
 			return r.notReadyWait(cfg, w.reason, w.message, w.component), nil
 		}
 	}

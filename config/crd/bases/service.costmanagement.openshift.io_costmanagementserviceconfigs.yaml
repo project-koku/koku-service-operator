@@ -3111,6 +3111,14 @@ spec:
                         type: string
                       id:
                         type: string
+                      recoveryAction:
+                        description: |-
+                          RecoveryAction records the accepted action independently of later spec edits.
+                          Empty on journals written before action tracking; those retain the drain barrier.
+                        enum:
+                        - Retry
+                        - ResumePrevious
+                        type: string
                       recoveryRequestID:
                         type: string
                       schemaMutationPossible:

@@ -242,6 +242,23 @@ func (r *CostManagementServiceConfigReconciler) waitForApplicationRollout(ctx co
 	return Result{}, nil
 }
 
+// The core readiness gate runs before the final rollout gate. Recognize an
+// actual listener shutdown here so it gets its warm-drain budget. A serving old
+// Pod beside an unhealthy replacement must not extend ordinary readiness.
+func (r *CostManagementServiceConfigReconciler) listenerDrainInProgress(ctx context.Context, cfg *cost.CostManagementServiceConfig) (bool, error) {
+	desired := resources.ListenerDeployment(cfg)
+	pods := &corev1.PodList{}
+	if err := r.List(ctx, pods, client.InNamespace(cfg.Namespace), client.MatchingLabels(desired.Spec.Selector.MatchLabels)); err != nil {
+		return false, err
+	}
+	for i := range pods.Items {
+		if p := &pods.Items[i]; !podTerminal(p) && !p.DeletionTimestamp.IsZero() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func deploymentMatchesTarget(live, desired *appsv1.Deployment) bool {
 	want := *desired.Spec.Replicas
 	ready := live.Spec.Replicas != nil && *live.Spec.Replicas == want &&

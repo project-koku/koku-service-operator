@@ -84,6 +84,10 @@ type UpgradeOperation struct {
 	SchemaMutationPossible bool   `json:"schemaMutationPossible,omitempty"`
 	Failure                string `json:"failure,omitempty"`
 	RecoveryRequestID      string `json:"recoveryRequestID,omitempty"`
+	// RecoveryAction records the accepted action independently of later spec edits.
+	// Empty on journals written before action tracking; those retain the drain barrier.
+	// +kubebuilder:validation:Enum=Retry;ResumePrevious
+	RecoveryAction string `json:"recoveryAction,omitempty"`
 }
 
 type UpgradeStatus struct {

@@ -106,6 +106,8 @@ recovers, the same wait sets `Degraded=False/DeploymentReady`. During an upgrade
 operation this timer is suppressed; the operation's own deadline applies.
 The old-Pod termination wait allows the one-hour worker shutdown budget plus
 a five-minute readiness margin before setting `DeploymentNotReady`.
+The earlier listener readiness gate uses this budget only for a terminating Pod;
+after it exits, an unready replacement gets a fresh ordinary readiness wait.
 
 **Who owns `DatabaseReady` / `CacheReady`.** Infrastructure writes them for the
 bundled components it deploys; validation writes them for external ones,
@@ -199,18 +201,23 @@ stateDiagram-v2
 | `RollingBack` | `UpgradeFailed=True/UpgradeFailed`, `Available=False/RollingBack` | Waits for writers to stop; restores the source only when schema is safe, otherwise holds the failed target. |
 | `ResumingPrevious` | source pipeline readiness, with Ready/PhaseChanged Events suppressed | Explicit recovery completed its drain; reconcile the saved source once per pass until ready or its deadline expires. |
 | `RecoveryRequired` | `Phase=Degraded`, `RecoveryRequired=True/RecoveryRequired`, `Degraded=True/UpgradeFailed` | If schema may have changed, target images remain at 0 replicas. Also used when source recovery times out; needs `spec.upgrade.recovery`. |
-| `RolledBack` | `Phase=Degraded`, `Available=True`, `UpgradeFailed=True`, `Degraded=True/UpgradeFailed` | Source revision running; the requested target is still failed. |
+| `RolledBack` | `Phase=Degraded`, `Available=True` when source ready, `UpgradeFailed=True`, `Degraded=True` | Source drift correction continues without a restoration deadline; the requested target stays failed. |
 | `Recovering` | as `Quiescing` | Accepted `Retry`; deletes failed migration Jobs after writer exclusion. |
 
 `RecoveryRequired` and `RolledBack` are holds: editing image tags or restarting
 the operator does not leave them; only a recovery request bound to the
 operation ID does (see [application-upgrades.md](application-upgrades.md)).
+The journal records the accepted recovery action alongside its request ID;
+later spec edits cannot turn a `Retry` into `ResumePrevious`. Older journals
+without an action retain the conservative recovery drain barrier.
+Rejected targets also keep reconciling the installed source, without clearing
+the rejection condition or emitting success Events on each pass.
 
 ## 5. Condition reference
 
 | Condition | Written by | True reasons | False reasons |
 |-----------|------------|--------------|---------------|
-| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted` (UI gates), `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
+| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `WaitingForOldPodsToTerminate`, `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted` (UI gates), `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
 | `Progressing` | `reconcileStack`, `completeProgressing`, `markPaused`, upgrade | `Reconciling`, `UpgradePlanned`, `UpgradeMaintenance`, `UpgradeRetrying`, `LegacyBaselineAdopted` | `ReconcileComplete`, `Paused`, `MigrationFailed`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `RecoveryRequired`, `RolledBack` |
 | `Degraded` | `reconcileStack` (errors), `notReadyWait`, validation, migration, upgrade, `markReady` | `ReconcileError`, `ImageNotSet`, `DeploymentNotReady`, `DependencyUnreachable`, `MigrationFailed`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeFailed` | `ReconcileComplete`, `MigrationSucceeded`, `DeploymentReady`, `LegacyBaselineAdopted` |
 | `DiscoveryComplete` | discovery | `Discovered` | `ClusterDomainNotFound`, `StorageClassNotFound` |

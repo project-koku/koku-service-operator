@@ -124,10 +124,11 @@ For customer recovery steps, including first-install migration failures, see the
 [application upgrade recovery runbook](../operations/application-upgrade-recovery.md).
 
 `spec.upgrade.timeoutSeconds` defaults to 7200. Expiry requests rollback, but
-never force-deletes active migrations or terminating Pods. If rollback itself
-cannot finish before its deadline, the operator enters `RecoveryRequired` and
-waits for an explicit recovery request. Inspect remaining writers if rollback
-is waiting. This deadline covers drain and rollout readiness; the ordinary
+never force-deletes active migrations or terminating Pods. Source restoration
+that exceeds its deadline enters `RecoveryRequired`. Active migration writers
+and the explicit recovery drain barrier keep `RollingBack` waiting even after
+the deadline; inspect these writers before intervening. A completed `RolledBack`
+hold continues source drift correction without a restoration deadline. The ordinary
 readiness timeout does not prematurely abort a journaled upgrade or a graceful
 old-Pod shutdown; a steady-state old Pod becomes Degraded only after its
 one-hour termination budget plus the five-minute readiness margin.

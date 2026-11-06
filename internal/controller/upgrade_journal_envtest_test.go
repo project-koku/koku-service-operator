@@ -37,6 +37,7 @@ var _ = Describe("Upgrade journal storage", func() {
 				ID: "persisted-operation", TargetGeneration: cfg.Generation,
 				Source: revision.DeepCopy(), Target: *revision, Stage: cost.UpgradeStageMigrating,
 				StartedAt: metav1.Now(), StageStartedAt: metav1.Now(), SchemaMutationPossible: true,
+				RecoveryRequestID: "accepted-retry", RecoveryAction: cost.RecoveryRetry,
 			},
 		}
 		Expect(k8sClient.Status().Update(ctx, cfg)).To(Succeed())
@@ -48,6 +49,8 @@ var _ = Describe("Upgrade journal storage", func() {
 		op := restored.Status.Upgrade.Operation
 		Expect(op.TargetGeneration).To(BeNumerically("<", restored.Generation))
 		Expect(op.SchemaMutationPossible).To(BeTrue())
+		Expect(op.RecoveryAction).To(Equal(cost.RecoveryRetry))
+		Expect(op.RecoveryRequestID).To(Equal("accepted-retry"))
 		Expect(op.Source.Images).To(Equal(revision.Images))
 		var frozen cost.CostManagementServiceConfigSpec
 		Expect(json.Unmarshal(op.Target.Spec.Raw, &frozen)).To(Succeed())

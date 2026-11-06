@@ -13,12 +13,12 @@ works before upgrading.
    oc get cmsc -n <namespace> <name> -o yaml
    ```
 
-2. Find the failed migration Job, then save its logs before deleting or
-   replacing it:
+2. Find the failed migration Job, then save logs from every retry Pod before
+   deleting or replacing it:
 
    ```sh
    oc get jobs -n <namespace>
-   oc logs -n <namespace> job/<migration-job> --all-containers=true
+   oc logs -n <namespace> -l 'batch.kubernetes.io/job-name=<migration-job>' --all-containers=true --prefix=true --tail=-1
    ```
 
 3. Ask the PostgreSQL owner to inspect the database and decide whether to

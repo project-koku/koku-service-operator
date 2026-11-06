@@ -204,7 +204,7 @@ func TestUpgradeRecoveryRequiresBoundRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := cfg.Status.Upgrade.Operation
-	if op.Stage != "Recovering" || op.RecoveryRequestID != "repair-1" || !op.SchemaMutationPossible {
+	if op.Stage != "Recovering" || op.RecoveryRequestID != "repair-1" || op.RecoveryAction != cost.RecoveryRetry || !op.SchemaMutationPossible {
 		t.Fatal("explicit retry did not preserve recovery checkpoint")
 	}
 	if op.Target.Images["koku"] != "quay.io/test/koku:forward-fix" {
@@ -1139,47 +1139,53 @@ func TestUpgradeQuiescenceCoversScheduledAndMigrationWriters(t *testing.T) {
 }
 
 func TestExplicitRecoveryDoesNotResumeSourceBeforeScheduledWritersDrain(t *testing.T) {
-	r, cfg, c := upgradeFixture(t)
-	attachUpgrade(cfg, cost.UpgradeStageRollingBack, true)
-	op := cfg.Status.Upgrade.Operation
-	op.SchemaMutationPossible = false
-	op.RecoveryRequestID = "resume-previous"
-	cron := resources.KeycloakSyncCronJob(cfg)
-	setOwnerRef(cfg, cron)
-	cron.UID = "cron"
-	if err := c.Create(context.Background(), cron); err != nil {
-		t.Fatal(err)
-	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "scheduled-work", Namespace: cfg.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: cronJobKind, Name: cron.Name, UID: cron.UID, Controller: new(true)}}}}
-	if err := c.Create(context.Background(), job); err != nil {
-		t.Fatal(err)
-	}
-	var sourceResumed bool
-	r.phasesOverride = func(_ context.Context, effective *cost.CostManagementServiceConfig) []PhaseFn {
-		image, _ := resources.ImageRef(effective.Spec.CostManagement.API.Image)
-		if image == op.Source.Images["koku"] {
-			sourceResumed = true
-		}
-		return []PhaseFn{func() (Result, error) { return Result{}, nil }}
-	}
-	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if sourceResumed {
-		t.Fatal("source revision resumed while an active CronJob child Job remained")
-	}
-	markJobComplete(t, c, cfg.Namespace, job.Name)
-	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if op.Stage != cost.UpgradeStageResumingPrevious || sourceResumed {
-		t.Fatal("source resume must begin only after the completed drain barrier is checkpointed")
-	}
-	if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if !sourceResumed {
-		t.Fatal("source revision did not resume after the scheduled Job completed")
+	for _, action := range []string{cost.RecoveryResumePrevious, ""} {
+		t.Run("accepted_action_"+action, func(t *testing.T) {
+			r, cfg, c := upgradeFixture(t)
+			attachUpgrade(cfg, cost.UpgradeStageRollingBack, true)
+			op := cfg.Status.Upgrade.Operation
+			op.SchemaMutationPossible = false
+			op.RecoveryRequestID = "resume-previous"
+			op.RecoveryAction = action
+			op.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour))
+			cron := resources.KeycloakSyncCronJob(cfg)
+			setOwnerRef(cfg, cron)
+			cron.UID = "cron"
+			if err := c.Create(context.Background(), cron); err != nil {
+				t.Fatal(err)
+			}
+			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "scheduled-work", Namespace: cfg.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: cronJobKind, Name: cron.Name, UID: cron.UID, Controller: new(true)}}}}
+			if err := c.Create(context.Background(), job); err != nil {
+				t.Fatal(err)
+			}
+			var sourceResumed bool
+			r.phasesOverride = func(_ context.Context, effective *cost.CostManagementServiceConfig) []PhaseFn {
+				image, _ := resources.ImageRef(effective.Spec.CostManagement.API.Image)
+				if image == op.Source.Images["koku"] {
+					sourceResumed = true
+				}
+				return []PhaseFn{func() (Result, error) { return Result{}, nil }}
+			}
+			if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			if sourceResumed || op.Stage != cost.UpgradeStageRollingBack {
+				t.Fatal("source revision resumed while an active CronJob child Job remained")
+			}
+			markJobComplete(t, c, cfg.Namespace, job.Name)
+			if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			if op.Stage != cost.UpgradeStageResumingPrevious || sourceResumed {
+				t.Fatal("source resume must begin only after the completed drain barrier is checkpointed")
+			}
+			if _, err := r.rollbackUpgrade(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			if !sourceResumed {
+				t.Fatal("source revision did not resume after the scheduled Job completed")
+			}
+		})
 	}
 }
 

@@ -68,7 +68,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 		return ctrl.Result{}, err
 	}
 	if target.ID == cfg.Status.Upgrade.Installed.ID && !needsMigration {
-		result, err := r.reconcileStack(ctx, cfg, true, true)
+		result, err := r.reconcileStack(ctx, cfg, true, stackOptions{discoveryAlreadyRun: true})
 		if err == nil && cfg.Status.Phase == cost.PhaseReady {
 			cfg.Status.Upgrade.Installed = applicationRevision(cfg, bundle)
 		}
@@ -108,7 +108,7 @@ func (r *CostManagementServiceConfigReconciler) rejectUpgradeTarget(
 	requested := cfg.Spec
 	cfg.Spec = source
 	cfg.Status.DiscoveredConfig = installed.DiscoveredConfig.DeepCopy()
-	result, err := r.reconcileStack(ctx, cfg, false)
+	result, err := r.reconcileStack(ctx, cfg, false, stackOptions{preserveUpgradeFailure: true})
 	cfg.Spec = requested
 	if err != nil {
 		return result, err
@@ -289,7 +289,9 @@ func (r *CostManagementServiceConfigReconciler) rollbackUpgrade(ctx context.Cont
 		return ctrl.Result{RequeueAfter: requeueDrift}, nil
 	}
 	timeout := upgradeTimeoutSeconds(cfg, op)
-	deadlineExceeded := time.Since(op.StageStartedAt.Time) > time.Duration(timeout)*time.Second
+	// RolledBack is a completed, serving hold. Ordinary drift correction must
+	// keep retrying transient errors even after the restoration deadline passed.
+	deadlineExceeded := op.Stage != cost.UpgradeStageRolledBack && time.Since(op.StageStartedAt.Time) > time.Duration(timeout)*time.Second
 	requestedSpec := cfg.Spec
 	defer func() { cfg.Spec = requestedSpec }()
 	var target cost.CostManagementServiceConfigSpec
@@ -384,10 +386,12 @@ func (r *CostManagementServiceConfigReconciler) applyStoppedApplicationRevision(
 func (r *CostManagementServiceConfigReconciler) resumeSourceAfterSafeFailure(
 	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, deadlineExceeded bool,
 ) (ctrl.Result, error) {
-	if op.RecoveryRequestID != "" && op.Stage == cost.UpgradeStageRollingBack {
+	if op.RecoveryRequestID != "" && op.RecoveryAction != cost.RecoveryRetry && op.Stage == cost.UpgradeStageRollingBack {
 		// A recovery action may arrive while old Pods or a scheduled writer are
 		// still draining (for example, after the rollback deadline). Do not resume
 		// the source until that explicit recovery path has completed quiescence.
+		// Legacy journals without an action retain this conservative barrier.
+		// A safe image-only Retry must not drain unchanged application writers.
 		quiet, err := r.quiesceApplications(ctx, cfg)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -802,6 +806,7 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 		return true, fmt.Errorf("unknown recovery action %q", request.Action)
 	}
 	op.RecoveryRequestID = request.RequestID
+	op.RecoveryAction = request.Action
 	op.StartedAt = metav1.Now()
 	return true, nil
 }
