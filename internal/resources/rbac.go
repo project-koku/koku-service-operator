@@ -143,7 +143,7 @@ func rbacWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
 
 func rbacAPICommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 	if RBACBackendIsGo(cfg) {
-		return []string{"/rbac-go", "serve"}
+		return []string{"/usr/local/bin/rbac-go", "serve"}
 	}
 	return []string{"gunicorn"}
 }

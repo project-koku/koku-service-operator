@@ -162,7 +162,7 @@ func rbacSyncWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
 // discovery across org- groups replaces the embedded Python script.
 func rbacSyncCommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 	if RBACBackendIsGo(cfg) {
-		return []string{"/rbac-go", "sync"}
+		return []string{"/usr/local/bin/rbac-go", "sync"}
 	}
 	return []string{"/bin/bash", "-c"}
 }

@@ -386,8 +386,8 @@ func TestKeycloakSyncCronJobGoBackend(t *testing.T) {
 	cfg.Spec.RBAC.Backend = "go"
 	cj := KeycloakSyncCronJob(cfg)
 	c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
-	if len(c.Command) != 2 || c.Command[0] != "/rbac-go" || c.Command[1] != "sync" {
-		t.Errorf("Command = %v, want [/rbac-go sync]", c.Command)
+	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-go" || c.Command[1] != "sync" {
+		t.Errorf("Command = %v, want [/usr/local/bin/rbac-go sync]", c.Command)
 	}
 	if len(c.Args) != 0 {
 		t.Errorf("Args = %v, want empty (env-driven sync)", c.Args)

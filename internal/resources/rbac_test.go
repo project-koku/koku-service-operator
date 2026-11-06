@@ -212,8 +212,8 @@ func TestRBACAPIDeploymentDjangoDefault(t *testing.T) {
 
 func TestRBACAPIDeploymentGoBackend(t *testing.T) {
 	c := RBACAPIDeployment(goBackendCfg()).Spec.Template.Spec.Containers[0]
-	if len(c.Command) != 2 || c.Command[0] != "/rbac-go" || c.Command[1] != "serve" {
-		t.Errorf("Command = %v, want [/rbac-go serve]", c.Command)
+	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-go" || c.Command[1] != "serve" {
+		t.Errorf("Command = %v, want [/usr/local/bin/rbac-go serve]", c.Command)
 	}
 	if len(c.Args) != 2 || c.Args[0] != "--addr" || c.Args[1] != ":8080" {
 		t.Errorf("Args = %v, want [--addr :8080]", c.Args)
