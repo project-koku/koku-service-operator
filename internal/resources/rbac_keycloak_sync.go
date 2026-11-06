@@ -64,28 +64,32 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 	)
 
 	vols, mounts := rbacVolumesAndMounts(cfg)
-	vols = append(vols, corev1.Volume{
-		Name: "sync-script",
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: NameRBACKeycloakSyncConfigMap(cfg)},
+	if !RBACBackendIsGo(cfg) {
+		vols = append(vols, corev1.Volume{
+			Name: "sync-script",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: NameRBACKeycloakSyncConfigMap(cfg)},
+				},
 			},
-		},
-	})
-	mounts = append(mounts, corev1.VolumeMount{
-		Name:      "sync-script",
-		MountPath: "/opt/rbac/rbac/sync_keycloak_principals.py",
-		SubPath:   "sync_keycloak_principals.py",
-		ReadOnly:  true,
-	})
-	// Same CA oauth2-proxy trusts: auth.keycloak.tls.caCertSecretName, else the
-	// service CA. The script adds it to the default trust store. Mount it only
-	// for verified HTTPS: the service-CA ConfigMap starts empty until injection,
-	// and an unused but unmountable key would block the Pod.
-	if keycloakSyncVerifiesTLS(cfg) {
-		env = append(env, EnvVal("KEYCLOAK_CA_FILE", "/etc/keycloak-ca/ca.crt"))
-		vols = append(vols, keycloakCAVolume(cfg))
-		mounts = append(mounts, corev1.VolumeMount{Name: "keycloak-ca", MountPath: "/etc/keycloak-ca", ReadOnly: true})
+		})
+		mounts = append(mounts, corev1.VolumeMount{
+			Name:      "sync-script",
+			MountPath: "/opt/rbac/rbac/sync_keycloak_principals.py",
+			SubPath:   "sync_keycloak_principals.py",
+			ReadOnly:  true,
+		})
+		// Same CA oauth2-proxy trusts: auth.keycloak.tls.caCertSecretName, else the
+		// service CA. The script adds it to the default trust store. Mount it only
+		// for verified HTTPS: the service-CA ConfigMap starts empty until injection,
+		// and an unused but unmountable key would block the Pod.
+		// Django-only for now: rbac-go relies on the system trust store and reads
+		// no CA file yet.
+		if keycloakSyncVerifiesTLS(cfg) {
+			env = append(env, EnvVal("KEYCLOAK_CA_FILE", "/etc/keycloak-ca/ca.crt"))
+			vols = append(vols, keycloakCAVolume(cfg))
+			mounts = append(mounts, corev1.VolumeMount{Name: "keycloak-ca", MountPath: "/etc/keycloak-ca", ReadOnly: true})
+		}
 	}
 
 	return &batchv1.CronJob{
@@ -122,9 +126,9 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 								Name:            "keycloak-sync",
 								Image:           image,
 								ImagePullPolicy: pullPolicy(cfg),
-								WorkingDir:      "/opt/rbac/rbac",
-								Command:         []string{"/bin/bash", "-c"},
-								Args:            []string{"python manage.py shell < /opt/rbac/rbac/sync_keycloak_principals.py"},
+								WorkingDir:      rbacSyncWorkingDir(cfg),
+								Command:         rbacSyncCommand(cfg),
+								Args:            rbacSyncArgs(cfg),
 								Env:             env,
 								VolumeMounts:    mounts,
 								Resources:       ProfileResources(cfg, WorkloadKeycloakSync, spec.Resources),
@@ -144,6 +148,30 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 func keycloakSyncVerifiesTLS(cfg *costv1alpha1.CostManagementServiceConfig) bool {
 	return strings.HasPrefix(strings.ToLower(KeycloakURL(cfg)), "https://") &&
 		!cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify
+}
+
+func rbacSyncWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if RBACBackendIsGo(cfg) {
+		return ""
+	}
+	return "/opt/rbac/rbac"
+}
+
+// rbacSyncCommand selects the sync entrypoint. The Go binary reads the same
+// KEYCLOAK_*/SYNC_* env the Django script reads, so no Args are needed;
+// discovery across org- groups replaces the embedded Python script.
+func rbacSyncCommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
+	if RBACBackendIsGo(cfg) {
+		return []string{"/rbac-go", "sync"}
+	}
+	return []string{"/bin/bash", "-c"}
+}
+
+func rbacSyncArgs(cfg *costv1alpha1.CostManagementServiceConfig) []string {
+	if RBACBackendIsGo(cfg) {
+		return nil
+	}
+	return []string{"python manage.py shell < /opt/rbac/rbac/sync_keycloak_principals.py"}
 }
 
 func keycloakTLSVerifyStr(cfg *costv1alpha1.CostManagementServiceConfig) string {

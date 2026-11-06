@@ -126,6 +126,42 @@ func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Contain
 // RBAC API
 // -----------------------------------------------------------------------------
 
+// RBACBackendIsGo reports whether the experimental rbac-go implementation is
+// selected (spec.rbac.backend: "go"). Empty (or "django") keeps insights-rbac.
+func RBACBackendIsGo(cfg *costv1alpha1.CostManagementServiceConfig) bool {
+	return cfg.Spec.RBAC.Backend == "go"
+}
+
+// rbacWorkingDir is the Django app dir; rbac-go ignores cwd (absolute paths,
+// /data workdir in-image), so it must not point at the Django tree.
+func rbacWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if RBACBackendIsGo(cfg) {
+		return ""
+	}
+	return "/opt/rbac/rbac"
+}
+
+func rbacAPICommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
+	if RBACBackendIsGo(cfg) {
+		return []string{"/rbac-go", "serve"}
+	}
+	return []string{"gunicorn"}
+}
+
+func rbacAPIArgs(cfg *costv1alpha1.CostManagementServiceConfig) []string {
+	if RBACBackendIsGo(cfg) {
+		return []string{"--addr", ":8080"}
+	}
+	return []string{
+		"rbac.wsgi",
+		"--bind=0.0.0.0:8080",
+		"--workers=2",
+		"--threads=2",
+		"--timeout=120",
+		"--access-logfile=-",
+	}
+}
+
 // RBACAPIDeployment builds the RBAC Gunicorn API Deployment.
 // Koku delegates all permission checks to this service via HTTP.
 func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
@@ -162,16 +198,9 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 						Name:            "rbac-api",
 						Image:           image,
 						ImagePullPolicy: pullPolicy(cfg),
-						WorkingDir:      "/opt/rbac/rbac",
-						Command:         []string{"gunicorn"},
-						Args: []string{
-							"rbac.wsgi",
-							"--bind=0.0.0.0:8080",
-							"--workers=2",
-							"--threads=2",
-							"--timeout=120",
-							"--access-logfile=-",
-						},
+						WorkingDir:      rbacWorkingDir(cfg),
+						Command:         rbacAPICommand(cfg),
+						Args:            rbacAPIArgs(cfg),
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: rbacAPIPort, Protocol: corev1.ProtocolTCP},
 						},
