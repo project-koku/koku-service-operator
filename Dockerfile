@@ -26,12 +26,12 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY internal/ internal/
 
-# Build operator manager and wait-for helper (both shipped in the same image).
-# wait-for is used by init containers in managed pods so they don't need a
-# separate image — they reuse the operator image itself.
+# Build operator manager, wait-for helper, and principal-profile sidecar.
+# wait-for / principal-profile reuse this image so managed pods need no extra images.
 RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -tags=no_openssl,nativefips -o manager ./cmd
 RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -tags=no_openssl,nativefips -o wait-for ./cmd/wait-for/
-RUN go version -m manager wait-for
+RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -tags=no_openssl,nativefips -o principal-profile ./cmd/principal-profile/
+RUN go version -m manager wait-for principal-profile
 
 # Use Red Hat UBI Micro as the minimal supported runtime image.
 FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1791895366
@@ -39,6 +39,7 @@ FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1791895366
 WORKDIR /
 COPY --from=builder /workspace/manager /manager
 COPY --from=builder /workspace/wait-for /wait-for
+COPY --from=builder /workspace/principal-profile /principal-profile
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

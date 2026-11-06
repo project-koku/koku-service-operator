@@ -59,6 +59,13 @@ func TestKeycloakSyncConfigMap(t *testing.T) {
 	if !strings.Contains(script, "def discover_and_sync") {
 		t.Error("script should contain discover_and_sync function")
 	}
+	// Disabled Keycloak users must stay in synced_usernames (COST-8167 Inactive path).
+	if strings.Contains(script, "action=skip_disabled") {
+		t.Error("script must not skip disabled users (they would be pruned as orphans)")
+	}
+	if !strings.Contains(script, "action=sync_disabled") {
+		t.Error("script should sync disabled Keycloak users into Principals")
+	}
 }
 
 func TestKeycloakSyncCronJobMeta(t *testing.T) {
