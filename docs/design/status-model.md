@@ -207,9 +207,10 @@ stateDiagram-v2
 `RecoveryRequired` and `RolledBack` are holds: editing image tags or restarting
 the operator does not leave them; only a recovery request bound to the
 operation ID does (see [application-upgrades.md](application-upgrades.md)).
-The journal records the accepted recovery action alongside its request ID;
-later spec edits cannot turn a `Retry` into `ResumePrevious`. Older journals
-without an action retain the conservative recovery drain barrier.
+The journal records the accepted recovery action and image-only classification
+alongside its request ID. Only a classified image-only `Retry` skips the rollback
+drain; other retries and older journals retain that barrier. Later spec edits
+cannot change the accepted action or classification.
 Rejected targets also keep reconciling the installed source, without clearing
 the rejection condition or emitting success Events on each pass.
 

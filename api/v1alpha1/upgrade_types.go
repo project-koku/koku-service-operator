@@ -88,6 +88,9 @@ type UpgradeOperation struct {
 	// Empty on journals written before action tracking; those retain the drain barrier.
 	// +kubebuilder:validation:Enum=Retry;ResumePrevious
 	RecoveryAction string `json:"recoveryAction,omitempty"`
+	// RecoveryImageOnly records that the accepted Retry needs neither migrations
+	// nor writer drain. Missing on older journals, which retain the drain barrier.
+	RecoveryImageOnly bool `json:"recoveryImageOnly,omitempty"`
 }
 
 type UpgradeStatus struct {

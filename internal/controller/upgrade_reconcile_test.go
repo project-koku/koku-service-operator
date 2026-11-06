@@ -260,7 +260,7 @@ func TestFailedImageOnlyRetryPreservesBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := l.cfg.Status.Upgrade.Operation
-	if op.RecoveryAction != cost.RecoveryRetry || op.Stage != cost.UpgradeStageRollingOut || op.SchemaMutationPossible || !reflect.DeepEqual(op.Source.Migrations, op.Target.Migrations) {
+	if op.RecoveryAction != cost.RecoveryRetry || !op.RecoveryImageOnly || op.Stage != cost.UpgradeStageRollingOut || op.SchemaMutationPossible || !reflect.DeepEqual(op.Source.Migrations, op.Target.Migrations) {
 		t.Fatalf("not image-only retry: %+v", op)
 	}
 	for name, ref := range before.Images {
@@ -286,6 +286,103 @@ func TestFailedImageOnlyRetryPreservesBackend(t *testing.T) {
 		}
 	}
 
+}
+
+func TestRetryTimeoutPreservesDrainBarrier(t *testing.T) {
+	for _, scheduled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "terminating Pod", true: "active CronJob child"}[scheduled], func(t *testing.T) {
+			l := newUpgradeReconcileFixture(t)
+			if scheduled {
+				secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sync-client", Namespace: l.cfg.Namespace}, Data: map[string][]byte{"client-secret": []byte("test")}}
+				if err := l.c.Create(t.Context(), secret); err != nil {
+					t.Fatal(err)
+				}
+				l.edit(func() {
+					l.cfg.Spec.RBAC.KeycloakSync.Enabled = true
+					l.cfg.Spec.RBAC.KeycloakSync.ClientSecretRef.Name = secret.Name
+				})
+				l.drive(func() bool { return l.cfg.Status.Phase == cost.PhaseReady && l.cfg.Status.Upgrade.Operation == nil })
+			}
+			l.failedUI()
+			var finishWriter func()
+			if scheduled {
+				cron := resources.KeycloakSyncCronJob(l.cfg)
+				if err := l.c.Get(t.Context(), client.ObjectKeyFromObject(cron), cron); err != nil {
+					t.Fatal(err)
+				}
+				cron.UID = "active-schedule"
+				cron.Spec.Suspend = new(true)
+				if err := l.c.Update(t.Context(), cron); err != nil {
+					t.Fatal(err)
+				}
+				// CronJob children need not carry the operator's application labels.
+				job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "still-running", Namespace: l.cfg.Namespace,
+					OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: cronJobKind, Name: cron.Name, UID: cron.UID, Controller: new(true)}}}}
+				if err := l.c.Create(t.Context(), job); err != nil {
+					t.Fatal(err)
+				}
+				finishWriter = func() { markJobComplete(t, l.c, l.cfg.Namespace, job.Name) }
+			} else {
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "still-draining", Namespace: l.cfg.Namespace,
+					Labels: resources.Labels(l.cfg, "listener"), Finalizers: []string{"test-drain"}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+				if err := l.c.Create(t.Context(), pod); err != nil {
+					t.Fatal(err)
+				}
+				if err := l.c.Delete(t.Context(), pod); err != nil {
+					t.Fatal(err)
+				}
+				finishWriter = func() {
+					if err := l.c.Get(t.Context(), client.ObjectKeyFromObject(pod), pod); err != nil {
+						t.Fatal(err)
+					}
+					pod.Finalizers = nil
+					if err := l.c.Update(t.Context(), pod); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			l.edit(func() {
+				l.cfg.Spec.CostManagement.API.Image.Tag = "retry-backend"
+				l.cfg.Spec.Upgrade.Recovery = &cost.UpgradeRecoveryRequest{OperationID: l.cfg.Status.Upgrade.Operation.ID, RequestID: "backend-retry", Action: cost.RecoveryRetry}
+			})
+			if err := l.step(); err != nil {
+				t.Fatal(err)
+			}
+			op := l.cfg.Status.Upgrade.Operation
+			if op.Stage != cost.UpgradeStageRecovering || op.RecoveryImageOnly || op.SchemaMutationPossible || reflect.DeepEqual(op.Source.Migrations, op.Target.Migrations) {
+				t.Fatalf("expected Retry requiring migrations before schema mutation: %+v", op)
+			}
+			if err := l.step(); err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range resources.ApplicationDeployments(l.cfg) {
+				markDeploymentReady(t, l.c, l.cfg.Namespace, d.Name)
+			}
+			if *l.dep(resources.NameKokuAPI(l.cfg)).Spec.Replicas != 0 {
+				t.Fatal("Retry did not start draining applications")
+			}
+			l.status(func() { l.cfg.Status.Upgrade.Operation.StartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour)) })
+			if err := l.step(); err != nil {
+				t.Fatal(err)
+			}
+			if l.cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRollingBack {
+				t.Fatal("Retry deadline did not enter rollback")
+			}
+			for range 3 {
+				if err := l.step(); err != nil {
+					t.Fatal(err)
+				}
+				if *l.dep(resources.NameKokuAPI(l.cfg)).Spec.Replicas != 0 {
+					t.Fatal("Retry timeout restarted source workloads before the writer stopped")
+				}
+			}
+			finishWriter()
+			l.drive(func() bool { return l.cfg.Status.Upgrade.Operation.Stage == cost.UpgradeStageRolledBack })
+			if *l.dep(resources.NameKokuAPI(l.cfg)).Spec.Replicas == 0 {
+				t.Fatal("source did not resume after writer drain")
+			}
+		})
+	}
 }
 
 func TestListenerDrainBudgetThroughReconcile(t *testing.T) {

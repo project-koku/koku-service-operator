@@ -228,7 +228,7 @@ func TestImageOnlyRecoveryRetrySkipsQuiesceAndMigration(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("recovery request: handled=%v err=%v", handled, err)
 	}
-	if op.Stage != cost.UpgradeStageRollingOut || op.SchemaMutationPossible {
+	if op.Stage != cost.UpgradeStageRollingOut || !op.RecoveryImageOnly || op.SchemaMutationPossible {
 		t.Fatalf("image-only recovery should proceed directly to rollout: stage=%s schema-risk=%v", op.Stage, op.SchemaMutationPossible)
 	}
 	if countJobs(c, cfg.Namespace) != len(migrationJobs(cfg)) {
@@ -251,6 +251,45 @@ func TestRecoveryToSourceChecksFailedReceipt(t *testing.T) {
 	}
 	if op.Stage != cost.UpgradeStageRecovering {
 		t.Fatal("retry must clear the retained failed receipt before claiming the source target complete")
+	}
+}
+
+func TestRecoveryClassificationIsReplacedOnAcceptance(t *testing.T) {
+	for _, next := range []string{"backend Retry", "receipt refresh", cost.RecoveryResumePrevious} {
+		t.Run(next, func(t *testing.T) {
+			r, cfg, c := upgradeFixture(t)
+			attachUpgrade(cfg, cost.UpgradeStageRolledBack, false)
+			op := cfg.Status.Upgrade.Operation
+			for _, job := range migrationJobs(cfg) {
+				if err := c.Create(t.Context(), job); err != nil {
+					t.Fatal(err)
+				}
+				markJobComplete(t, c, cfg.Namespace, job.Name)
+			}
+			cfg.Spec.UI.App.Image.Tag = "ui-retry"
+			cfg.Spec.Upgrade.Recovery = &cost.UpgradeRecoveryRequest{OperationID: op.ID, RequestID: "image-only", Action: cost.RecoveryRetry}
+			if _, err := r.acceptUpgradeRecovery(t.Context(), cfg, cfg, mustCurrentReleaseBundle(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if !op.RecoveryImageOnly {
+				t.Fatal("initial image-only classification missing")
+			}
+			// A subsequent failed rollout accepts a different recovery request.
+			op.Stage = cost.UpgradeStageRolledBack
+			cfg.Spec.Upgrade.Recovery.RequestID = "next-request"
+			switch next {
+			case "backend Retry":
+				cfg.Spec.CostManagement.API.Image.Tag = "backend-retry"
+			case "receipt refresh":
+				markJobFailed(t, c, cfg.Namespace, resources.NameKokuMigration(cfg))
+			case cost.RecoveryResumePrevious:
+				cfg.Spec.Upgrade.Recovery.Action = cost.RecoveryResumePrevious
+			}
+			handled, err := r.acceptUpgradeRecovery(t.Context(), cfg, cfg, mustCurrentReleaseBundle(), nil)
+			if err != nil || !handled || op.RecoveryImageOnly {
+				t.Fatalf("accepted recovery retained stale image-only exemption: handled=%v err=%v operation=%+v", handled, err, op)
+			}
+		})
 	}
 }
 
@@ -1139,7 +1178,7 @@ func TestUpgradeQuiescenceCoversScheduledAndMigrationWriters(t *testing.T) {
 }
 
 func TestExplicitRecoveryDoesNotResumeSourceBeforeScheduledWritersDrain(t *testing.T) {
-	for _, action := range []string{cost.RecoveryResumePrevious, ""} {
+	for _, action := range []string{cost.RecoveryResumePrevious, cost.RecoveryRetry, ""} {
 		t.Run("accepted_action_"+action, func(t *testing.T) {
 			r, cfg, c := upgradeFixture(t)
 			attachUpgrade(cfg, cost.UpgradeStageRollingBack, true)

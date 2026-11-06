@@ -3119,6 +3119,11 @@ spec:
                         - Retry
                         - ResumePrevious
                         type: string
+                      recoveryImageOnly:
+                        description: |-
+                          RecoveryImageOnly records that the accepted Retry needs neither migrations
+                          nor writer drain. Missing on older journals, which retain the drain barrier.
+                        type: boolean
                       recoveryRequestID:
                         type: string
                       schemaMutationPossible:

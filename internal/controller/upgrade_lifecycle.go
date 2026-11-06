@@ -386,11 +386,12 @@ func (r *CostManagementServiceConfigReconciler) applyStoppedApplicationRevision(
 func (r *CostManagementServiceConfigReconciler) resumeSourceAfterSafeFailure(
 	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, deadlineExceeded bool,
 ) (ctrl.Result, error) {
-	if op.RecoveryRequestID != "" && op.RecoveryAction != cost.RecoveryRetry && op.Stage == cost.UpgradeStageRollingBack {
+	imageOnlyRetry := op.RecoveryAction == cost.RecoveryRetry && op.RecoveryImageOnly
+	if op.RecoveryRequestID != "" && !imageOnlyRetry && op.Stage == cost.UpgradeStageRollingBack {
 		// A recovery action may arrive while old Pods or a scheduled writer are
 		// still draining (for example, after the rollback deadline). Do not resume
 		// the source until that explicit recovery path has completed quiescence.
-		// Legacy journals without an action retain this conservative barrier.
+		// Legacy journals without a classification retain this conservative barrier.
 		// A safe image-only Retry must not drain unchanged application writers.
 		quiet, err := r.quiesceApplications(ctx, cfg)
 		if err != nil {
@@ -765,6 +766,7 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 	if (op.Stage != cost.UpgradeStageRecoveryRequired && op.Stage != cost.UpgradeStageRolledBack) || request == nil || request.OperationID != op.ID || request.RequestID == "" || request.RequestID == op.RecoveryRequestID {
 		return false, nil
 	}
+	imageOnly := false
 	switch request.Action {
 	case cost.RecoveryRetry:
 		if resolveErr != nil {
@@ -777,7 +779,7 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 		if err := bundle.ValidateTransition(requested, op.Source, target.Images); err != nil {
 			return true, err
 		}
-		imageOnly := !op.SchemaMutationPossible && op.Source != nil && reflect.DeepEqual(op.Source.Migrations, target.Migrations)
+		imageOnly = !op.SchemaMutationPossible && op.Source != nil && reflect.DeepEqual(op.Source.Migrations, target.Migrations)
 		if imageOnly {
 			// ResumePrevious retains failed Job evidence. A later Retry of the
 			// source still needs to replace that receipt before becoming Ready.
@@ -807,6 +809,7 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 	}
 	op.RecoveryRequestID = request.RequestID
 	op.RecoveryAction = request.Action
+	op.RecoveryImageOnly = imageOnly
 	op.StartedAt = metav1.Now()
 	return true, nil
 }

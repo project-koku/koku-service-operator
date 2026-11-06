@@ -56,5 +56,14 @@ var _ = Describe("Upgrade journal storage", func() {
 		Expect(json.Unmarshal(op.Target.Spec.Raw, &frozen)).To(Succeed())
 		Expect(frozen.CostManagement.API.Image).To(Equal(effective.Spec.CostManagement.API.Image))
 		Expect(restored.Spec.CostManagement.API.Image.Tag).To(Equal("pending"))
+		Expect(op.RecoveryImageOnly).To(BeFalse())
+		// A later accepted image-only Retry must retain its classification across
+		// API reads; otherwise a controller restart would change the drain policy.
+		op.Stage = cost.UpgradeStageRollingOut
+		op.SchemaMutationPossible = false
+		op.RecoveryImageOnly = true
+		Expect(k8sClient.Status().Update(ctx, restored)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cfg), restored)).To(Succeed())
+		Expect(restored.Status.Upgrade.Operation.RecoveryImageOnly).To(BeTrue())
 	})
 })
