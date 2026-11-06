@@ -18,6 +18,7 @@ const (
 	UpgradeStageRecoveryRequired = "RecoveryRequired"
 	UpgradeStageRolledBack       = "RolledBack"
 	UpgradeStageRecovering       = "Recovering"
+	UpgradeStageResumingPrevious = "ResumingPrevious"
 )
 
 // UpgradePolicy controls application image ownership and explicit recovery.
@@ -74,7 +75,7 @@ type UpgradeOperation struct {
 	TargetGeneration int64                `json:"targetGeneration"`
 	Source           *ApplicationRevision `json:"source,omitempty"`
 	Target           ApplicationRevision  `json:"target"`
-	// +kubebuilder:validation:Enum=Quiescing;Migrating;RollingOut;RollingBack;RecoveryRequired;RolledBack;Recovering
+	// +kubebuilder:validation:Enum=Quiescing;Migrating;RollingOut;RollingBack;RecoveryRequired;RolledBack;Recovering;ResumingPrevious
 	Stage          string      `json:"stage"`
 	StartedAt      metav1.Time `json:"startedAt"`
 	StageStartedAt metav1.Time `json:"stageStartedAt"`
@@ -83,6 +84,13 @@ type UpgradeOperation struct {
 	SchemaMutationPossible bool   `json:"schemaMutationPossible,omitempty"`
 	Failure                string `json:"failure,omitempty"`
 	RecoveryRequestID      string `json:"recoveryRequestID,omitempty"`
+	// RecoveryAction records the accepted action independently of later spec edits.
+	// Empty on journals written before action tracking; those retain the drain barrier.
+	// +kubebuilder:validation:Enum=Retry;ResumePrevious
+	RecoveryAction string `json:"recoveryAction,omitempty"`
+	// RecoveryImageOnly records that the accepted Retry needs neither migrations
+	// nor writer drain. Missing on older journals, which retain the drain barrier.
+	RecoveryImageOnly bool `json:"recoveryImageOnly,omitempty"`
 }
 
 type UpgradeStatus struct {

@@ -242,10 +242,12 @@ func migrationJob(
 				Spec: corev1.PodSpec{
 					ServiceAccountName:           migrationServiceAccountName(cfg, component),
 					AutomountServiceAccountToken: new(false),
-					RestartPolicy:                corev1.RestartPolicyOnFailure,
-					SecurityContext:              nonRootPodSC(),
-					ImagePullSecrets:             imagePullSecrets(cfg),
-					InitContainers:               initContainers,
+					// Keep each failed Pod and its logs available for diagnosis. The
+					// Job controller retries by creating another Pod up to BackoffLimit.
+					RestartPolicy:    corev1.RestartPolicyNever,
+					SecurityContext:  nonRootPodSC(),
+					ImagePullSecrets: imagePullSecrets(cfg),
+					InitContainers:   initContainers,
 					Containers: []corev1.Container{{
 						Name:            "migrate",
 						Image:           image,

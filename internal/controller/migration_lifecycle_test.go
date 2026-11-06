@@ -159,6 +159,7 @@ func TestReconcileMigration_KokuComplete_CreatesRBACJob(t *testing.T) {
 
 func TestReconcileMigration_AllComplete_SchemaUpToDateTrue(t *testing.T) {
 	r, cfg, c := newMigrationTestReconciler(t)
+	r.setCondition(cfg, costv1alpha1.ConditionRecoveryRequired, metav1.ConditionTrue, "SchemaStateUnknown", "manual recovery was required")
 
 	steps := []string{
 		resources.NameKokuMigration(cfg),
@@ -182,6 +183,9 @@ func TestReconcileMigration_AllComplete_SchemaUpToDateTrue(t *testing.T) {
 	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
 	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "MigrationComplete" {
 		t.Fatalf("expected SchemaUpToDate=True MigrationComplete, got %+v", cond)
+	}
+	if recovery := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionRecoveryRequired); recovery == nil || recovery.Status != metav1.ConditionFalse {
+		t.Fatalf("successful migrations must clear RecoveryRequired, got %+v", recovery)
 	}
 
 	// Degraded should be cleared on success (controller.go:411 sets Degraded=False MigrationSucceeded)
@@ -444,6 +448,12 @@ func assertMigrationBlockedStatus(t *testing.T, cfg *costv1alpha1.CostManagement
 		cond := findCondition(cfg.Status.Conditions, w.typ)
 		if cond == nil || cond.Status != w.status || cond.Reason != reason {
 			t.Errorf("%s: got %+v, want status=%s reason=%s", w.typ, cond, w.status, reason)
+		}
+	}
+	if reason == "MigrationFailed" {
+		recovery := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionRecoveryRequired)
+		if recovery == nil || recovery.Status != metav1.ConditionTrue {
+			t.Errorf("RecoveryRequired: got %+v, want True after a failed first-install migration", recovery)
 		}
 	}
 	if cfg.Status.Phase != costv1alpha1.PhaseDegraded {

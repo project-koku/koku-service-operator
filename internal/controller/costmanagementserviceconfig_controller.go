@@ -44,6 +44,9 @@ const (
 	requeueSlow      = 30 * time.Second
 	requeueDrift     = 5 * time.Minute
 	readinessTimeout = 5 * time.Minute
+	// Worker Pods can use a one-hour graceful shutdown budget. Allow one full
+	// readiness window beyond that before treating an old Pod as stuck.
+	oldPodTerminationTimeout = time.Hour + readinessTimeout
 
 	// Status condition reasons shared with tests so the strings cannot drift.
 	reasonWaitingForRBAC         = "WaitingForRBAC"
@@ -54,6 +57,7 @@ const (
 	reasonWaitingForMasu         = "WaitingForMasu"
 	reasonWaitingForListener     = "WaitingForListener"
 	reasonWaitingForKruize       = "WaitingForKruize"
+	reasonWaitingForOldPods      = "WaitingForOldPodsToTerminate"
 	reasonWaitingForROSAPI       = "WaitingForROSAPI"
 	reasonWaitingForROSProcessor = "WaitingForROSProcessor"
 	reasonCoreServicesAvailable  = "CoreServicesAvailable"
@@ -278,20 +282,28 @@ func (r *CostManagementServiceConfigReconciler) reconcileDelete(ctx context.Cont
 // phases is the ordered production pipeline. migrations=false skips the
 // migration step for upgrade rollout/rollback, which run migrations separately.
 func (r *CostManagementServiceConfigReconciler) phases(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations bool) []PhaseFn {
+	return r.phasesWithDiscovery(ctx, cfg, migrations, false)
+}
+
+func (r *CostManagementServiceConfigReconciler) phasesWithDiscovery(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations, discoveryAlreadyRun bool) []PhaseFn {
 	if r.phasesOverride != nil {
 		return r.phasesOverride(ctx, cfg)
 	}
 	pipeline := []PhaseFn{
 		func() (Result, error) { return r.reconcileWorkloadImages(ctx, cfg) },
-		func() (Result, error) {
+	}
+	if !discoveryAlreadyRun {
+		pipeline = append(pipeline, func() (Result, error) {
 			// A saved operation uses its frozen discovery snapshot.
 			if cfg.Status.Upgrade.Operation != nil {
 				return Result{}, nil
 			}
 			return r.reconcileDiscovery(ctx, cfg)
-		},
-		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
+		})
 	}
+	pipeline = append(pipeline,
+		func() (Result, error) { return r.reconcileSharedConfig(ctx, cfg) },
+	)
 	pipeline = append(pipeline, r.infrastructurePhases(ctx, cfg)...)
 	return append(pipeline,
 		func() (Result, error) {
@@ -348,6 +360,11 @@ func (r *CostManagementServiceConfigReconciler) markProfileApplied(cfg *costv1al
 	cfg.Status.Profile = resources.EffectiveProfile(cfg)
 }
 
+type stackOptions struct {
+	discoveryAlreadyRun    bool
+	preserveUpgradeFailure bool
+}
+
 // reconcileStack drives the ordered, staged rollout:
 //  0. Workload images (spec.*.image required; no operator catalog default)
 //  1. Discovery (cluster domain, StorageClass, S3)
@@ -358,14 +375,18 @@ func (r *CostManagementServiceConfigReconciler) markProfileApplied(cfg *costv1al
 //  6. Core services (Koku API, Masu, Listener)
 //  7. Workers (Celery, ROS, Kruize)
 //  8. Edge (Envoy gateway, UI, Route)
-func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations bool) (ctrl.Result, error) {
+func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, migrations bool, options ...stackOptions) (ctrl.Result, error) {
+	var opts stackOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	// Capture the phase before overwriting it so we can detect the
 	// first Ready transition at the end of this pass.
 	priorPhase := cfg.Status.Phase
 	// A rollback hold restores the source but the requested target stays failed:
 	// rollbackUpgrade owns Degraded/Phase, so this pass must not announce Ready.
 	op := cfg.Status.Upgrade.Operation
-	rollbackHold := op != nil && (op.Stage == costv1alpha1.UpgradeStageRollingBack || op.Stage == costv1alpha1.UpgradeStageRolledBack)
+	rollbackHold := op != nil && (op.Stage == costv1alpha1.UpgradeStageRollingBack || op.Stage == costv1alpha1.UpgradeStageResumingPrevious || op.Stage == costv1alpha1.UpgradeStageRolledBack)
 	priorProgressing := apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionProgressing)
 	if priorProgressing != nil {
 		priorProgressing = priorProgressing.DeepCopy()
@@ -374,7 +395,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 	cfg.Status.Phase = costv1alpha1.PhaseProgressing
 	r.setCondition(cfg, costv1alpha1.ConditionProgressing, metav1.ConditionTrue, "Reconciling", "Reconciliation in progress")
 
-	result, err := runPhases(r.phases(ctx, cfg, migrations))
+	result, err := runPhases(r.phasesWithDiscovery(ctx, cfg, migrations, opts.discoveryAlreadyRun))
 
 	if err != nil {
 		// applyPhaseError handles structured PhaseError (condition + phase from err).
@@ -399,7 +420,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 		return ctrl.Result{RequeueAfter: result.RequeueAfter}, nil
 	}
 
-	r.markReady(cfg, priorPhase, rollbackHold)
+	r.markReady(cfg, priorPhase, rollbackHold || opts.preserveUpgradeFailure)
 	r.completeProgressing(cfg, priorProgressing)
 	// Periodic drift correction: re-apply all desired state every 5 minutes so
 	// manual edits to managed resources are reverted without waiting for an event.
@@ -409,19 +430,19 @@ func (r *CostManagementServiceConfigReconciler) reconcileStack(ctx context.Conte
 // markReady publishes the success state at the end of a full pipeline pass.
 // priorPhase is the phase read at the start of the pass (before reconcileStack
 // reset it to Progressing); the Ready event fires only on a genuine
-// non-Ready → Ready transition. During a rollback hold rollbackUpgrade owns
-// Degraded and the phase-change announcement, so neither Ready nor
-// PhaseChanged is emitted and Degraded is left as is.
-func (r *CostManagementServiceConfigReconciler) markReady(cfg *costv1alpha1.CostManagementServiceConfig, priorPhase costv1alpha1.Phase, rollbackHold bool) {
-	if priorPhase != costv1alpha1.PhaseReady && !rollbackHold {
+// non-Ready → Ready transition. When serving a source after rollback or target
+// rejection, the caller owns the upgrade failure: preserve Degraded and suppress
+// success Events while still recording the source's current availability.
+func (r *CostManagementServiceConfigReconciler) markReady(cfg *costv1alpha1.CostManagementServiceConfig, priorPhase costv1alpha1.Phase, preserveUpgradeFailure bool) {
+	if priorPhase != costv1alpha1.PhaseReady && !preserveUpgradeFailure {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "Ready", "All components are running")
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "AllComponentsReady", "All components are running")
-	if !rollbackHold {
+	if !preserveUpgradeFailure {
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionFalse, "ReconcileComplete", "")
 	}
 	cfg.Status.Phase = costv1alpha1.PhaseReady
-	if !rollbackHold {
+	if !preserveUpgradeFailure {
 		r.emitPhaseChanged(cfg, priorPhase, costv1alpha1.PhaseReady)
 	}
 }
@@ -642,6 +663,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileMigration(ctx context.C
 	schemaWasReady := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionSchemaUpToDate)
 	r.setCondition(cfg, costv1alpha1.ConditionSchemaUpToDate, metav1.ConditionTrue, "MigrationComplete", "all schema migrations succeeded")
 	r.setCondition(cfg, costv1alpha1.ConditionUpgradeFailed, metav1.ConditionFalse, "MigrationComplete", "all schema migrations succeeded")
+	r.setCondition(cfg, costv1alpha1.ConditionRecoveryRequired, metav1.ConditionFalse, "MigrationComplete", "")
 	// DeploymentNotReady belongs to a later readiness wait, which clears it
 	// when its Deployment recovers. Clearing it here would have that wait set
 	// it again in the same pass and reset Degraded's LastTransitionTime.
@@ -1631,7 +1653,7 @@ func holdingWorkerReadinessWait(cfg *costv1alpha1.CostManagementServiceConfig) b
 	}
 	switch existing.Reason {
 	case reasonWaitingForROSAPI, reasonWaitingForROSProcessor, reasonWaitingForApplicationRollout, reasonWaitingForUI,
-		reasonOAuthSecretMissing, reasonOAuthSecretInvalid, reasonRouteNotAdmitted:
+		reasonOAuthSecretMissing, reasonOAuthSecretInvalid, reasonRouteNotAdmitted, reasonWaitingForOldPods:
 		return true
 	default:
 		return false
@@ -1649,6 +1671,15 @@ func (r *CostManagementServiceConfigReconciler) waitForDeployments(
 			return Result{}, err
 		}
 		if !ready {
+			if w.reason == reasonWaitingForListener {
+				draining, err := r.listenerDrainInProgress(ctx, cfg)
+				if err != nil {
+					return Result{}, err
+				}
+				if draining {
+					return r.notReadyWait(cfg, reasonWaitingForOldPods, "waiting for old listener Pods to terminate", w.component), nil
+				}
+			}
 			return r.notReadyWait(cfg, w.reason, w.message, w.component), nil
 		}
 	}
@@ -1692,7 +1723,11 @@ func (r *CostManagementServiceConfigReconciler) notReadyWait(
 	existing = apimeta.FindStatusCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
 	// A journaled upgrade has its own deadline, including warm worker drain.
 	// The ordinary readiness timer must not abort it before that budget expires.
-	if existing != nil && cfg.Status.Upgrade.Operation == nil && time.Since(existing.LastTransitionTime.Time) >= readinessTimeout {
+	deadline := readinessTimeout
+	if reason == reasonWaitingForOldPods {
+		deadline = oldPodTerminationTimeout
+	}
+	if existing != nil && cfg.Status.Upgrade.Operation == nil && time.Since(existing.LastTransitionTime.Time) >= deadline {
 		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, reasonDeploymentNotReady,
 			fmt.Sprintf("%s is not ready", component))
 		cfg.Status.Phase = costv1alpha1.PhaseDegraded
