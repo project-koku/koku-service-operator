@@ -567,9 +567,10 @@ func lifecyclePlatform(t *testing.T) (*CostManagementServiceConfigReconciler, *c
 	cfg.Spec.Global.ClusterDomain = "apps.example.com"
 	cfg.Spec.Global.StorageClass = "standard"
 	cfg.Spec.Monitoring.Enabled = new(false)
-	cfg.Spec.ObjectStorage.Endpoint = "http://127.0.0.1:1"
-	cfg.Spec.ObjectStorage.Port = 1
-	cfg.Spec.ObjectStorage.SecretName = "test-s3"
+	// Keep repeated reconciles independent of DNS failures and SDK retry backoff.
+	storage := httptest.NewServer(fakeS3Buckets(http.StatusForbidden, map[string]int{"/test-bucket": http.StatusOK}))
+	t.Cleanup(storage.Close)
+	cfg.Spec.ObjectStorage = objectStorageForServer(t, storage, "test-s3")
 	cfg.Spec.ObjectStorage.Buckets.Koku = "test-bucket"
 	cfg.Spec.Kafka.BootstrapServers = "127.0.0.1:1"
 	cfg.Status.Upgrade = cost.UpgradeStatus{}
@@ -586,6 +587,15 @@ func lifecyclePlatform(t *testing.T) (*CostManagementServiceConfigReconciler, *c
 	}
 	return r, cfg, c
 }
+func TestLifecyclePlatformStorageReady(t *testing.T) {
+	r, cfg, _ := lifecyclePlatform(t)
+	r.validateObjectStorage(t.Context(), cfg)
+	condition := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionStorageReady)
+	if condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != storageReasonBucketsAccessible {
+		t.Fatalf("lifecycle fixture must provide accessible storage without transport retries: %+v", condition)
+	}
+}
+
 func driveLifecycle(t *testing.T, r *CostManagementServiceConfigReconciler, cfg *cost.CostManagementServiceConfig, c client.Client, failImage string, done func() bool) {
 	t.Helper()
 	for pass := range 60 {
