@@ -1,11 +1,14 @@
 package resources
 
 import (
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -45,7 +48,7 @@ func alertNamesFromRules(t *testing.T, pr *unstructured.Unstructured) map[string
 	return names
 }
 
-func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
+func TestPrometheusRules_ApplicationMetricSet(t *testing.T) {
 	pr := PrometheusRules(testMonitoringCFG())
 	if pr.GetName() != "cost-management-alerts" {
 		t.Errorf("name: got %q", pr.GetName())
@@ -57,17 +60,24 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 	names := alertNamesFromRules(t, pr)
 
 	want := []string{
+		"CostManagementAPIDown",
+		"CostManagementCeleryBacklogDownload",
+		"CostManagementCeleryBacklogPriority",
+		"CostManagementCeleryBacklogSummary",
+	}
+
+	for _, a := range []string{
 		"CostManagementMigrationFailed",
 		"CostManagementMigrationStalled",
 		"CostManagementDegraded",
 		"CostManagementDependencyDown",
 		"CostManagementPodRestarting",
 		"CostManagementNotAvailable",
-		"CostManagementAPIDown",
 		"CostManagementReconcileFailure",
-		"CostManagementCeleryBacklogDownload",
-		"CostManagementCeleryBacklogPriority",
-		"CostManagementCeleryBacklogSummary",
+	} {
+		if names[a] {
+			t.Errorf("operator alert %s must be in the singleton rule", a)
+		}
 	}
 	for _, a := range want {
 		if !names[a] {
@@ -93,8 +103,8 @@ func TestPrometheusRules_BetaOperatorCentricSet(t *testing.T) {
 	}
 }
 
-func TestPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
-	pr := PrometheusRules(testMonitoringCFG())
+func TestOperatorPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
+	pr := OperatorPrometheusRules()
 	expr := prometheusRuleExpr(t, pr, "CostManagementDegraded")
 	if !strings.Contains(expr, `costmanagement_condition{`) || !strings.Contains(expr, `type="Degraded"`) {
 		t.Fatalf("Degraded should use costmanagement_condition gauges: %s", expr)
@@ -102,12 +112,18 @@ func TestPrometheusRules_ConditionAlertsUseOperatorGauges(t *testing.T) {
 	if strings.Contains(expr, "kube_customresource_status_condition") {
 		t.Fatalf("Degraded must not use kube_customresource_status_condition: %s", expr)
 	}
+	if strings.Contains(expr, `namespace=`) {
+		t.Fatalf("Degraded must match CMSCs in any namespace: %s", expr)
+	}
 }
 
 func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
-	sm := OperatorServiceMonitor(testMonitoringCFG())
-	if sm.GetName() != "cost-management-operator-metrics" {
+	sm := OperatorServiceMonitor("cost-onprem")
+	if sm.GetName() != "controller-manager-metrics-monitor" {
 		t.Errorf("name: got %q", sm.GetName())
+	}
+	if sm.GetNamespace() != "cost-onprem" {
+		t.Errorf("namespace: got %q", sm.GetNamespace())
 	}
 	endpoints, found, err := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
 	if err != nil || !found || len(endpoints) != 1 {
@@ -120,6 +136,12 @@ func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
 	if ep["port"] != "https" {
 		t.Errorf("port name: got %v want https (Service port name)", ep["port"])
 	}
+	if ep["path"] != "/metrics" || ep["interval"] != "30s" {
+		t.Errorf("scrape configuration: got %v", ep)
+	}
+	if _, found := ep["bearerTokenFile"]; found {
+		t.Error("unauthenticated metrics must not require file-based credentials")
+	}
 	sel, found, err := unstructured.NestedStringMap(sm.Object, "spec", "selector", "matchLabels")
 	if err != nil || !found {
 		t.Fatalf("selector.matchLabels: found=%v err=%v", found, err)
@@ -129,6 +151,64 @@ func TestOperatorServiceMonitor_HTTPScheme(t *testing.T) {
 	}
 	if sel["app.kubernetes.io/name"] != "koku-service-operator" {
 		t.Errorf("app.kubernetes.io/name: got %q want koku-service-operator", sel["app.kubernetes.io/name"])
+	}
+}
+
+func TestShippedOperatorMonitoringManifests(t *testing.T) {
+	rules := OperatorPrometheusRules()
+	rules.SetNamespace("system")
+	bundleMonitor := OperatorServiceMonitor("")
+	bundleMonitor.SetName("koku-service-operator-controller-manager-metrics-monitor")
+	bundleRules := OperatorPrometheusRules()
+	bundleRules.SetName("koku-service-operator-controller-manager-alerts")
+
+	for _, tt := range []struct {
+		path string
+		want *unstructured.Unstructured
+	}{
+		{"../../config/prometheus/monitor.yaml", OperatorServiceMonitor("system")},
+		{"../../config/prometheus/operator_alerts.yaml", rules},
+		{"../../bundle/manifests/koku-service-operator-controller-manager-metrics-monitor_monitoring.coreos.com_v1_servicemonitor.yaml", bundleMonitor},
+		{"../../bundle/manifests/koku-service-operator-controller-manager-alerts_monitoring.coreos.com_v1_prometheusrule.yaml", bundleRules},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			data, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got unstructured.Unstructured
+			if err := yaml.Unmarshal(data, &got); err != nil {
+				t.Fatalf("decode Kubernetes monitoring resource: %v", err)
+			}
+			if got.GroupVersionKind() != tt.want.GroupVersionKind() || got.GetName() != tt.want.GetName() || got.GetNamespace() != tt.want.GetNamespace() {
+				t.Errorf("resource identity: got %s %s/%s, want %s %s/%s", got.GroupVersionKind(), got.GetNamespace(), got.GetName(), tt.want.GroupVersionKind(), tt.want.GetNamespace(), tt.want.GetName())
+			}
+			if diff := cmp.Diff(tt.want.GetLabels(), got.GetLabels()); diff != "" {
+				t.Errorf("labels mismatch (-want +got):\n%s", diff)
+			}
+			// Compare parsed fields and their types, including every endpoint,
+			// alert name, expression, duration, label, and annotation.
+			if diff := cmp.Diff(tt.want.Object["spec"], got.Object["spec"]); diff != "" {
+				t.Errorf("monitoring spec mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestLegacyOperatorServiceMonitor_UsesPerCMSCIdentity(t *testing.T) {
+	sm := LegacyOperatorServiceMonitor(testMonitoringCFG())
+	if sm.GetName() != "cost-management-operator-metrics" {
+		t.Errorf("name: got %q", sm.GetName())
+	}
+	if sm.GetNamespace() != "cost-onprem" {
+		t.Errorf("namespace: got %q", sm.GetNamespace())
+	}
+	matchNames, found, err := unstructured.NestedStringSlice(sm.Object, "spec", "namespaceSelector", "matchNames")
+	if err != nil || !found {
+		t.Fatalf("namespaceSelector.matchNames: found=%v err=%v", found, err)
+	}
+	if len(matchNames) != 1 || matchNames[0] != "cost-onprem" {
+		t.Errorf("namespaceSelector.matchNames: got %v", matchNames)
 	}
 }
 
@@ -171,7 +251,7 @@ func TestKruizeServiceMonitor_QuarkusMetricsEndpoint(t *testing.T) {
 }
 
 func TestPrometheusRules_ReconcileFailureFiresOnAnyRecentError(t *testing.T) {
-	pr := PrometheusRules(testMonitoringCFG())
+	pr := OperatorPrometheusRules()
 	groups, _, _ := unstructured.NestedSlice(pr.Object, "spec", "groups")
 	group := groups[0].(map[string]any)
 	for _, r := range group["rules"].([]any) {

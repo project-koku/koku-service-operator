@@ -1175,25 +1175,31 @@ func (r *CostManagementServiceConfigReconciler) uiBlocked(cfg *costv1alpha1.Cost
 }
 
 // -----------------------------------------------------------------------------
-// Stage 8 — Monitoring (PrometheusRules + App ServiceMonitor)
+// Stage 8 — Monitoring (per-CMSC application metrics)
 // -----------------------------------------------------------------------------
 
-// reconcileMonitoring applies App/Gateway/Operator/Celery ServiceMonitors and
-// PrometheusRules when spec.monitoring.enabled is true (the default). When
-// disabled, best-effort deletes those managed objects so Alerting/scrape
-// targets do not linger. Kruize ServiceMonitor is not applied here yet
-// (ROS scrape → COST-8054) but is still deleted on disable so a future or
-// manually present object does not linger. CRDs absent → skip one resource
-// and continue.
+// reconcileMonitoring applies per-CMSC application ServiceMonitors and the
+// application-metric PrometheusRule when spec.monitoring.enabled is true (the
+// default). Operator metrics and operator alerts are singleton bundle
+// resources in the operator namespace; they are not created from a CMSC.
+// This method removes the per-CMSC operator ServiceMonitor left by older
+// versions. Kruize ServiceMonitor is not applied in beta yet (COST-8054) but
+// is still deleted on disable so a future or manually present object does not
+// linger. CRDs absent → skip one resource and continue.
 func (r *CostManagementServiceConfigReconciler) reconcileMonitoring(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	logger := log.FromContext(ctx)
 	objs := []client.Object{
 		resources.AppServiceMonitor(cfg),
 		resources.GatewayServiceMonitor(cfg),
-		resources.OperatorServiceMonitor(cfg),
 		resources.CeleryServiceMonitor(cfg),
 		resources.RBACServiceMonitor(cfg),
 		resources.PrometheusRules(cfg),
+	}
+	// COST-8519 moved the operator ServiceMonitor to the operator namespace.
+	// Delete the old per-CMSC object regardless of the current monitoring flag.
+	legacyOperatorMonitor := resources.LegacyOperatorServiceMonitor(cfg)
+	if err := r.Delete(ctx, legacyOperatorMonitor); err != nil && !errors.IsNotFound(err) && !apimeta.IsNoMatchError(err) {
+		return Result{}, fmt.Errorf("delete legacy operator ServiceMonitor %s: %w", legacyOperatorMonitor.GetName(), err)
 	}
 
 	if !costv1alpha1.BoolVal(cfg.Spec.Monitoring.Enabled, true) {
