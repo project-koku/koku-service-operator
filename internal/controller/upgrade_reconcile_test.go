@@ -197,6 +197,41 @@ func TestRejectedTargetPreservesFailureAcrossReconciles(t *testing.T) {
 	}
 }
 
+func TestRecoveryHoldPreservesProgressingTransition(t *testing.T) {
+	for _, invalidTarget := range []bool{false, true} {
+		name := "failed_target"
+		if invalidTarget {
+			name = "invalid_target"
+		}
+		t.Run(name, func(t *testing.T) {
+			l := newUpgradeReconcileFixture(t)
+			l.status(func() {
+				attachUpgrade(l.cfg, cost.UpgradeStageRollingBack, true)
+				if invalidTarget {
+					l.cfg.Status.Upgrade.Operation.Target.Spec.Raw = []byte(`"oops"`)
+				}
+			})
+			l.drive(func() bool {
+				return l.cfg.Status.Upgrade.Operation.Stage == cost.UpgradeStageRecoveryRequired
+			})
+			since := metav1.NewTime(time.Now().Add(-time.Hour).Truncate(time.Second))
+			l.status(func() {
+				apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionProgressing).LastTransitionTime = since
+			})
+			before := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionProgressing).DeepCopy()
+			for range 2 {
+				if err := l.step(); err != nil {
+					t.Fatal(err)
+				}
+				got := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionProgressing)
+				if got.Status != before.Status || got.Reason != before.Reason || !got.LastTransitionTime.Equal(&since) {
+					t.Fatalf("stable recovery hold changed Progressing: before=%+v after=%+v", before, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRolledBackHoldContinuesDriftCorrection(t *testing.T) {
 	for _, tc := range []struct {
 		name             string

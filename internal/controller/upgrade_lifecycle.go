@@ -327,6 +327,7 @@ func (r *CostManagementServiceConfigReconciler) holdInvalidUpgradeTarget(
 	if !stopped {
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
+	defer preserveProgressingTransition(cfg)()
 	quiet, err := r.quiesceApplications(ctx, cfg)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -340,6 +341,7 @@ func (r *CostManagementServiceConfigReconciler) holdInvalidUpgradeTarget(
 func (r *CostManagementServiceConfigReconciler) holdFailedUpgradeTarget(
 	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, deadlineExceeded bool,
 ) (ctrl.Result, error) {
+	defer preserveProgressingTransition(cfg)()
 	quiet, err := r.quiesceApplications(ctx, cfg)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -371,6 +373,22 @@ func (r *CostManagementServiceConfigReconciler) holdFailedUpgradeTarget(
 		r.setCondition(cfg, cost.ConditionUpgradeFailed, metav1.ConditionTrue, "UpgradeFailed", op.Failure)
 	}
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// Quiescence briefly reports Progressing=True. Keep the original transition
+// time when the completed hold returns to the same status and reason.
+func preserveProgressingTransition(cfg *cost.CostManagementServiceConfig) func() {
+	prior := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionProgressing)
+	if prior == nil {
+		return func() {}
+	}
+	prior = prior.DeepCopy()
+	return func() {
+		current := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionProgressing)
+		if current != nil && current.Status == prior.Status && current.Reason == prior.Reason {
+			current.LastTransitionTime = prior.LastTransitionTime
+		}
+	}
 }
 
 func (r *CostManagementServiceConfigReconciler) applyStoppedApplicationRevision(ctx context.Context, cfg *cost.CostManagementServiceConfig) error {

@@ -65,6 +65,29 @@ func attachUpgrade(cfg *cost.CostManagementServiceConfig, stage string, mutating
 	cfg.Status.Upgrade.Operation = &cost.UpgradeOperation{ID: "operation-1", TargetGeneration: 2, Source: cfg.Status.Upgrade.Installed.DeepCopy(), Target: *applicationRevision(target, mustCurrentReleaseBundle()), Stage: stage, SchemaMutationPossible: mutating, StartedAt: metav1.Now(), StageStartedAt: metav1.Now()}
 }
 
+func TestPreserveProgressingTransitionKeepsRealChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		status       metav1.ConditionStatus
+	}{
+		{name: "reason changed", reason: "RecoveryRequired", status: metav1.ConditionFalse},
+		{name: "status changed", reason: "UpgradeMaintenance", status: metav1.ConditionTrue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prior := metav1.NewTime(time.Now().Add(-time.Hour))
+			current := metav1.Now()
+			cfg := &cost.CostManagementServiceConfig{Status: cost.CostManagementServiceConfigStatus{Conditions: []metav1.Condition{{Type: cost.ConditionProgressing, Status: metav1.ConditionFalse, Reason: "UpgradeMaintenance", LastTransitionTime: prior}}}}
+			restore := preserveProgressingTransition(cfg)
+			condition := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionProgressing)
+			condition.Status, condition.Reason, condition.LastTransitionTime = tc.status, tc.reason, current
+			restore()
+			if !condition.LastTransitionTime.Equal(&current) {
+				t.Fatal("a real Progressing transition lost its timestamp")
+			}
+		})
+	}
+}
+
 func TestUpgradePlanPersistsBeforeMutation(t *testing.T) {
 	r, cfg, c := upgradeFixture(t)
 	cfg.Spec.CostManagement.API.Image.Tag = "v2"
