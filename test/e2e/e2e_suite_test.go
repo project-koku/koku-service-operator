@@ -47,7 +47,7 @@ var (
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
 // temporary environment to validate project changes with the purposed to be used in CI jobs.
 // The default setup requires Kind, builds/loads the Manager Docker image locally, and installs
-// CertManager.
+// CertManager and the monitoring CRDs required by the default deployment.
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting koku-service-operator integration test suite\n")
@@ -55,6 +55,9 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	By("installing the ServiceMonitor and PrometheusRule CRDs")
+	Expect(utils.InstallPrometheusMonitoringCRDs()).To(Succeed(), "Failed to install monitoring CRDs")
+
 	By("building the manager(Operator) image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
 	_, err := utils.Run(cmd)

@@ -68,6 +68,24 @@ func InstallPrometheusOperator() error {
 	return err
 }
 
+// InstallPrometheusMonitoringCRDs installs the two monitoring APIs used by the
+// default operator deployment. The disposable Kind cluster owns their cleanup.
+func InstallPrometheusMonitoringCRDs() error {
+	baseURL := "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/" +
+		prometheusOperatorVersion + "/example/prometheus-operator-crd/monitoring.coreos.com_"
+	cmd := exec.Command("kubectl", "apply", "--server-side",
+		"-f", baseURL+"servicemonitors.yaml",
+		"-f", baseURL+"prometheusrules.yaml")
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Established", "--timeout=60s",
+		"crd/servicemonitors.monitoring.coreos.com",
+		"crd/prometheusrules.monitoring.coreos.com")
+	_, err := Run(cmd)
+	return err
+}
+
 // UninstallPrometheusOperator uninstalls the prometheus
 func UninstallPrometheusOperator() {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
