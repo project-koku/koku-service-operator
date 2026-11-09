@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -100,12 +101,17 @@ func TestMonitoringAppliesServiceMonitorAndPrometheusRule(t *testing.T) {
 	}
 
 	var patchKinds []string
+	var deleted []string
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(_ context.Context, _ client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
 				patchKinds = append(patchKinds, obj.GetObjectKind().GroupVersionKind().Kind)
+				return nil
+			},
+			Delete: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.DeleteOption) error {
+				deleted = append(deleted, obj.GetName())
 				return nil
 			},
 		}).
@@ -119,14 +125,16 @@ func TestMonitoringAppliesServiceMonitorAndPrometheusRule(t *testing.T) {
 	if _, err := r.reconcileMonitoring(context.Background(), cfg); err != nil {
 		t.Fatalf("reconcileMonitoring: %v", err)
 	}
-	if len(patchKinds) != 6 ||
+	if len(patchKinds) != 5 ||
 		patchKinds[0] != "ServiceMonitor" ||
 		patchKinds[1] != "ServiceMonitor" ||
 		patchKinds[2] != "ServiceMonitor" ||
 		patchKinds[3] != "ServiceMonitor" ||
-		patchKinds[4] != "ServiceMonitor" ||
-		patchKinds[5] != "PrometheusRule" {
-		t.Errorf("expected App+Gateway+Operator+Celery+RBAC ServiceMonitors then PrometheusRule, got %v", patchKinds)
+		patchKinds[4] != "PrometheusRule" {
+		t.Errorf("expected App+Gateway+Celery+RBAC ServiceMonitors then PrometheusRule, got %v", patchKinds)
+	}
+	if !slices.Contains(deleted, testCRName+"-operator-metrics") {
+		t.Errorf("expected legacy operator ServiceMonitor cleanup, got deleted=%v", deleted)
 	}
 }
 

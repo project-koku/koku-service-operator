@@ -1,0 +1,69 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: koku-service-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-alerts
+  namespace: system
+spec:
+  groups:
+    - name: cost-management.rules
+      rules:
+        - alert: CostManagementMigrationFailed
+          expr: costmanagement_migration_job_failed == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: Cost Management migration job failed
+            description: 'Migration job {{ $labels.migration_job }} has failed for {{ $labels.cr_namespace }}/{{ $labels.name }}. Schema upgrades are blocked.'
+        - alert: CostManagementMigrationStalled
+          expr: costmanagement_condition{type="SchemaUpToDate",status="False"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cost Management schema migration stalled
+            description: 'Database schema is not up to date for {{ $labels.cr_namespace }}/{{ $labels.name }} for more than 10 minutes.'
+        - alert: CostManagementDegraded
+          expr: costmanagement_condition{type="Degraded",status="True"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Cost Management operator is degraded
+            description: 'The CostManagementServiceConfig {{ $labels.cr_namespace }}/{{ $labels.name }} has been in Degraded state for 5 minutes.'
+        - alert: CostManagementDependencyDown
+          expr: (costmanagement_condition{type="DatabaseReady",status="False"} == 1) or (costmanagement_condition{type="CacheReady",status="False"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Cost Management dependency validation failed
+            description: 'DatabaseReady or CacheReady is False on {{ $labels.cr_namespace }}/{{ $labels.name }} for more than 5 minutes.'
+        - alert: CostManagementPodRestarting
+          expr: costmanagement_managed_pod_restarts > 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cost Management managed pod restarting
+            description: 'Pod {{ $labels.managed_pod }} container {{ $labels.managed_container }} for {{ $labels.cr_namespace }}/{{ $labels.name }} has restart count > 3 for 15 minutes.'
+        - alert: CostManagementNotAvailable
+          expr: costmanagement_condition{type="Available",status="False"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cost Management stack is not available
+            description: 'CostManagementServiceConfig {{ $labels.cr_namespace }}/{{ $labels.name }} has Available=False for 30 minutes.'
+        - alert: CostManagementReconcileFailure
+          expr: increase(costmanagement_reconcile_errors_total[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cost Management reconcile errors
+            description: 'Operator reconcile errors for {{ $labels.cr_namespace }}/{{ $labels.name }} over the last 15 minutes.'
