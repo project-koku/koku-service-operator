@@ -197,6 +197,81 @@ func TestRejectedTargetPreservesFailureAcrossReconciles(t *testing.T) {
 	}
 }
 
+func TestRejectedTargetKeepsInstalledConfigUntilCorrected(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		name := "combined_edit"
+		if partial {
+			name = "config_already_applied"
+		}
+		t.Run(name, func(t *testing.T) {
+			l := newUpgradeReconcileFixture(t)
+			originalImage := l.cfg.Spec.CostManagement.API.Image
+			originalPolicy := l.cfg.Spec.Upgrade.ImagePolicy
+			originalRegion := l.cfg.Spec.ObjectStorage.S3.Region
+			jobs := func() map[string]batchv1.Job {
+				out := make(map[string]batchv1.Job)
+				for _, jobName := range []string{resources.NameKokuMigration(l.cfg), resources.NameRBACMigration(l.cfg)} {
+					job := &batchv1.Job{}
+					if err := l.c.Get(t.Context(), client.ObjectKey{Namespace: l.cfg.Namespace, Name: jobName}, job); err != nil {
+						t.Fatal(err)
+					}
+					out[jobName] = *job
+				}
+				return out
+			}
+			beforeJobs := jobs()
+			config := func() string {
+				cm := &corev1.ConfigMap{}
+				if err := l.c.Get(t.Context(), client.ObjectKey{Namespace: l.cfg.Namespace, Name: resources.NameAWSConfigMap(l.cfg)}, cm); err != nil {
+					t.Fatal(err)
+				}
+				return cm.Data["config"]
+			}
+			before := config()
+			if partial {
+				l.edit(func() { l.cfg.Spec.ObjectStorage.S3.Region = "example-region-1" })
+				if err := l.step(); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(config(), "example-region-1") || l.cfg.Status.Phase == cost.PhaseReady {
+					t.Fatal("expected config applied while rollout remains incomplete")
+				}
+			}
+			l.edit(func() {
+				l.cfg.Spec.ObjectStorage.S3.Region = "example-region-1"
+				l.cfg.Spec.Upgrade.ImagePolicy = cost.ImagePolicyFollowOperator
+				l.cfg.Spec.CostManagement.API.Image = cost.ImageSpec{}
+			})
+			if err := l.step(); err == nil {
+				t.Fatal("expected rejected image combination")
+			}
+			if got := config(); got != before {
+				t.Fatalf("installed config not restored: %q", got)
+			}
+			if l.cfg.Spec.ObjectStorage.S3.Region != "example-region-1" || l.cfg.Spec.CostManagement.API.Image.Repository != "" {
+				t.Fatal("requested spec changed during rejection")
+			}
+			if c := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionDegraded); c == nil || c.Reason != "UpgradeBlocked" || !strings.Contains(c.Message, "requested changes remain pending") {
+				t.Fatalf("missing pending changes diagnostic: %+v", c)
+			}
+			if !reflect.DeepEqual(beforeJobs, jobs()) {
+				t.Fatal("rejected target changed migration Jobs")
+			}
+			l.edit(func() {
+				l.cfg.Spec.Upgrade.ImagePolicy = originalPolicy
+				l.cfg.Spec.CostManagement.API.Image = originalImage
+			})
+			l.drive(func() bool { return l.cfg.Status.Phase == cost.PhaseReady && l.cfg.Status.Upgrade.Operation == nil })
+			if !strings.Contains(config(), "example-region-1") || originalRegion == "example-region-1" {
+				t.Fatal("corrected request did not apply pending configuration")
+			}
+			if !reflect.DeepEqual(beforeJobs, jobs()) {
+				t.Fatal("corrected runtime-only edit changed migration Jobs")
+			}
+		})
+	}
+}
+
 func TestRecoveryHoldPreservesProgressingTransition(t *testing.T) {
 	for _, invalidTarget := range []bool{false, true} {
 		name := "failed_target"
@@ -403,18 +478,126 @@ func TestRetryTimeoutPreservesDrainBarrier(t *testing.T) {
 			if l.cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRollingBack {
 				t.Fatal("Retry deadline did not enter rollback")
 			}
+			l.status(func() { l.cfg.Status.Upgrade.Operation.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour)) })
+			drainEvents(l.r)
 			for range 3 {
 				if err := l.step(); err != nil {
 					t.Fatal(err)
+				}
+				cond := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionDegraded)
+				if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "RollbackDrainStalled" {
+					t.Fatalf("missing stalled drain diagnostic: %+v", cond)
 				}
 				if *l.dep(resources.NameKokuAPI(l.cfg)).Spec.Replicas != 0 {
 					t.Fatal("Retry timeout restarted source workloads before the writer stopped")
 				}
 			}
+			if got := countEvents(drainEvents(l.r), "RollbackDrainStalled"); got != 1 {
+				t.Fatalf("stalled drain events = %d, want one", got)
+			}
 			finishWriter()
 			l.drive(func() bool { return l.cfg.Status.Upgrade.Operation.Stage == cost.UpgradeStageRolledBack })
 			if *l.dep(resources.NameKokuAPI(l.cfg)).Spec.Replicas == 0 {
 				t.Fatal("source did not resume after writer drain")
+			}
+		})
+	}
+}
+
+func TestRollbackDeadlineReportsActiveMigrationWriter(t *testing.T) {
+	l := newUpgradeReconcileFixture(t)
+	job := &batchv1.Job{}
+	if err := l.c.Get(t.Context(), client.ObjectKey{Namespace: l.cfg.Namespace, Name: resources.NameKokuMigration(l.cfg)}, job); err != nil {
+		t.Fatal(err)
+	}
+	job.Status = batchv1.JobStatus{Active: 1}
+	if err := l.c.Status().Update(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	l.status(func() {
+		attachUpgrade(l.cfg, cost.UpgradeStageMigrating, false)
+		l.r.failUpgrade(l.cfg, "upgrade deadline exceeded")
+	})
+	drainEvents(l.r)
+	if err := l.step(); err != nil {
+		t.Fatal(err)
+	}
+	if c := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionDegraded); c != nil && c.Reason == "RollbackDrainStalled" {
+		t.Fatal("reported stalled drain before rollback deadline")
+	}
+	l.status(func() { l.cfg.Status.Upgrade.Operation.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour)) })
+	for range 3 {
+		if err := l.step(); err != nil {
+			t.Fatal(err)
+		}
+		if l.cfg.Status.Upgrade.Operation.Stage != cost.UpgradeStageRollingBack {
+			t.Fatal("active migration writer did not block rollback")
+		}
+		c := apimeta.FindStatusCondition(l.cfg.Status.Conditions, cost.ConditionDegraded)
+		if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "RollbackDrainStalled" {
+			t.Fatalf("missing stalled writer status: %+v", c)
+		}
+	}
+	if got := countEvents(drainEvents(l.r), "RollbackDrainStalled"); got != 1 {
+		t.Fatalf("stalled writer events = %d, want one", got)
+	}
+}
+
+func TestOldPodWaitDuringSourceRestorationAndCompletedHold(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		name := "source_restoration"
+		if completed {
+			name = "completed_hold"
+		}
+		t.Run(name, func(t *testing.T) {
+			l := newUpgradeReconcileFixture(t)
+			l.failedUI()
+			l.status(func() {
+				if !completed {
+					l.cfg.Status.Upgrade.Operation.Stage = cost.UpgradeStageResumingPrevious
+				}
+				l.cfg.Status.Upgrade.Operation.StageStartedAt = metav1.NewTime(time.Now().Add(-3 * time.Hour))
+			})
+			d := l.dep(resources.NameListener(l.cfg))
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old-listener", Namespace: l.cfg.Namespace, Labels: d.Spec.Selector.MatchLabels, Finalizers: []string{"test-drain"}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+			if err := l.c.Create(t.Context(), pod); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.c.Delete(t.Context(), pod); err != nil {
+				t.Fatal(err)
+			}
+			d.Status.ReadyReplicas = 0
+			d.Status.AvailableReplicas = 0
+			if err := l.c.Status().Update(t.Context(), d); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.step(); err != nil {
+				t.Fatal(err)
+			}
+			want := cost.UpgradeStageRecoveryRequired
+			if completed {
+				want = cost.UpgradeStageRolledBack
+			}
+			if got := l.cfg.Status.Upgrade.Operation.Stage; got != want {
+				t.Fatalf("stage = %s, want %s", got, want)
+			}
+			if apimeta.IsStatusConditionTrue(l.cfg.Status.Conditions, cost.ConditionAvailable) {
+				t.Fatal("source reported available while old Pod is terminating")
+			}
+			if !apimeta.IsStatusConditionTrue(l.cfg.Status.Conditions, cost.ConditionDegraded) {
+				t.Fatal("missing degraded status")
+			}
+			if completed {
+				if err := l.c.Get(t.Context(), client.ObjectKeyFromObject(pod), pod); err != nil {
+					t.Fatal(err)
+				}
+				pod.Finalizers = nil
+				if err := l.c.Update(t.Context(), pod); err != nil {
+					t.Fatal(err)
+				}
+				l.drive(func() bool {
+					return l.cfg.Status.Upgrade.Operation.Stage == cost.UpgradeStageRolledBack && apimeta.IsStatusConditionTrue(l.cfg.Status.Conditions, cost.ConditionAvailable)
+				})
 			}
 		})
 	}

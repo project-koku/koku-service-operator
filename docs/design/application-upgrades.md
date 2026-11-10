@@ -26,6 +26,11 @@ combination. A bundle ID does not certify custom overrides. Unknown source
 releases and untested mixtures block before mutation. Administrators can retain
 all explicit pins and select their own compatible target instead.
 
+If a target is rejected, the requested CMSC remains unchanged and its other
+edits remain pending. The controller continues reconciling the complete last
+Ready configuration; a configuration edit already partly applied can therefore
+be restored to that checkpoint until the rejected image request is corrected.
+
 Release authors update the image manifest and supported source IDs together,
 validate the release pair, and regenerate the bundle. OLM `relatedImages`
 contains the same shipped operand references for catalog/mirroring tooling.
@@ -127,7 +132,9 @@ For customer recovery steps, including first-install migration failures, see the
 never force-deletes active migrations or terminating Pods. Source restoration
 that exceeds its deadline enters `RecoveryRequired`. Active migration writers
 and the explicit recovery drain barrier keep `RollingBack` waiting even after
-the deadline; inspect these writers before intervening. A completed `RolledBack`
+the deadline. An expired drain reports `RollbackDrainStalled` in `Degraded` and
+a warning Event; inspect active Pods and Jobs while the operator continues to
+wait. A completed `RolledBack`
 hold continues source drift correction without a restoration deadline. The ordinary
 readiness timeout does not prematurely abort a journaled upgrade or a graceful
 old-Pod shutdown; a steady-state old Pod becomes Degraded only after its

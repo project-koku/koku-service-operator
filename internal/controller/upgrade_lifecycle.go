@@ -113,7 +113,7 @@ func (r *CostManagementServiceConfigReconciler) rejectUpgradeTarget(
 	if err != nil {
 		return result, err
 	}
-	blockedResult, blockedErr := r.upgradeConfigError(cfg, cause)
+	blockedResult, blockedErr := r.upgradeConfigError(cfg, fmt.Errorf("requested changes remain pending; reconciling the last Ready revision: %w", cause))
 	if result.RequeueAfter > 0 {
 		blockedResult.RequeueAfter = result.RequeueAfter
 	}
@@ -305,6 +305,9 @@ func (r *CostManagementServiceConfigReconciler) rollbackUpgrade(ctx context.Cont
 		return ctrl.Result{}, err
 	}
 	if !stopped {
+		if deadlineExceeded && op.Stage == cost.UpgradeStageRollingBack {
+			r.reportRollbackDrainStalled(cfg)
+		}
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
 	if op.SchemaMutationPossible {
@@ -325,6 +328,9 @@ func (r *CostManagementServiceConfigReconciler) holdInvalidUpgradeTarget(
 		return ctrl.Result{}, err
 	}
 	if !stopped {
+		if deadlineExceeded && op.Stage == cost.UpgradeStageRollingBack {
+			r.reportRollbackDrainStalled(cfg)
+		}
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
 	defer preserveProgressingTransition(cfg)()
@@ -416,6 +422,9 @@ func (r *CostManagementServiceConfigReconciler) resumeSourceAfterSafeFailure(
 			return ctrl.Result{}, err
 		}
 		if !quiet {
+			if deadlineExceeded {
+				r.reportRollbackDrainStalled(cfg)
+			}
 			return ctrl.Result{RequeueAfter: requeueFast}, nil
 		}
 		// Persist the completed drain barrier before applying the source revision.
@@ -457,6 +466,20 @@ func (r *CostManagementServiceConfigReconciler) resumeSourceAfterSafeFailure(
 	r.setCondition(cfg, cost.ConditionProgressing, metav1.ConditionFalse, op.Stage, "target upgrade did not complete")
 	cfg.Status.Phase = cost.PhaseDegraded
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// reportRollbackDrainStalled reports a deadline without bypassing writer exclusion.
+func (r *CostManagementServiceConfigReconciler) reportRollbackDrainStalled(cfg *cost.CostManagementServiceConfig) {
+	const reason = "RollbackDrainStalled"
+	message := "rollback deadline exceeded while waiting for application Pods or migration writers to stop; inspect active Pods and Jobs"
+	previous := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionDegraded)
+	newEvent := previous == nil || previous.Status != metav1.ConditionTrue || previous.Reason != reason
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, reason, message)
+	r.setCondition(cfg, cost.ConditionDegraded, metav1.ConditionTrue, reason, message)
+	cfg.Status.Phase = cost.PhaseDegraded
+	if newEvent && r.Recorder != nil {
+		r.Recorder.Event(cfg, corev1.EventTypeWarning, reason, message)
+	}
 }
 
 func (r *CostManagementServiceConfigReconciler) requireRecovery(cfg *cost.CostManagementServiceConfig, message string) ctrl.Result {
