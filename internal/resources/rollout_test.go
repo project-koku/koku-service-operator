@@ -9,6 +9,31 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func TestApplicationDeploymentsOmitsRBACWorkerForGoBackend(t *testing.T) {
+	django := ApplicationDeployments(minimalCRForResources("cm", "ns"))
+	goCfg := goBackendCfg()
+	goCfg.Name, goCfg.Namespace = "cm", "ns"
+	goBackend := ApplicationDeployments(goCfg)
+
+	hasWorker := func(deps []*appsv1.Deployment) bool {
+		for _, d := range deps {
+			if d.Labels[labelComponent] == "rbac-worker" {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasWorker(django) {
+		t.Fatal("django backend must include rbac-worker in ApplicationDeployments")
+	}
+	if hasWorker(goBackend) {
+		t.Fatal("go backend must omit rbac-worker from ApplicationDeployments (worker is deleted)")
+	}
+	if len(goBackend) != len(django)-1 {
+		t.Fatalf("go backend deployment count = %d, want django count-1 (%d)", len(goBackend), len(django)-1)
+	}
+}
+
 func TestApplicationRolloutPolicies(t *testing.T) {
 	cfg := minimalCRForResources("cm", "ns")
 	cfg.Spec.ROS.Enabled = new(true)
