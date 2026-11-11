@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -126,8 +127,8 @@ func TestMigrationJobBuildsValidJob(t *testing.T) {
 	}
 
 	// RestartPolicy
-	if spec.RestartPolicy != "OnFailure" {
-		t.Errorf("RestartPolicy = %q, want OnFailure", spec.RestartPolicy)
+	if spec.RestartPolicy != corev1.RestartPolicyNever {
+		t.Errorf("RestartPolicy = %q, want Never", spec.RestartPolicy)
 	}
 }
 

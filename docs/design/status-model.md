@@ -5,7 +5,7 @@ dispatch, the stage pipeline and what each stage writes, the `status.phase`
 state machine, the upgrade operation state machine (COST-7693), and a reference
 of every condition and Event.
 
-The code is authoritative; this document describes it as of COST-8103. When the
+The code is authoritative; this document includes COST-8103 and the COST-7693 recovery follow-up. When the
 two disagree, fix this document. Key files:
 
 | Concern | Code |
@@ -48,7 +48,7 @@ flowchart LR
     P -->|no| OP{upgrade<br/>operation?}
     OP -->|yes| ADV["advanceUpgrade<br/>(section 4)"]
     OP -->|no| RES{release bundle<br/>resolves?}
-    RES -->|no| UB["upgradeConfigError<br/>Degraded=UpgradeBlocked"]
+    RES -->|no| UB["rejectUpgradeTarget<br/>reconcile installed revision<br/>Degraded=UpgradeBlocked"]
     RES -->|yes| INST{installed<br/>revision?}
     INST -->|"no: first install"| INI["reconcileInitial<br/>→ reconcileStack"]
     INST -->|yes| SAME{"target ==<br/>installed?"}
@@ -85,16 +85,16 @@ The table says which stages wait or block, and on what.
 | # | Stage (`phases()`) | Conditions written | Stops the pass when | Events |
 |---|--------------------|--------------------|---------------------|--------|
 | 0 | `reconcileWorkloadImages` | — | a required `spec.*.image` is empty (error → `ImageNotSet`) | `ImageNotSet` (Warning) |
-| 1 | `reconcileDiscovery` (skipped while an upgrade operation exists) | `DiscoveryComplete`, `StorageReady` (S3 discovery) | cluster domain / StorageClass not found | `DiscoveryComplete` |
+| 1 | `reconcileDiscovery` (skipped while an upgrade operation exists or discovery already ran in this pass) | `DiscoveryComplete`, `StorageReady` (S3 discovery) | cluster domain / StorageClass not found | `DiscoveryComplete` |
 | 2 | `reconcileSharedConfig` | — | API errors only | — |
 | 3 | `reconcileInfrastructure` | `DatabaseReady`, `CacheReady` — **bundled only** (`WaitingFor*` / `*Available`); `StorageConfigChanged` on a PostgreSQL volume change | bundled pod not ready; storage change (`Phase=Degraded`) | `StorageConfigChanged` (Warning) |
 | 4 | `reconcileValidation` | `DatabaseReady`, `CacheReady` — **external only**; `KafkaReady`, `StorageReady`, `AuthenticationReady` (non-blocking) | external DB/cache unreachable or its Secret invalid: `Available=False/DependencyNotReady`, `Degraded=True/DependencyUnreachable`, `Phase=Degraded`, requeue 30 s | `DependencyFailed` (Warning, on the transition to False); `InfrastructureReady` (once DB and cache become ready, emitted after this stage) |
-| 5 | `reconcileMigration` (skipped by upgrade rollout/rollback) | `SchemaUpToDate`, `UpgradeFailed=False/MigrationComplete`, `Degraded=False/MigrationSucceeded` | Job running (wait); Job failed or migration image missing (`Stop`, `Phase=Degraded`) | `MigrationStarted`, `MigrationsComplete`, `MigrationFailed` + `UpgradeFailed` (Warning) |
+| 5 | `reconcileMigration` (skipped by upgrade rollout/rollback) | `SchemaUpToDate`, `UpgradeFailed=False/MigrationComplete`, `RecoveryRequired=False/MigrationComplete`, `Degraded=False/MigrationSucceeded` (preserves `DeploymentNotReady`); first-install failure sets `RecoveryRequired=True/SchemaStateUnknown` | Job running (wait); Job failed or migration image missing (`Stop`, `Phase=Degraded`) | `MigrationStarted`, `MigrationsComplete`, `MigrationFailed` + `UpgradeFailed` (Warning) |
 | 6 | `reconcileCoreServices` | `ROSEnabled`, `RBACWorkerReady`, `RBACReady`, `CoreServicesReady`; `Available=False` with `WaitingForRBAC` / `WaitingForAPI` / `WaitingForMasu` / `WaitingForListener` / `WaitingForKruize`, then `WaitingForComponents` | RBAC API or a core Deployment not ready | — |
 | 7 | `reconcileWorkers` | `IngressReady`; `Available=False/WaitingForROSAPI` / `WaitingForROSProcessor` | Ingress or ROS Deployment not ready | — |
 | 8 | `reconcileEdge` | `GatewayReady`, `UIReady` | Envoy or its Route not ready; UI Deployment not ready (`Available=False/WaitingForUI`); UI OAuth client Secret missing or invalid, or UI Route not admitted (`UIReady` and `Available` False with the same reason: `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted`; no 5-minute `Degraded` escalation) | — |
 | 9 | `reconcileMonitoring` | — | API errors only | — |
-| 10 | `waitForApplicationRollout` | `Available=False/WaitingForApplicationRollout` | any application Deployment (UI, Celery, Beat, RBAC worker, Envoy, Ingress, ROS) not rolled out, or old Pods still terminating | — |
+| 10 | `waitForApplicationRollout` | `Available=False/WaitingForApplicationRollout` or `WaitingForOldPodsToTerminate` | any application Deployment (UI, Celery, Beat, RBAC worker, Envoy, Ingress, ROS) not rolled out, or old Pods still terminating | — |
 | — | end of pass | `Available=True/AllComponentsReady`, `Degraded=False/ReconcileComplete`, `Progressing=False/ReconcileComplete` | — | `Ready` and `PhaseChanged` (on the transition) |
 
 **Readiness timeout.** Every Deployment wait goes through `notReadyWait`. While
@@ -104,6 +104,10 @@ reason for 5 minutes (`readinessTimeout`) also sets
 `Phase=Degraded`, then backs off 30 s → 1 m → 2 m → 5 m. When the Deployment
 recovers, the same wait sets `Degraded=False/DeploymentReady`. During an upgrade
 operation this timer is suppressed; the operation's own deadline applies.
+The old-Pod termination wait allows the one-hour worker shutdown budget plus
+a five-minute readiness margin before setting `DeploymentNotReady`.
+The earlier listener readiness gate uses this budget only for a terminating Pod;
+after it exits, an unready replacement gets a fresh ordinary readiness wait.
 
 **Who owns `DatabaseReady` / `CacheReady`.** Infrastructure writes them for the
 bundled components it deploys; validation writes them for external ones,
@@ -151,7 +155,7 @@ stateDiagram-v2
 | Migration Job failed (no upgrade operation) | Degraded | False / `MigrationFailed` | False / `MigrationFailed` | True / `MigrationFailed` |
 | Migration image missing | Degraded | False / `ImageNotSet` | False / `ImageNotSet` | True / `ImageNotSet` |
 | Bundled PostgreSQL storage changed | Degraded | False / `StorageConfigChanged` | False / `StorageConfigChanged` | True / `StorageConfigChanged` |
-| Release bundle or transition invalid | Degraded | False / `UpgradeBlocked` | False / `UpgradeBlocked` | True / `UpgradeBlocked` |
+| Release bundle or transition invalid | Degraded | preserved when the installed revision is serving; otherwise False / `UpgradeBlocked` | False / `UpgradeBlocked` | True / `UpgradeBlocked` |
 | Upgrade quiescing or migrating | Progressing | False / `UpgradeMaintenance` | True / `UpgradeMaintenance` | unchanged |
 | Upgrade retrying after a transient error | Progressing (Degraded if `Degraded=True`) | False / `UpgradeRetrying` | True / `UpgradeRetrying` | unchanged |
 | Upgrade failed, recovery required | Degraded | False / `RecoveryRequired` | False / `RecoveryRequired` | True / `UpgradeFailed` |
@@ -176,12 +180,17 @@ stateDiagram-v2
     Quiescing --> RollingBack: deadline or frozen inputs changed
     Migrating --> RollingBack: Job failed, error, deadline,<br/>or frozen inputs changed
     RollingOut --> RollingBack: readiness failure or deadline
-    RollingBack --> RecoveryRequired: a migration may have run<br/>(source images, replicas 0)
+    RollingBack --> RecoveryRequired: a migration may have run<br/>(target images, replicas 0)<br/>or rollback deadline exceeded
     RollingBack --> RolledBack: no migration ran and the source stack is Ready
     RecoveryRequired --> Recovering: recovery action Retry
     RolledBack --> Recovering: recovery action Retry
     RecoveryRequired --> RollingBack: recovery action ResumePrevious
     RolledBack --> RollingBack: recovery action ResumePrevious
+    RollingBack --> ResumingPrevious: explicit recovery drain complete
+    ResumingPrevious --> RolledBack: source stack ready
+    ResumingPrevious --> RecoveryRequired: source recovery deadline exceeded
+    RecoveryRequired --> RollingOut: Retry with safe schema and matching successful receipts
+    RolledBack --> RollingOut: Retry with safe schema and matching successful receipts
     Recovering --> Quiescing: writers stopped, failed Jobs deleted
 ```
 
@@ -189,20 +198,27 @@ stateDiagram-v2
 |-------|------------------|-------|
 | `Quiescing`, `Migrating` | `Phase=Progressing`, `Available=False/UpgradeMaintenance`, `SchemaUpToDate=False/MigrationPending` then `MigrationRunning` | Application Deployments scaled to 0 and schedules suspended before any Job runs. `Migrating` re-runs shared config, infrastructure and validation as a preflight. |
 | `RollingOut` | as for the pipeline (section 2), migration stage skipped | The 5-minute readiness timer is off; `spec.upgrade.timeoutSeconds` (default 7200) applies to the whole operation. |
-| `RollingBack` | `UpgradeFailed=True/UpgradeFailed`, `Available=False/RollingBack` | Waits for migration writers to stop before restoring the source revision. |
-| `RecoveryRequired` | `Phase=Degraded`, `RecoveryRequired=True/SchemaStateUnknown`, `Degraded=True/UpgradeFailed` | Source images restored with replicas at 0; needs `spec.upgrade.recovery`. |
-| `RolledBack` | `Phase=Degraded`, `Available=True`, `UpgradeFailed=True`, `Degraded=True/UpgradeFailed` | Source revision running; the requested target is still failed. |
+| `RollingBack` | `UpgradeFailed=True/UpgradeFailed`, `Available=False/RollingBack` | Waits for writers to stop; restores the source only when schema is safe, otherwise holds the failed target. |
+| `ResumingPrevious` | source pipeline readiness, with Ready/PhaseChanged Events suppressed | Explicit recovery completed its drain; reconcile the saved source once per pass until ready or its deadline expires. |
+| `RecoveryRequired` | `Phase=Degraded`, `RecoveryRequired=True/RecoveryRequired`, `Degraded=True/UpgradeFailed` | If schema may have changed, target images remain at 0 replicas. Also used when source recovery times out; needs `spec.upgrade.recovery`. |
+| `RolledBack` | `Phase=Degraded`, `Available=True` when source ready, `UpgradeFailed=True`, `Degraded=True` | Source drift correction continues without a restoration deadline; the requested target stays failed. |
 | `Recovering` | as `Quiescing` | Accepted `Retry`; deletes failed migration Jobs after writer exclusion. |
 
 `RecoveryRequired` and `RolledBack` are holds: editing image tags or restarting
 the operator does not leave them; only a recovery request bound to the
 operation ID does (see [application-upgrades.md](application-upgrades.md)).
+The journal records the accepted recovery action and image-only classification
+alongside its request ID. Only a classified image-only `Retry` skips the rollback
+drain; other retries and older journals retain that barrier. Later spec edits
+cannot change the accepted action or classification.
+Rejected targets also keep reconciling the installed source, without clearing
+the rejection condition or emitting success Events on each pass.
 
 ## 5. Condition reference
 
 | Condition | Written by | True reasons | False reasons |
 |-----------|------------|--------------|---------------|
-| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted` (UI gates), `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
+| `Available` | core, worker, edge and rollout waits; `markReady`; validation; migration; upgrade | `AllComponentsReady` | `Waiting*` (one per Deployment wait), `WaitingForComponents`, `WaitingForApplicationRollout`, `WaitingForOldPodsToTerminate`, `OAuthClientSecretMissing`, `OAuthClientSecretInvalid`, `RouteNotAdmitted` (UI gates), `DependencyNotReady`, `MigrationFailed`, `MigrationPending`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeMaintenance`, `UpgradeRetrying`, `RollingBack`, `RecoveryRequired` |
 | `Progressing` | `reconcileStack`, `completeProgressing`, `markPaused`, upgrade | `Reconciling`, `UpgradePlanned`, `UpgradeMaintenance`, `UpgradeRetrying`, `LegacyBaselineAdopted` | `ReconcileComplete`, `Paused`, `MigrationFailed`, `ImageNotSet`, `StorageConfigChanged`, `UpgradeBlocked`, `RecoveryRequired`, `RolledBack` |
 | `Degraded` | `reconcileStack` (errors), `notReadyWait`, validation, migration, upgrade, `markReady` | `ReconcileError`, `ImageNotSet`, `DeploymentNotReady`, `DependencyUnreachable`, `MigrationFailed`, `StorageConfigChanged`, `UpgradeBlocked`, `UpgradeFailed` | `ReconcileComplete`, `MigrationSucceeded`, `DeploymentReady`, `LegacyBaselineAdopted` |
 | `DiscoveryComplete` | discovery | `Discovered` | `ClusterDomainNotFound`, `StorageClassNotFound` |
@@ -213,7 +229,7 @@ operation ID does (see [application-upgrades.md](application-upgrades.md)).
 | `AuthenticationReady` | validation (non-blocking) | `OIDCReachable` | `OIDCConfigMissing`, `OIDCCACertInvalid`, `OIDCUnreachable` |
 | `SchemaUpToDate` | migration, upgrade | `MigrationComplete`, `SourceRestored` | `MigrationPending`, `MigrationRunning`, `MigrationFailed`, `ImageNotSet` |
 | `UpgradeFailed` | migration, upgrade | `MigrationFailed`, `UpgradeFailed` | `MigrationComplete`, `UpgradeComplete` |
-| `RecoveryRequired` | upgrade | `SchemaStateUnknown` | `SourceRestored`, `UpgradeComplete` |
+| `RecoveryRequired` | migration, upgrade | `SchemaStateUnknown` (first install), `RecoveryRequired` (upgrade) | `MigrationComplete`, `SourceRestored`, `UpgradeComplete` |
 | `ROSEnabled` | core (feature flag, not health) | `Enabled` | `Disabled` |
 | `RBACWorkerReady` | core | `RBACWorkerAvailable` | `WaitingForRBACWorker` |
 | `RBACReady` | core | `RBACAvailable` | `WaitingForRBAC` |

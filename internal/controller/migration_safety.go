@@ -106,6 +106,10 @@ func (r *CostManagementServiceConfigReconciler) migrationFailed(
 	}
 	r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, reasonMigrationFailed, msg)
 	r.setCondition(cfg, costv1alpha1.ConditionUpgradeFailed, metav1.ConditionTrue, reasonMigrationFailed, msg)
+	if cfg.Status.Upgrade.Operation == nil {
+		r.setCondition(cfg, costv1alpha1.ConditionRecoveryRequired, metav1.ConditionTrue,
+			"SchemaStateUnknown", msg+"; no previous application revision is available")
+	}
 	cfg.Status.Phase = costv1alpha1.PhaseDegraded
 	opmetrics.SetMigrationJobFailed(cfg.Namespace, cfg.Name, job.Name, true)
 	if newFailure && r.Recorder != nil {
