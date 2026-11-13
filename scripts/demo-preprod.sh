@@ -235,7 +235,7 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 

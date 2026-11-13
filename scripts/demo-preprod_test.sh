@@ -88,9 +88,14 @@ assert_contains "$cr" $'  ros:\n    enabled: false' "ROS stays off (sample CR, n
 rm -f "$tmp"
 
 # --- Demo uses the in-repo Keycloak provisioner by default ---
-plan="$(RHBK_SCRIPT= ./scripts/demo-preprod.sh --dry-run)"
-assert_contains "$plan" "RHBK script: ${ROOT}/scripts/deploy-rhbk.sh" "demo defaults to in-repo RHBK script"
+demo_root="$(mktemp -d)"
+mkdir -p "${demo_root}/scripts/lib"
+cp -p "${ROOT}/scripts/demo-preprod.sh" "${ROOT}/scripts/demo-preprod.env.example" "${demo_root}/scripts/"
+cp -p "${ROOT}/scripts/lib/demo-preprod.bash" "${demo_root}/scripts/lib/"
+plan="$(RHBK_SCRIPT= "${demo_root}/scripts/demo-preprod.sh" --dry-run)"
+assert_contains "$plan" "RHBK script: ${demo_root}/scripts/deploy-rhbk.sh" "demo defaults to in-repo RHBK script"
 assert_not_contains "$plan" "CHART_ROOT" "demo does not require a chart checkout"
+rm -rf "$demo_root"
 plan="$(RHBK_SCRIPT=/tmp/custom-deploy-rhbk.sh ./scripts/demo-preprod.sh --dry-run)"
 assert_contains "$plan" "RHBK script: /tmp/custom-deploy-rhbk.sh" "demo accepts an RHBK script override"
 
