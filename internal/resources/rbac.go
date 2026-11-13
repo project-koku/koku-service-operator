@@ -136,6 +136,43 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 	selLabels := SelectorLabels(cfg, "rbac-api")
 	allLabels := Labels(cfg, "rbac-api")
 	vols, mounts := rbacVolumesAndMounts(cfg)
+	containers := []corev1.Container{{
+		Name:            "rbac-api",
+		Image:           image,
+		ImagePullPolicy: pullPolicy(cfg),
+		WorkingDir:      "/opt/rbac/rbac",
+		Command:         []string{"gunicorn"},
+		Args: []string{
+			"rbac.wsgi",
+			"--bind=0.0.0.0:8080",
+			"--workers=2",
+			"--threads=2",
+			"--timeout=120",
+			"--access-logfile=-",
+		},
+		Ports: []corev1.ContainerPort{
+			{Name: "http", ContainerPort: rbacAPIPort, Protocol: corev1.ProtocolTCP},
+		},
+		Env: rbacEnvWithPrincipalProfile(cfg),
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
+			InitialDelaySeconds: 30, PeriodSeconds: 20, TimeoutSeconds: 5, FailureThreshold: 5,
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
+			InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
+		},
+		Resources:       ProfileResources(cfg, WorkloadRBACAPI, spec.API.Resources),
+		VolumeMounts:    mounts,
+		SecurityContext: rbacAppContainerSC(),
+	}}
+	// COST-8167: Cost-owned Keycloak profile sidecar; insights-rbac calls localhost.
+	if principalProfileEnabled(cfg) {
+		containers = append(containers, principalProfileContainer(cfg))
+		if keycloakSyncVerifiesTLS(cfg) {
+			vols = append(vols, keycloakCAVolume(cfg))
+		}
+	}
 
 	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -158,37 +195,8 @@ func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 						waitForRBACDB(cfg),
 						WaitForValkeyInitContainer(cfg),
 					},
-					Containers: []corev1.Container{{
-						Name:            "rbac-api",
-						Image:           image,
-						ImagePullPolicy: pullPolicy(cfg),
-						WorkingDir:      "/opt/rbac/rbac",
-						Command:         []string{"gunicorn"},
-						Args: []string{
-							"rbac.wsgi",
-							"--bind=0.0.0.0:8080",
-							"--workers=2",
-							"--threads=2",
-							"--timeout=120",
-							"--access-logfile=-",
-						},
-						Ports: []corev1.ContainerPort{
-							{Name: "http", ContainerPort: rbacAPIPort, Protocol: corev1.ProtocolTCP},
-						},
-						Env: rbacEnv(cfg),
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
-							InitialDelaySeconds: 30, PeriodSeconds: 20, TimeoutSeconds: 5, FailureThreshold: 5,
-						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/api/rbac/v1/status/", Port: intstr.FromString("http")}},
-							InitialDelaySeconds: 15, PeriodSeconds: 10, TimeoutSeconds: 5, FailureThreshold: 3,
-						},
-						Resources:       ProfileResources(cfg, WorkloadRBACAPI, spec.API.Resources),
-						VolumeMounts:    mounts,
-						SecurityContext: rbacAppContainerSC(),
-					}},
-					Volumes: vols,
+					Containers: containers,
+					Volumes:    vols,
 				},
 			},
 		},
