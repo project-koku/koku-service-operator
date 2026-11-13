@@ -148,31 +148,6 @@ pin_kube_context() {
   export KUBE_CONTEXT
 }
 
-resolve_chart_root() {
-  local script="scripts/deploy-rhbk.sh"
-  local c
-  local candidates=(
-    "${CHART_ROOT:-}"
-    "${HOME}/go/src/github.com/insights-onprem/cost-onprem-chart"
-    "${GOPATH:-}/src/github.com/insights-onprem/cost-onprem-chart"
-    "/go/src/github.com/insights-onprem/cost-onprem-chart"
-    "/home/prow/go/src/github.com/insights-onprem/cost-onprem-chart"
-    "${ROOT}/../cost-onprem-chart"
-  )
-  for c in "${candidates[@]}"; do
-    [[ -n "$c" && -x "${c}/${script}" ]] && { echo "$c"; return 0; }
-  done
-  return 1
-}
-
-# Optional sibling chart checkout. Prow does not clone cost-onprem-chart:
-# scripts/deploy-byoi.sh uses this repo's scripts/deploy-rhbk.sh.
-ensure_chart_root() {
-  local found
-  found="$(resolve_chart_root || true)"
-  echo "$found"
-}
-
 # Redact credential-shaped strings on stdin. Used for anything that may land in
 # ARTIFACT_DIR or the Prow build log (CMSC status, events, operator logs, JUnit).
 redact_filter() {
@@ -359,15 +334,11 @@ if ! "$KUBECTL" get crd costmanagementserviceconfigs.service.costmanagement.open
   exit 1
 fi
 
-CHART_ROOT="$(ensure_chart_root)"
-export CHART_ROOT
-
 echo "=== operator e2e (BYOI + CMSC + pytest) ==="
 echo "App NS:       $NAMESPACE"
 echo "CR name:      $CR_NAME"
 echo "Infra NS:     $INFRA_NAMESPACE"
 echo "Operator NS:  $OPERATOR_NAMESPACE"
-echo "CHART_ROOT:   ${CHART_ROOT:-<unset>}"
 echo "Context:      ${KUBE_CONTEXT} ($("$KUBECTL" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo unknown))"
 echo ""
 
@@ -380,7 +351,6 @@ export KEYCLOAK_ADMIN_VIA="${KEYCLOAK_ADMIN_VIA:-port-forward}"
 KUBE_CONTEXT="$KUBE_CONTEXT" KUBECTL="$KUBECTL" \
   NAMESPACE="$NAMESPACE" CR_NAME="$CR_NAME" INFRA_NAMESPACE="$INFRA_NAMESPACE" \
   KAFKA_NAMESPACE="$KAFKA_NAMESPACE" KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE" \
-  CHART_ROOT="${CHART_ROOT:-}" \
   KEYCLOAK_ADMIN_VIA="$KEYCLOAK_ADMIN_VIA" \
   ./scripts/deploy-byoi.sh
 

@@ -5,7 +5,7 @@ set -euo pipefail
 # Cost Management On-Premise OpenShift with JWT Authentication Deployment Script
 #
 # This script orchestrates the complete setup for Cost Management on
-# OpenShift by wrapping the authoritative scripts from cost-onprem-chart repository.
+# OpenShift by calling the deployment scripts in this repository.
 #
 # Based on: https://github.com/insights-onprem/cost-onprem-chart/blob/main/scripts/README.md
 # Section: JWT Authentication Setup

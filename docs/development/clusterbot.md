@@ -166,5 +166,5 @@ fi
 oc delete ns cost-byoi cost-byoi-infra --ignore-not-found
 # If you used AMQ Streams / Keycloak instead of the smoke path:
 #   ./config/samples/byoi/deploy-kafka.sh cleanup
-#   ./scripts/deploy-rhbk.sh cleanup   # from cost-onprem-chart or repo scripts/
+#   ./scripts/deploy-rhbk.sh cleanup
 ```
