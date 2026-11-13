@@ -91,21 +91,6 @@ Path(dest).write_text(text)
 PY
 }
 
-# cost-onprem-chart is a sibling of the main checkout, not of a git worktree dir.
-# Paths are string-computed so this works in tests without the dirs existing.
-default_chart_root() {
-  local repo_root="${1:?}"
-  local git_common_dir="${2:-}"
-  local main_root parent
-  if [[ -n "$git_common_dir" ]]; then
-    main_root="$(dirname "$git_common_dir")"
-  else
-    main_root="$repo_root"
-  fi
-  parent="$(dirname "$main_root")"
-  echo "${parent}/cost-onprem-chart"
-}
-
 # Fail with the real oc/kubectl error when the API is down (expired Cluster Bot).
 require_reachable_cluster() {
   local kubectl="${1:?kubectl/oc binary}"
