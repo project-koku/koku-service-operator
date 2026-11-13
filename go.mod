@@ -2,7 +2,7 @@ module github.com/project-koku/koku-service-operator
 
 go 1.26.5
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.6
