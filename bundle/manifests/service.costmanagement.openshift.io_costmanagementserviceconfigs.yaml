@@ -2087,6 +2087,11 @@ spec:
                             type: object
                         type: object
                     type: object
+                  backend:
+                    description: |-
+                      Backend selects the RBAC implementation: empty (or "django") runs
+                      insights-rbac; "go" runs rbac-go.
+                    type: string
                   image:
                     properties:
                       digest:

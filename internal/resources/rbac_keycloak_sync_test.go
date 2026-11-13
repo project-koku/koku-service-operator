@@ -380,3 +380,33 @@ func TestKeycloakSyncCronJobNoCAWhenUnused(t *testing.T) {
 		})
 	}
 }
+
+func TestKeycloakSyncCronJobGoBackend(t *testing.T) {
+	cfg := keycloakSyncCfg()
+	cfg.Spec.RBAC.Backend = "go"
+	cj := KeycloakSyncCronJob(cfg)
+	c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-go" || c.Command[1] != "sync" {
+		t.Errorf("Command = %v, want [/usr/local/bin/rbac-go sync]", c.Command)
+	}
+	if len(c.Args) != 0 {
+		t.Errorf("Args = %v, want empty (env-driven sync)", c.Args)
+	}
+	if c.WorkingDir != "" {
+		t.Errorf("WorkingDir = %q, want empty (image default)", c.WorkingDir)
+	}
+	for _, m := range c.VolumeMounts {
+		if m.Name == "sync-script" {
+			t.Error("go backend must not mount sync-script")
+		}
+	}
+	env := map[string]string{}
+	for _, e := range c.Env {
+		env[e.Name] = e.Value
+	}
+	for _, k := range []string{"KEYCLOAK_URL", "KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID", "SYNC_ORG_GROUP_PREFIX", "SYNC_PRUNE_ORPHANS"} {
+		if _, ok := env[k]; !ok {
+			t.Errorf("go sync missing env %s (rbac-go sync reads the same env)", k)
+		}
+	}
+}
