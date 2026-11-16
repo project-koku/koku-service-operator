@@ -86,7 +86,7 @@ later reports `Unauthorized`.
 ### Run it
 
 ```bash
-# needs the sibling cost-onprem-chart checkout for scripts/deploy-rhbk.sh
+# uses this repo's scripts/deploy-rhbk.sh for Keycloak
 ./scripts/demo-preprod.sh --crc --dry-run     # show the plan
 ./scripts/demo-preprod.sh --crc               # tmux: steps + two klock panes
 ./scripts/demo-preprod.sh --crc --reset       # tear the four namespaces down first

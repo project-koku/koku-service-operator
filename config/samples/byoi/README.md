@@ -128,7 +128,7 @@ that require Strimzi; use AMQ Streams for those.
 
 ## UI OAuth Secret
 
-After Keycloak/RHBK is up (e.g. chart `scripts/deploy-rhbk.sh`), set
+After Keycloak/RHBK is up (e.g. this repo's `scripts/deploy-rhbk.sh`), set
 `COST_MGMT_NAMESPACE` / `COST_MGMT_RELEASE_NAME` (or `COST_MGMT_UI_BASE_URL`)
 so the UI client redirect URI matches
 `https://{CR_NAME}-ui-{NAMESPACE}.<apps-domain>/oauth2/callback`, then mirror

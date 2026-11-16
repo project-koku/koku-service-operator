@@ -15,7 +15,7 @@
 #   SKIP_REALM_USERS=1 ./scripts/deploy-byoi.sh
 #
 # Keycloak uses this repo's scripts/deploy-rhbk.sh by default.
-# Override with RHBK_SCRIPT or CHART_ROOT (chart copy) if needed.
+# Override with RHBK_SCRIPT if needed.
 #
 set -euo pipefail
 
@@ -29,8 +29,10 @@ KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
-CHART_ROOT="${CHART_ROOT:-${ROOT}/../cost-onprem-chart}"
 RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"
+if [[ "$RHBK_SCRIPT" != /* ]]; then
+  RHBK_SCRIPT="${ROOT}/${RHBK_SCRIPT}"
+fi
 
 SKIP_KAFKA="${SKIP_KAFKA:-0}"
 SKIP_INFRA="${SKIP_INFRA:-0}"
@@ -139,7 +141,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# A3 — Keycloak / RHBK (external chart script)
+# A3 — Keycloak / RHBK
 # -----------------------------------------------------------------------------
 if [[ "$SKIP_KEYCLOAK" != "1" ]]; then
   echo "[A3] Keycloak / RHBK..."
@@ -161,7 +163,7 @@ if [[ "$SKIP_KEYCLOAK" != "1" ]]; then
     if [[ -n "$UI_BASE_URL" ]]; then
       export COST_MGMT_UI_BASE_URL="$UI_BASE_URL"
     fi
-    ./deploy-rhbk.sh
+    "$RHBK_SCRIPT"
   )
 else
   echo "[A3] Skipping Keycloak (SKIP_KEYCLOAK=1)"

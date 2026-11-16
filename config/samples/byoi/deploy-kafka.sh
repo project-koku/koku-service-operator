@@ -764,7 +764,6 @@ display_summary() {
     echo_info "Next Steps:"
     echo_info "  1. (Optional) Verify Kafka cluster: kubectl get kafka $KAFKA_CLUSTER_NAME -n $KAFKA_NAMESPACE"
     echo_info "  2. Operator BYOI: kubectl apply -k config/samples/byoi/infra && kubectl apply -k config/samples/byoi/app"
-    echo_info "     (Helm chart path: ./install-helm-chart.sh from cost-onprem-chart)"
     echo ""
 }
 

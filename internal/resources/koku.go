@@ -152,7 +152,7 @@ func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.D
 	env = MergeEnv(env, spec.Env)
 
 	return deployment(cfg, NameListener(cfg), "listener", image, replicas, ProfileResources(cfg, WorkloadListener, spec.Resources),
-		nil, kokuAPIProbe("/readyz"), env,
+		nil, kokuAPIProbe("/livez"), env,
 		[]string{"/bin/bash", "-c", "cd \"$APP_HOME\" && exec python -c \"" +
 			"import runpy, signal, sys; " +
 			"signal.signal(signal.SIGTERM, signal.default_int_handler); " +

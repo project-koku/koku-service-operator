@@ -111,17 +111,8 @@ WATCHER="${WATCHER:-klock}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 KUBECTL="${KUBECTL:-oc}"
 
-GIT_COMMON=""
-if git -C "$ROOT" rev-parse --git-common-dir >/dev/null 2>&1; then
-  GIT_COMMON="$(git -C "$ROOT" rev-parse --git-common-dir)"
-  if [[ "$GIT_COMMON" != /* ]]; then
-    GIT_COMMON="$(cd "$ROOT/${GIT_COMMON}" && pwd)"
-  fi
-fi
-if [[ -z "${CHART_ROOT:-}" ]]; then
-  CHART_ROOT="$(default_chart_root "$ROOT" "$GIT_COMMON")"
-fi
-export CHART_ROOT NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPACE LOG_LEVEL
+RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"
+export RHBK_SCRIPT NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPACE LOG_LEVEL
 
 IMG="${IMG:-image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/koku-service-operator:${IMAGE_TAG}}"
 export IMG
@@ -178,7 +169,7 @@ Pre-prod demo plan
   infra NS:    ${INFRA_NAMESPACE}
   kafka NS:    ${KAFKA_NAMESPACE}
   keycloak NS: ${KEYCLOAK_NAMESPACE}
-  CHART_ROOT:  ${CHART_ROOT}
+  RHBK script: ${RHBK_SCRIPT}
   IMG:         ${IMG}
   BUILD_MODE:  ${BUILD_MODE}
   watcher:     ${WATCHER}
@@ -188,7 +179,7 @@ Pre-prod demo plan
   crc mode:    ${DEMO_CRC}$([[ "$DEMO_CRC" == "1" ]] && echo "  (arm64 image overrides + single-node Kafka from scripts/demo-preprod.crc.env)")
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
-  [1/8] Preflight (context, oc, CHART_ROOT, StorageClass)
+  [1/8] Preflight (context, oc, RHBK script, StorageClass)
   [2/8] --reset: delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}
   [3/8] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
   [4/8] Operator image (${BUILD_MODE}: docker or OpenShift binary build)
@@ -244,7 +235,7 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -286,12 +277,12 @@ if [[ "$DEMO_CRC" == "1" ]]; then
   fi
 fi
 
-if [[ ! -x "${CHART_ROOT}/scripts/deploy-rhbk.sh" ]]; then
-  echo "error: CHART_ROOT has no scripts/deploy-rhbk.sh: ${CHART_ROOT}" >&2
-  echo "  copy scripts/demo-preprod.env.example → scripts/demo-preprod.local.env and set CHART_ROOT" >&2
+if [[ ! -x "$RHBK_SCRIPT" ]]; then
+  echo "error: RHBK script not found or not executable: ${RHBK_SCRIPT}" >&2
+  echo "  set RHBK_SCRIPT to an executable deploy-rhbk.sh" >&2
   exit 1
 fi
-ok "CHART_ROOT=${CHART_ROOT}"
+ok "RHBK script=${RHBK_SCRIPT}"
 
 DOMAIN="$(read_apps_domain "$KUBECTL")" || exit 1
 ok "apps domain=${DOMAIN}"

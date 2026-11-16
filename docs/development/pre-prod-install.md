@@ -61,14 +61,14 @@ point the CR at those endpoints.
 
 ### One-shot (recommended)
 
-From the operator repo root (Keycloak script comes from the sibling
-`cost-onprem-chart` checkout — override with `CHART_ROOT` / `RHBK_SCRIPT`):
+From the operator repo root (Keycloak uses this repo's
+`scripts/deploy-rhbk.sh` by default; override with `RHBK_SCRIPT`):
 
 ```bash
 export NAMESPACE=cost-byoi
 export CR_NAME=cost-management
 export INFRA_NAMESPACE=cost-byoi-infra
-# Optional overrides: KAFKA_NAMESPACE, KEYCLOAK_NAMESPACE, STORAGE_CLASS, CHART_ROOT
+# Optional overrides: KAFKA_NAMESPACE, KEYCLOAK_NAMESPACE, STORAGE_CLASS, RHBK_SCRIPT
 
 ./scripts/deploy-byoi.sh
 ```
@@ -77,7 +77,7 @@ This runs A1–A4 plus app Secrets in `$NAMESPACE`:
 
 1. AMQ Streams Kafka (`config/samples/byoi/deploy-kafka.sh`)
 2. Postgres / Valkey / MinIO (`config/samples/byoi/infra`, namespace-overridable)
-3. Keycloak / RHBK (`cost-onprem-chart` `scripts/deploy-rhbk.sh`) with
+3. Keycloak / RHBK (`scripts/deploy-rhbk.sh`) with
    `COST_MGMT_NAMESPACE` / `COST_MGMT_RELEASE_NAME` / UI redirect URL aligned
 4. Mirror UI OAuth client Secret → `${NAMESPACE}/${CR_NAME}-ui-oauth-client`
 5. Apply `byoi-*-credentials` Secrets into `$NAMESPACE`
@@ -116,7 +116,7 @@ kubectl -n cost-byoi-infra wait --for=condition=complete job/minio-init --timeou
 
 #### A3. Keycloak / RHBK (required for UI login)
 
-The operator never deploys Keycloak. From the **cost-onprem-chart** checkout:
+The operator never deploys Keycloak. From this repository's root:
 
 ```bash
 export COST_MGMT_NAMESPACE="$NAMESPACE"

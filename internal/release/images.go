@@ -179,6 +179,10 @@ func (b Bundle) ValidateTransition(
 			return nil
 		}
 	}
+	if !source.ReleaseManaged {
+		return fmt.Errorf("installed application images do not match declared release %s; "+
+			"keep explicit pins or select a complete supported release combination", source.ReleaseID)
+	}
 	return fmt.Errorf("no declared operator-managed upgrade edge from application release %s; "+
 		"keep explicit pins until a supported bridge release is available", source.ReleaseID)
 }

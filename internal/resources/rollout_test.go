@@ -56,8 +56,9 @@ func TestApplicationRolloutPolicies(t *testing.T) {
 	}
 	rbacProbe := RBACWorkerDeployment(cfg).Spec.Template.Spec.Containers[0].ReadinessProbe
 	if rbacProbe.Exec == nil || len(rbacProbe.Exec.Command) != 3 || rbacProbe.Exec.Command[0] != "python" ||
-		rbacProbe.TimeoutSeconds < 10 {
-		t.Fatal("RBAC readiness must work without shell utilities and allow Django startup plus the ping timeout")
+		!strings.Contains(strings.Join(rbacProbe.Exec.Command, " "), "/proc/1/cmdline") ||
+		strings.Contains(strings.Join(rbacProbe.Exec.Command, " "), "inspect") {
+		t.Fatal("RBAC readiness must check the local worker process without a broker ping")
 	}
 	listener := ListenerDeployment(cfg).Spec.Template.Spec.Containers[0]
 	if !strings.Contains(listener.Command[2], "signal.signal(signal.SIGTERM, signal.default_int_handler)") ||
@@ -65,8 +66,8 @@ func TestApplicationRolloutPolicies(t *testing.T) {
 		t.Fatal("Python PID 1 must handle SIGTERM through the listener's normal interrupt shutdown path")
 	}
 	if listener.ReadinessProbe == nil || listener.ReadinessProbe.HTTPGet == nil ||
-		listener.ReadinessProbe.HTTPGet.Path != "/readyz" || listener.ReadinessProbe.HTTPGet.Port.IntValue() != 9000 {
-		t.Fatal("listener readiness must use Koku's probe server on port 9000")
+		listener.ReadinessProbe.HTTPGet.Path != "/livez" || listener.ReadinessProbe.HTTPGet.Port.IntValue() != 9000 {
+		t.Fatal("listener readiness must use the dependency-independent liveness endpoint on port 9000")
 	}
 	if beat.ReadinessProbe == nil || beat.ReadinessProbe.Exec == nil {
 		t.Fatal("Beat must have an exec readiness probe")

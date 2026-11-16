@@ -38,7 +38,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 		var err error
 		bundle, err = release.Current()
 		if err != nil {
-			return r.upgradeConfigError(cfg, err)
+			return r.rejectUpgradeTarget(ctx, cfg, err)
 		}
 	}
 	resolveErr := bundle.Resolve(cfg)
@@ -47,7 +47,7 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 		return r.advanceUpgrade(ctx, cfg, requested, bundle, resolveErr)
 	}
 	if resolveErr != nil {
-		return r.upgradeConfigError(cfg, resolveErr)
+		return r.rejectUpgradeTarget(ctx, cfg, resolveErr)
 	}
 	if len(resources.MissingWorkloadImages(cfg)) != 0 {
 		return r.reconcileStack(ctx, cfg, true)
@@ -61,14 +61,14 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 	}
 	target := applicationRevision(cfg, bundle)
 	if err := bundle.ValidateTransition(requested, cfg.Status.Upgrade.Installed, target.Images); err != nil {
-		return r.upgradeConfigError(cfg, err)
+		return r.rejectUpgradeTarget(ctx, cfg, err)
 	}
 	needsMigration, err := r.migrationExecutionNeeded(ctx, cfg, target)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if target.ID == cfg.Status.Upgrade.Installed.ID && !needsMigration {
-		result, err := r.reconcileStack(ctx, cfg, true)
+		result, err := r.reconcileStack(ctx, cfg, true, stackOptions{discoveryAlreadyRun: true})
 		if err == nil && cfg.Status.Phase == cost.PhaseReady {
 			cfg.Status.Upgrade.Installed = applicationRevision(cfg, bundle)
 		}
@@ -89,6 +89,35 @@ func (r *CostManagementServiceConfigReconciler) reconcile(ctx context.Context, r
 	// Returning before any child write is essential: a failed outer status patch
 	// must never leave an unjournaled mutation or migration behind.
 	return ctrl.Result{RequeueAfter: requeueFast}, nil
+}
+
+// rejectUpgradeTarget keeps reconciling the last installed application spec
+// when a new target is invalid. The requested CMSC is preserved; its failure is
+// reported after the serving revision has received ordinary drift correction.
+func (r *CostManagementServiceConfigReconciler) rejectUpgradeTarget(
+	ctx context.Context, cfg *cost.CostManagementServiceConfig, cause error,
+) (ctrl.Result, error) {
+	installed := cfg.Status.Upgrade.Installed
+	if installed == nil {
+		return r.upgradeConfigError(cfg, cause)
+	}
+	var source cost.CostManagementServiceConfigSpec
+	if err := json.Unmarshal(installed.Spec.Raw, &source); err != nil {
+		return r.upgradeConfigError(cfg, fmt.Errorf("cannot reconcile installed revision after rejecting target: %w", err))
+	}
+	requested := cfg.Spec
+	cfg.Spec = source
+	cfg.Status.DiscoveredConfig = installed.DiscoveredConfig.DeepCopy()
+	result, err := r.reconcileStack(ctx, cfg, false, stackOptions{preserveUpgradeFailure: true})
+	cfg.Spec = requested
+	if err != nil {
+		return result, err
+	}
+	blockedResult, blockedErr := r.upgradeConfigError(cfg, fmt.Errorf("requested changes remain pending; reconciling the last Ready revision: %w", cause))
+	if result.RequeueAfter > 0 {
+		blockedResult.RequeueAfter = result.RequeueAfter
+	}
+	return blockedResult, blockedErr
 }
 
 func applicationRevision(cfg *cost.CostManagementServiceConfig, bundle release.Bundle) *cost.ApplicationRevision {
@@ -139,6 +168,10 @@ func (r *CostManagementServiceConfigReconciler) migrationExecutionNeeded(ctx con
 	if !reflect.DeepEqual(cfg.Status.Upgrade.Installed.Migrations, target.Migrations) {
 		return true, nil
 	}
+	return r.migrationReceiptRefreshNeeded(ctx, cfg)
+}
+
+func (r *CostManagementServiceConfigReconciler) migrationReceiptRefreshNeeded(ctx context.Context, cfg *cost.CostManagementServiceConfig) (bool, error) {
 	for _, desired := range migrationJobs(cfg) {
 		existing := &batchv1.Job{}
 		err := r.safetyReader().Get(ctx, client.ObjectKeyFromObject(desired), existing)
@@ -157,23 +190,33 @@ func (r *CostManagementServiceConfigReconciler) migrationExecutionNeeded(ctx con
 
 func (r *CostManagementServiceConfigReconciler) advanceUpgrade(ctx context.Context, cfg *cost.CostManagementServiceConfig, requested *cost.CostManagementServiceConfig, bundle release.Bundle, resolveErr error) (ctrl.Result, error) {
 	op := cfg.Status.Upgrade.Operation
-	// Maintain monitoring even when an upgrade/recovery gate blocks the stack.
-	if _, err := r.reconcileMonitoring(ctx, cfg); err != nil {
-		return ctrl.Result{}, err
-	}
-	handled, err := r.acceptUpgradeRecovery(cfg, requested, bundle, resolveErr)
+	handled, err := r.acceptUpgradeRecovery(ctx, cfg, requested, bundle, resolveErr)
 	if err != nil {
+		if _, monitorErr := r.reconcileMonitoring(ctx, cfg); monitorErr != nil {
+			return ctrl.Result{}, monitorErr
+		}
 		return r.upgradeConfigError(cfg, err)
 	}
 	if handled {
+		// A recovery request is a separate short pass before its new frozen plan
+		// executes. Keep monitoring in sync once, using the accepted request.
+		if _, err := r.reconcileMonitoring(ctx, cfg); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
-	if op.Stage == cost.UpgradeStageRollingBack || op.Stage == cost.UpgradeStageRecoveryRequired || op.Stage == cost.UpgradeStageRolledBack {
+	if op.Stage == cost.UpgradeStageRollingBack || op.Stage == cost.UpgradeStageResumingPrevious || op.Stage == cost.UpgradeStageRecoveryRequired || op.Stage == cost.UpgradeStageRolledBack {
 		cfg.Generation = op.TargetGeneration
 		return r.rollbackUpgrade(ctx, cfg)
 	}
+	return r.advanceFrozenUpgrade(ctx, cfg, requested.Spec)
+}
+
+func (r *CostManagementServiceConfigReconciler) advanceFrozenUpgrade(
+	ctx context.Context, cfg *cost.CostManagementServiceConfig, requestedSpec cost.CostManagementServiceConfigSpec,
+) (ctrl.Result, error) {
+	op := cfg.Status.Upgrade.Operation
 	// Work with the frozen target/source, never a mid-flight requested spec.
-	requestedSpec := cfg.Spec
 	var targetSpec cost.CostManagementServiceConfigSpec
 	if err := json.Unmarshal(op.Target.Spec.Raw, &targetSpec); err != nil {
 		return r.upgradeConfigError(cfg, fmt.Errorf("invalid frozen upgrade target: %w", err))
@@ -188,11 +231,15 @@ func (r *CostManagementServiceConfigReconciler) advanceUpgrade(ctx context.Conte
 	if (op.Stage == cost.UpgradeStageQuiescing || op.Stage == cost.UpgradeStageMigrating) && frozenMigrationInputsChanged(cfg, op.Target.Migrations) {
 		return r.failUpgrade(cfg, "operator migration inputs changed during this operation; use a compatible operator or explicit recovery"), nil
 	}
-
-	timeout := cfg.Spec.Upgrade.TimeoutSeconds
-	if timeout == 0 {
-		timeout = 7200
+	// The normal rollout stack owns monitoring in RollingOut. Earlier stages do
+	// not run that stack, so reconcile the frozen target exactly once here.
+	if op.Stage != cost.UpgradeStageRollingOut {
+		if _, err := r.reconcileMonitoring(ctx, cfg); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
+
+	timeout := upgradeTimeoutSeconds(cfg, op)
 	if upgradeExpired(op, timeout) {
 		return r.failUpgrade(cfg, "upgrade exceeded its execution deadline"), nil
 	}
@@ -216,11 +263,18 @@ func (r *CostManagementServiceConfigReconciler) upgradeStage(op *cost.UpgradeOpe
 }
 func (r *CostManagementServiceConfigReconciler) failUpgrade(cfg *cost.CostManagementServiceConfig, message string) ctrl.Result {
 	op := cfg.Status.Upgrade.Operation
+	// The migration phase may set UpgradeFailed before this method emits its
+	// event, so deduplicate against the persisted operation transition instead.
+	newFailure := op.Stage != cost.UpgradeStageRollingBack || op.Failure != message
 	op.Failure = message
 	r.upgradeStage(op, cost.UpgradeStageRollingBack)
 	r.setCondition(cfg, cost.ConditionUpgradeFailed, metav1.ConditionTrue, "UpgradeFailed", message)
-	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, cost.UpgradeStageRollingBack, "restoring previous application images")
-	if r.Recorder != nil {
+	availableMessage := "restoring previous application images"
+	if op.SchemaMutationPossible {
+		availableMessage = "stopping failed target workloads while database recovery is assessed"
+	}
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, cost.UpgradeStageRollingBack, availableMessage)
+	if newFailure && r.Recorder != nil {
 		r.Recorder.Event(cfg, corev1.EventTypeWarning, "UpgradeFailed", message)
 	}
 	return ctrl.Result{RequeueAfter: requeueFast}
@@ -228,11 +282,155 @@ func (r *CostManagementServiceConfigReconciler) failUpgrade(cfg *cost.CostManage
 
 func (r *CostManagementServiceConfigReconciler) rollbackUpgrade(ctx context.Context, cfg *cost.CostManagementServiceConfig) (ctrl.Result, error) {
 	op := cfg.Status.Upgrade.Operation
-	quiet, err := r.migrationWritersStopped(ctx, cfg)
+	if op.Stage == cost.UpgradeStageRecoveryRequired && !op.SchemaMutationPossible {
+		// A source rollout that timed out or became unhealthy is also a hold.
+		// Do not turn RecoveryRequired into another automatic source rollout;
+		// require a new, operation-bound Retry or ResumePrevious request.
+		return ctrl.Result{RequeueAfter: requeueDrift}, nil
+	}
+	timeout := upgradeTimeoutSeconds(cfg, op)
+	// RolledBack is a completed, serving hold. Ordinary drift correction must
+	// keep retrying transient errors even after the restoration deadline passed.
+	deadlineExceeded := op.Stage != cost.UpgradeStageRolledBack && time.Since(op.StageStartedAt.Time) > time.Duration(timeout)*time.Second
+	requestedSpec := cfg.Spec
+	defer func() { cfg.Spec = requestedSpec }()
+	var target cost.CostManagementServiceConfigSpec
+	if err := json.Unmarshal(op.Target.Spec.Raw, &target); err != nil {
+		return r.holdInvalidUpgradeTarget(ctx, cfg, op, err, deadlineExceeded)
+	}
+	cfg.Spec = target
+	cfg.Status.DiscoveredConfig = op.Target.DiscoveredConfig.DeepCopy()
+	stopped, err := r.migrationWritersStopped(ctx, cfg)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if !stopped {
+		if deadlineExceeded && op.Stage == cost.UpgradeStageRollingBack {
+			r.reportRollbackDrainStalled(cfg)
+		}
+		return ctrl.Result{RequeueAfter: requeueFast}, nil
+	}
+	if op.SchemaMutationPossible {
+		return r.holdFailedUpgradeTarget(ctx, cfg, op, deadlineExceeded)
+	}
+	return r.resumeSourceAfterSafeFailure(ctx, cfg, op, deadlineExceeded)
+}
+
+func (r *CostManagementServiceConfigReconciler) holdInvalidUpgradeTarget(
+	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, targetErr error, deadlineExceeded bool,
+) (ctrl.Result, error) {
+	names := make([]string, 0, len(op.Target.Migrations))
+	for name := range op.Target.Migrations {
+		names = append(names, name)
+	}
+	stopped, err := r.migrationWritersStoppedFor(ctx, cfg, names)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !stopped {
+		if deadlineExceeded && op.Stage == cost.UpgradeStageRollingBack {
+			r.reportRollbackDrainStalled(cfg)
+		}
+		return ctrl.Result{RequeueAfter: requeueFast}, nil
+	}
+	defer preserveProgressingTransition(cfg)()
+	quiet, err := r.quiesceApplications(ctx, cfg)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !quiet && !deadlineExceeded {
+		return ctrl.Result{RequeueAfter: requeueFast}, nil
+	}
+	return r.requireRecovery(cfg, fmt.Sprintf("frozen failed target is invalid (%v); workloads are held stopped and require manual recovery", targetErr)), nil
+}
+
+func (r *CostManagementServiceConfigReconciler) holdFailedUpgradeTarget(
+	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, deadlineExceeded bool,
+) (ctrl.Result, error) {
+	defer preserveProgressingTransition(cfg)()
+	quiet, err := r.quiesceApplications(ctx, cfg)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	missing := resources.MissingWorkloadImages(cfg)
+	if len(missing) == 0 {
+		if err := r.applyStoppedApplicationRevision(ctx, cfg); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	if !quiet {
+		if deadlineExceeded {
+			return r.requireRecovery(cfg, "rollback deadline exceeded; target workloads are being stopped and writers must remain down until database recovery"), nil
+		}
+		return ctrl.Result{RequeueAfter: requeueFast}, nil
+	}
+	if len(missing) > 0 {
+		return r.requireRecovery(cfg, fmt.Sprintf("frozen failed target has incomplete images: %v; repair the target before recovery", missing)), nil
+	}
+	if _, err := r.reconcileSharedConfig(ctx, cfg); err != nil {
+		return ctrl.Result{}, err
+	}
+	if _, err := r.reconcileMonitoring(ctx, cfg); err != nil {
+		return ctrl.Result{}, err
+	}
+	message := "failed target images are retained with workloads stopped; inspect/repair database state before resuming"
+	r.requireRecovery(cfg, message)
+	if op.Failure != "" {
+		r.setCondition(cfg, cost.ConditionUpgradeFailed, metav1.ConditionTrue, "UpgradeFailed", op.Failure)
+	}
+	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// Quiescence briefly reports Progressing=True. Keep the original transition
+// time when the completed hold returns to the same status and reason.
+func preserveProgressingTransition(cfg *cost.CostManagementServiceConfig) func() {
+	prior := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionProgressing)
+	if prior == nil {
+		return func() {}
+	}
+	prior = prior.DeepCopy()
+	return func() {
+		current := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionProgressing)
+		if current != nil && current.Status == prior.Status && current.Reason == prior.Reason {
+			current.LastTransitionTime = prior.LastTransitionTime
+		}
+	}
+}
+
+func (r *CostManagementServiceConfigReconciler) applyStoppedApplicationRevision(ctx context.Context, cfg *cost.CostManagementServiceConfig) error {
+	for _, d := range resources.ApplicationDeployments(cfg) {
+		d.Spec.Replicas = new(int32(0))
+		if err := r.apply(ctx, cfg, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *CostManagementServiceConfigReconciler) resumeSourceAfterSafeFailure(
+	ctx context.Context, cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation, deadlineExceeded bool,
+) (ctrl.Result, error) {
+	imageOnlyRetry := op.RecoveryAction == cost.RecoveryRetry && op.RecoveryImageOnly
+	if op.RecoveryRequestID != "" && !imageOnlyRetry && op.Stage == cost.UpgradeStageRollingBack {
+		// A recovery action may arrive while old Pods or a scheduled writer are
+		// still draining (for example, after the rollback deadline). Do not resume
+		// the source until that explicit recovery path has completed quiescence.
+		// Legacy journals without a classification retain this conservative barrier.
+		// A safe image-only Retry must not drain unchanged application writers.
+		quiet, err := r.quiesceApplications(ctx, cfg)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !quiet {
+			if deadlineExceeded {
+				r.reportRollbackDrainStalled(cfg)
+			}
+			return ctrl.Result{RequeueAfter: requeueFast}, nil
+		}
+		// Persist the completed drain barrier before applying the source revision.
+		// Otherwise each reconcile would reapply the failed target at zero first,
+		// continually resetting the source rollout's observed generation.
+		r.upgradeStage(op, cost.UpgradeStageResumingPrevious)
 		return ctrl.Result{RequeueAfter: requeueFast}, nil
 	}
 	if op.Source == nil {
@@ -245,46 +443,58 @@ func (r *CostManagementServiceConfigReconciler) rollbackUpgrade(ctx context.Cont
 	cfg.Spec = source
 	cfg.Status.DiscoveredConfig = op.Source.DiscoveredConfig.DeepCopy()
 	if missing := resources.MissingWorkloadImages(cfg); len(missing) > 0 {
-		return r.upgradeConfigError(cfg, fmt.Errorf("frozen source has incomplete images: %v", missing))
+		return r.requireRecovery(cfg, fmt.Sprintf("frozen source has incomplete images: %v; provide a runnable recovery target", missing)), nil
 	}
-	if op.SchemaMutationPossible {
-		// Restore source images immediately, but never start an old process
-		// against a schema that may have been partly upgraded.
-		if _, err := r.reconcileSharedConfig(ctx, cfg); err != nil {
-			return ctrl.Result{}, err
+	result, err := r.reconcileStack(ctx, cfg, false)
+	if err != nil {
+		if deadlineExceeded && !errors.Is(err, context.Canceled) {
+			return r.requireRecovery(cfg, fmt.Sprintf("rollback deadline exceeded while reconciling the source revision: %v", err)), nil
 		}
-		for _, d := range resources.ApplicationDeployments(cfg) {
-			d.Spec.Replicas = new(int32(0))
-			if err := r.apply(ctx, cfg, d); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		if _, err := r.quiesceApplications(ctx, cfg); err != nil {
-			return ctrl.Result{}, err
-		}
-		if op.Stage != cost.UpgradeStageRecoveryRequired && r.Recorder != nil {
-			r.Recorder.Event(cfg, corev1.EventTypeWarning, cost.UpgradeStageRecoveryRequired, "previous images restored with workloads stopped; inspect/repair database state before resuming")
-		}
-		r.upgradeStageIfChanged(op, cost.UpgradeStageRecoveryRequired)
-		r.setCondition(cfg, cost.ConditionRecoveryRequired, metav1.ConditionTrue, "SchemaStateUnknown", "previous images restored; explicit Retry or ResumePrevious recovery is required for operation "+op.ID)
-		r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, cost.UpgradeStageRecoveryRequired, "application writers remain stopped")
-	} else {
-		result, err := r.reconcileStack(ctx, cfg, false)
-		if err != nil {
-			return result, err
-		}
-		if cfg.Status.Phase != cost.PhaseReady {
-			return result, nil
-		}
-		r.upgradeStageIfChanged(op, cost.UpgradeStageRolledBack)
-		r.setCondition(cfg, cost.ConditionSchemaUpToDate, metav1.ConditionTrue, "SourceRestored", "previous revision resumed before any migration execution, or after explicit recovery")
-		r.setCondition(cfg, cost.ConditionRecoveryRequired, metav1.ConditionFalse, "SourceRestored", "")
+		return result, err
 	}
+	if cfg.Status.Phase != cost.PhaseReady {
+		if deadlineExceeded {
+			return r.requireRecovery(cfg, "rollback deadline exceeded before the source revision became ready; inspect workloads and database state before recovery"), nil
+		}
+		return result, nil
+	}
+	r.upgradeStageIfChanged(op, cost.UpgradeStageRolledBack)
+	r.setCondition(cfg, cost.ConditionSchemaUpToDate, metav1.ConditionTrue, "SourceRestored", "previous revision resumed before any migration execution, or after explicit recovery")
+	r.setCondition(cfg, cost.ConditionRecoveryRequired, metav1.ConditionFalse, "SourceRestored", "")
 	r.setCondition(cfg, cost.ConditionUpgradeFailed, metav1.ConditionTrue, "UpgradeFailed", op.Failure)
 	r.setCondition(cfg, cost.ConditionDegraded, metav1.ConditionTrue, "UpgradeFailed", op.Failure)
 	r.setCondition(cfg, cost.ConditionProgressing, metav1.ConditionFalse, op.Stage, "target upgrade did not complete")
 	cfg.Status.Phase = cost.PhaseDegraded
 	return ctrl.Result{RequeueAfter: requeueDrift}, nil
+}
+
+// reportRollbackDrainStalled reports a deadline without bypassing writer exclusion.
+func (r *CostManagementServiceConfigReconciler) reportRollbackDrainStalled(cfg *cost.CostManagementServiceConfig) {
+	const reason = "RollbackDrainStalled"
+	message := "rollback deadline exceeded while waiting for application Pods or migration writers to stop; inspect active Pods and Jobs"
+	previous := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionDegraded)
+	newEvent := previous == nil || previous.Status != metav1.ConditionTrue || previous.Reason != reason
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, reason, message)
+	r.setCondition(cfg, cost.ConditionDegraded, metav1.ConditionTrue, reason, message)
+	cfg.Status.Phase = cost.PhaseDegraded
+	if newEvent && r.Recorder != nil {
+		r.Recorder.Event(cfg, corev1.EventTypeWarning, reason, message)
+	}
+}
+
+func (r *CostManagementServiceConfigReconciler) requireRecovery(cfg *cost.CostManagementServiceConfig, message string) ctrl.Result {
+	op := cfg.Status.Upgrade.Operation
+	if op.Stage != cost.UpgradeStageRecoveryRequired && r.Recorder != nil {
+		r.Recorder.Event(cfg, corev1.EventTypeWarning, cost.UpgradeStageRecoveryRequired, message)
+	}
+	r.upgradeStageIfChanged(op, cost.UpgradeStageRecoveryRequired)
+	r.setCondition(cfg, cost.ConditionRecoveryRequired, metav1.ConditionTrue, "RecoveryRequired", message+"; submit an explicit Retry or ResumePrevious request for operation "+op.ID)
+	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, cost.UpgradeStageRecoveryRequired, "application availability requires operator recovery")
+	r.setCondition(cfg, cost.ConditionUpgradeFailed, metav1.ConditionTrue, "UpgradeFailed", message)
+	r.setCondition(cfg, cost.ConditionDegraded, metav1.ConditionTrue, "UpgradeFailed", message)
+	r.setCondition(cfg, cost.ConditionProgressing, metav1.ConditionFalse, cost.UpgradeStageRecoveryRequired, message)
+	cfg.Status.Phase = cost.PhaseDegraded
+	return ctrl.Result{RequeueAfter: requeueDrift}
 }
 func (r *CostManagementServiceConfigReconciler) upgradeStageIfChanged(op *cost.UpgradeOperation, stage string) {
 	if op.Stage != stage {
@@ -292,7 +502,11 @@ func (r *CostManagementServiceConfigReconciler) upgradeStageIfChanged(op *cost.U
 	}
 }
 func (r *CostManagementServiceConfigReconciler) upgradeConfigError(cfg *cost.CostManagementServiceConfig, err error) (ctrl.Result, error) {
-	r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, "UpgradeBlocked", err.Error())
+	// A rejected target does not take an already serving installed revision
+	// offline. Keep its last known availability while reporting the bad request.
+	if cfg.Status.Upgrade.Installed == nil || !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionAvailable) {
+		r.setCondition(cfg, cost.ConditionAvailable, metav1.ConditionFalse, "UpgradeBlocked", err.Error())
+	}
 	r.setCondition(cfg, cost.ConditionDegraded, metav1.ConditionTrue, "UpgradeBlocked", err.Error())
 	r.setCondition(cfg, cost.ConditionProgressing, metav1.ConditionFalse, "UpgradeBlocked", err.Error())
 	cfg.Status.Phase = cost.PhaseDegraded
@@ -353,7 +567,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileInitial(ctx context.Con
 	// An old operator has no durable source snapshot. Adopt only while the
 	// requested generation still matches the last reconciled installation.
 	blocked := apimeta.FindStatusCondition(cfg.Status.Conditions, cost.ConditionDegraded)
-	if cfg.Status.Phase == cost.PhaseReady || (blocked != nil && strings.HasPrefix(blocked.Message, "upgrade baseline unknown")) {
+	available := apimeta.IsStatusConditionTrue(cfg.Status.Conditions, cost.ConditionAvailable)
+	if available || (blocked != nil && strings.HasPrefix(blocked.Message, "upgrade baseline unknown")) {
 		baseline, err := r.legacyBaselineMatches(ctx, cfg)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -585,13 +800,14 @@ func (r *CostManagementServiceConfigReconciler) recoverUpgrade(ctx context.Conte
 }
 
 func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
-	cfg, requested *cost.CostManagementServiceConfig, bundle release.Bundle, resolveErr error,
+	ctx context.Context, cfg, requested *cost.CostManagementServiceConfig, bundle release.Bundle, resolveErr error,
 ) (bool, error) {
 	op := cfg.Status.Upgrade.Operation
 	request := cfg.Spec.Upgrade.Recovery
 	if (op.Stage != cost.UpgradeStageRecoveryRequired && op.Stage != cost.UpgradeStageRolledBack) || request == nil || request.OperationID != op.ID || request.RequestID == "" || request.RequestID == op.RecoveryRequestID {
 		return false, nil
 	}
+	imageOnly := false
 	switch request.Action {
 	case cost.RecoveryRetry:
 		if resolveErr != nil {
@@ -604,9 +820,26 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 		if err := bundle.ValidateTransition(requested, op.Source, target.Images); err != nil {
 			return true, err
 		}
+		imageOnly = !op.SchemaMutationPossible && op.Source != nil && reflect.DeepEqual(op.Source.Migrations, target.Migrations)
+		if imageOnly {
+			// ResumePrevious retains failed Job evidence. A later Retry of the
+			// source still needs to replace that receipt before becoming Ready.
+			refresh, err := r.migrationReceiptRefreshNeeded(ctx, cfg)
+			if err != nil {
+				return true, err
+			}
+			imageOnly = !refresh
+		}
 		op.Target = *target
 		op.TargetGeneration = cfg.Generation
-		r.upgradeStage(op, cost.UpgradeStageRecovering)
+		if imageOnly {
+			// A failed image-only rollout has not touched the database. Retry the
+			// requested application images directly without stopping writers or
+			// replaying completed migration Jobs.
+			r.upgradeStage(op, cost.UpgradeStageRollingOut)
+		} else {
+			r.upgradeStage(op, cost.UpgradeStageRecovering)
+		}
 	case cost.RecoveryResumePrevious:
 		// Only this explicit action attests that external repair/restore made
 		// the recorded source database/configuration safe to resume.
@@ -616,16 +849,29 @@ func (r *CostManagementServiceConfigReconciler) acceptUpgradeRecovery(
 		return true, fmt.Errorf("unknown recovery action %q", request.Action)
 	}
 	op.RecoveryRequestID = request.RequestID
+	op.RecoveryAction = request.Action
+	op.RecoveryImageOnly = imageOnly
 	op.StartedAt = metav1.Now()
 	return true, nil
 }
 
 func upgradeExpired(op *cost.UpgradeOperation, timeout int32) bool {
 	switch op.Stage {
-	case cost.UpgradeStageRollingBack, cost.UpgradeStageRecoveryRequired, cost.UpgradeStageRolledBack:
+	case cost.UpgradeStageRollingBack, cost.UpgradeStageResumingPrevious, cost.UpgradeStageRecoveryRequired, cost.UpgradeStageRolledBack:
 		return false
 	}
 	return time.Since(op.StartedAt.Time) > time.Duration(timeout)*time.Second
+}
+
+func upgradeTimeoutSeconds(cfg *cost.CostManagementServiceConfig, op *cost.UpgradeOperation) int32 {
+	var frozen cost.CostManagementServiceConfigSpec
+	if op != nil && json.Unmarshal(op.Target.Spec.Raw, &frozen) == nil && frozen.Upgrade.TimeoutSeconds > 0 {
+		return frozen.Upgrade.TimeoutSeconds
+	}
+	if cfg.Spec.Upgrade.TimeoutSeconds > 0 {
+		return cfg.Spec.Upgrade.TimeoutSeconds
+	}
+	return 7200
 }
 func frozenMigrationInputsChanged(cfg *cost.CostManagementServiceConfig, expected map[string]string) bool {
 	jobs := migrationJobs(cfg)

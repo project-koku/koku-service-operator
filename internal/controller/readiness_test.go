@@ -8,8 +8,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
 func TestIsDeploymentReady(t *testing.T) {
@@ -167,6 +170,30 @@ func TestReadinessBackoff(t *testing.T) {
 			got := readinessBackoff(time.Now().Add(-tt.age))
 			if got != tt.want {
 				t.Fatalf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOldPodTerminationWaitAllowsGracefulShutdownAndEventuallyDegrades(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		age      time.Duration
+		degraded bool
+	}{
+		{name: "within worker grace plus readiness margin", age: time.Hour + time.Minute, degraded: false},
+		{name: "stuck beyond worker grace plus readiness margin", age: oldPodTerminationTimeout + time.Minute, degraded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &CostManagementServiceConfigReconciler{}
+			cfg := &costv1alpha1.CostManagementServiceConfig{}
+			cfg.Status.Conditions = []metav1.Condition{{
+				Type: costv1alpha1.ConditionAvailable, Status: metav1.ConditionFalse,
+				Reason: reasonWaitingForOldPods, LastTransitionTime: metav1.NewTime(time.Now().Add(-tc.age)),
+			}}
+			result := r.notReadyWait(cfg, reasonWaitingForOldPods, "waiting for old worker Pod to terminate", "worker")
+			if result.RequeueAfter == 0 || apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDegraded) != tc.degraded {
+				t.Fatalf("old-Pod wait degraded=%v, want %v", apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDegraded), tc.degraded)
 			}
 		})
 	}

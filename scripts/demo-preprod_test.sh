@@ -87,9 +87,17 @@ assert_contains "$cr" "insecureSkipVerify: true" "skip-verify for lab router CA"
 assert_contains "$cr" $'  ros:\n    enabled: false' "ROS stays off (sample CR, not a demo env var)"
 rm -f "$tmp"
 
-# --- Chart root: worktree ROOT is not the sibling of cost-onprem-chart ---
-got="$(default_chart_root "/tmp/koku-service-operator/.worktrees/cost-7688-gaps" "/tmp/koku-service-operator/.git")"
-assert_eq "$got" "/tmp/cost-onprem-chart" "chart sits next to the main git dir, not the worktree"
+# --- Demo uses the in-repo Keycloak provisioner by default ---
+demo_root="$(mktemp -d)"
+mkdir -p "${demo_root}/scripts/lib"
+cp -p "${ROOT}/scripts/demo-preprod.sh" "${ROOT}/scripts/demo-preprod.env.example" "${demo_root}/scripts/"
+cp -p "${ROOT}/scripts/lib/demo-preprod.bash" "${demo_root}/scripts/lib/"
+plan="$(RHBK_SCRIPT= "${demo_root}/scripts/demo-preprod.sh" --dry-run)"
+assert_contains "$plan" "RHBK script: ${demo_root}/scripts/deploy-rhbk.sh" "demo defaults to in-repo RHBK script"
+assert_not_contains "$plan" "CHART_ROOT" "demo does not require a chart checkout"
+rm -rf "$demo_root"
+plan="$(RHBK_SCRIPT=/tmp/custom-deploy-rhbk.sh ./scripts/demo-preprod.sh --dry-run)"
+assert_contains "$plan" "RHBK script: /tmp/custom-deploy-rhbk.sh" "demo accepts an RHBK script override"
 
 # --- Preflight must surface the real API error (expired Cluster Bot, etc.) ---
 stub_dir="$(mktemp -d)"

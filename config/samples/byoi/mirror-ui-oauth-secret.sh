@@ -13,7 +13,7 @@
 # {release}-ui-oauth-client client-id/client-secret).
 #
 # Prerequisites:
-#   - Keycloak/RHBK deployed (e.g. cost-onprem-chart scripts/deploy-rhbk.sh)
+#   - Keycloak/RHBK deployed (e.g. scripts/deploy-rhbk.sh)
 #   - Secret keycloak-client-secret-cost-management-ui in KEYCLOAK_NAMESPACE
 #
 # Usage (from operator repo root):
@@ -46,7 +46,7 @@ done
 
 if ! kubectl get secret "$KEYCLOAK_UI_SECRET" -n "$KEYCLOAK_NAMESPACE" >/dev/null 2>&1; then
   echo "error: Secret ${KEYCLOAK_UI_SECRET} not found in namespace ${KEYCLOAK_NAMESPACE}" >&2
-  echo "  Deploy Keycloak first (cost-onprem-chart scripts/deploy-rhbk.sh)." >&2
+  echo "  Deploy Keycloak first (scripts/deploy-rhbk.sh)." >&2
   exit 1
 fi
 

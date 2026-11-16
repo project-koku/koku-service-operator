@@ -3116,6 +3116,19 @@ spec:
                         type: string
                       id:
                         type: string
+                      recoveryAction:
+                        description: |-
+                          RecoveryAction records the accepted action independently of later spec edits.
+                          Empty on journals written before action tracking; those retain the drain barrier.
+                        enum:
+                        - Retry
+                        - ResumePrevious
+                        type: string
+                      recoveryImageOnly:
+                        description: |-
+                          RecoveryImageOnly records that the accepted Retry needs neither migrations
+                          nor writer drain. Missing on older journals, which retain the drain barrier.
+                        type: boolean
                       recoveryRequestID:
                         type: string
                       schemaMutationPossible:
@@ -3198,6 +3211,7 @@ spec:
                         - RecoveryRequired
                         - RolledBack
                         - Recovering
+                        - ResumingPrevious
                         type: string
                       stageStartedAt:
                         format: date-time
