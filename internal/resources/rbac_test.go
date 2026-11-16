@@ -179,3 +179,46 @@ func TestRBACWorkerDeployment(t *testing.T) {
 		t.Errorf("Command = %v, want celery", c.Command)
 	}
 }
+
+func goBackendCfg() *costv1alpha1.CostManagementServiceConfig {
+	return &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "test"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image:   costv1alpha1.ImageSpec{Repository: "rbac-go", Tag: "v0.1.0"},
+				Backend: "go",
+			},
+		},
+	}
+}
+
+func TestRBACAPIDeploymentDjangoDefault(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "test"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image: costv1alpha1.ImageSpec{Repository: "rbac", Tag: "test"},
+			},
+		},
+	}
+	c := RBACAPIDeployment(cfg).Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 1 || c.Command[0] != "gunicorn" {
+		t.Errorf("Command = %v, want [gunicorn]", c.Command)
+	}
+	if c.WorkingDir != "/opt/rbac/rbac" {
+		t.Errorf("WorkingDir = %q, want /opt/rbac/rbac", c.WorkingDir)
+	}
+}
+
+func TestRBACAPIDeploymentGoBackend(t *testing.T) {
+	c := RBACAPIDeployment(goBackendCfg()).Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-go" || c.Command[1] != "serve" {
+		t.Errorf("Command = %v, want [/usr/local/bin/rbac-go serve]", c.Command)
+	}
+	if len(c.Args) != 2 || c.Args[0] != "--addr" || c.Args[1] != ":8080" {
+		t.Errorf("Args = %v, want [--addr :8080]", c.Args)
+	}
+	if c.WorkingDir != "" {
+		t.Errorf("WorkingDir = %q, want empty (image default)", c.WorkingDir)
+	}
+}

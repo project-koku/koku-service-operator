@@ -531,19 +531,22 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 			return Result{}, fmt.Errorf("configmap %s: %w", cm.Name, err)
 		}
 	}
-	permSeedCM, err := resources.RBACSeedPermissionsConfigMap(cfg)
-	if err != nil {
-		return Result{}, fmt.Errorf("rbac seed permissions configmap: %w", err)
-	}
-	if err := r.apply(ctx, cfg, permSeedCM); err != nil {
-		return Result{}, fmt.Errorf("configmap %s: %w", permSeedCM.Name, err)
-	}
-	defSeedCM, err := resources.RBACSeedDefinitionsConfigMap(cfg)
-	if err != nil {
-		return Result{}, fmt.Errorf("rbac seed definitions configmap: %w", err)
-	}
-	if err := r.apply(ctx, cfg, defSeedCM); err != nil {
-		return Result{}, fmt.Errorf("configmap %s: %w", defSeedCM.Name, err)
+	// Django-only seed JSON: rbac-go compiles its seed set into the binary.
+	if !resources.RBACBackendIsGo(cfg) {
+		permSeedCM, err := resources.RBACSeedPermissionsConfigMap(cfg)
+		if err != nil {
+			return Result{}, fmt.Errorf("rbac seed permissions configmap: %w", err)
+		}
+		if err := r.apply(ctx, cfg, permSeedCM); err != nil {
+			return Result{}, fmt.Errorf("configmap %s: %w", permSeedCM.Name, err)
+		}
+		defSeedCM, err := resources.RBACSeedDefinitionsConfigMap(cfg)
+		if err != nil {
+			return Result{}, fmt.Errorf("rbac seed definitions configmap: %w", err)
+		}
+		if err := r.apply(ctx, cfg, defSeedCM); err != nil {
+			return Result{}, fmt.Errorf("configmap %s: %w", defSeedCM.Name, err)
+		}
 	}
 
 	// ServiceAccount (skipped when costManagement.serviceAccount.create=false).
@@ -795,10 +798,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 	}
 
 	// RBAC API + worker (must be up before Koku API starts serving requests).
-	rbacObjs := []client.Object{
-		resources.RBACAPIDeployment(cfg),
-		resources.RBACAPIService(cfg),
-		resources.RBACWorkerDeployment(cfg),
+	rbacObjs, err := r.rbacObjects(ctx, cfg)
+	if err != nil {
+		return Result{}, err
 	}
 	for _, obj := range rbacObjs {
 		if err := r.apply(ctx, cfg, obj); err != nil {
@@ -829,14 +831,8 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 
 	// RBAC worker is independent of Available: surface it as its own
 	// condition so a down worker is not hidden behind RBACReady=True.
-	workerReady, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameRBACWorker(cfg))
-	if err != nil {
+	if err := r.reconcileRBACWorkerCondition(ctx, cfg); err != nil {
 		return Result{}, err
-	}
-	if !workerReady {
-		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionFalse, reasonWaitingForRBACWorker, msgWaitingForRBACWorker)
-	} else {
-		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionTrue, reasonRBACWorkerAvailable, "")
 	}
 
 	// Gate on the RBAC API (not the worker). Koku and Envoy call this
@@ -854,6 +850,43 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 	r.setCondition(cfg, costv1alpha1.ConditionRBACReady, metav1.ConditionTrue, reasonRBACAvailable, "")
 
 	return r.waitForCoreServiceReadiness(ctx, cfg)
+}
+
+// rbacObjects returns the RBAC objects to apply. The rbac-go backend is
+// workerless: the Celery worker is deleted (garbage-collected) instead of
+// applied when spec.rbac.backend is "go".
+func (r *CostManagementServiceConfigReconciler) rbacObjects(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) ([]client.Object, error) {
+	objs := []client.Object{
+		resources.RBACAPIDeployment(cfg),
+		resources.RBACAPIService(cfg),
+	}
+	if !resources.RBACBackendIsGo(cfg) {
+		return append(objs, resources.RBACWorkerDeployment(cfg)), nil
+	}
+	if err := r.Delete(ctx, resources.RBACWorkerDeployment(cfg)); err != nil && !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("delete rbac worker deployment: %w", err)
+	}
+	return objs, nil
+}
+
+// reconcileRBACWorkerCondition publishes RBACWorkerReady as its own condition
+// so a down worker is not hidden behind RBACReady=True. The rbac-go backend has
+// no worker, so it is always reported ready there.
+func (r *CostManagementServiceConfigReconciler) reconcileRBACWorkerCondition(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
+	if resources.RBACBackendIsGo(cfg) {
+		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionTrue, reasonRBACWorkerAvailable, "")
+		return nil
+	}
+	workerReady, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameRBACWorker(cfg))
+	if err != nil {
+		return err
+	}
+	if !workerReady {
+		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionFalse, reasonWaitingForRBACWorker, msgWaitingForRBACWorker)
+		return nil
+	}
+	r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionTrue, reasonRBACWorkerAvailable, "")
+	return nil
 }
 
 func (r *CostManagementServiceConfigReconciler) waitForCoreServiceReadiness(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {

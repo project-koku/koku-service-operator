@@ -157,6 +157,9 @@ func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag st
 
 	env := rbacMigrationEnv(cfg)
 	script := rbacMigrationScript()
+	if RBACBackendIsGo(cfg) {
+		script = rbacGoMigrationScript()
+	}
 
 	seedVols := rbacSeedVolumes(cfg)
 	vols := make([]corev1.Volume, 0, 1+len(seedVols))
@@ -164,12 +167,16 @@ func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag st
 		Name:         "tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
-	vols = append(vols, seedVols...)
+	if !RBACBackendIsGo(cfg) {
+		vols = append(vols, seedVols...)
+	}
 
 	seedMounts := rbacSeedVolumeMounts()
 	mounts := make([]corev1.VolumeMount, 0, 1+len(seedMounts))
 	mounts = append(mounts, corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"})
-	mounts = append(mounts, seedMounts...)
+	if !RBACBackendIsGo(cfg) {
+		mounts = append(mounts, seedMounts...)
+	}
 
 	host := DatabaseHost(cfg)
 	dbPort := cfg.Spec.Database.Port
@@ -202,6 +209,18 @@ echo "Seeding permissions, roles, and groups..."
 python manage.py seeds --skip-notifications
 echo "✓ Seeding complete"
 echo "=== insights-rbac migration job completed ==="`
+}
+
+func rbacGoMigrationScript() string {
+	return `set -e
+echo "=== rbac-go migration job ==="
+rbac-go migrate
+echo "✓ Migrations complete"
+
+echo "Seeding roles..."
+rbac-go seed
+echo "✓ Seeding complete"
+echo "=== rbac-go migration job completed ==="`
 }
 
 // -----------------------------------------------------------------------------
