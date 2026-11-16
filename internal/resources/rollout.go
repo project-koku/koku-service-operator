@@ -34,10 +34,16 @@ func ApplicationRollout(d *appsv1.Deployment) *appsv1.Deployment {
 
 // ApplicationDeployments is the complete enabled set used for completion and
 // recovery. A zero-replica worker remains in the set as an intentionally off target.
+// The experimental rbac-go backend is workerless, so RBACWorkerDeployment is
+// omitted when spec.rbac.backend is "go" (matching rbacObjects, which deletes it).
 func ApplicationDeployments(cfg *costv1alpha1.CostManagementServiceConfig) []*appsv1.Deployment {
 	deployments := []*appsv1.Deployment{KokuAPIDeployment(cfg), MasuDeployment(cfg), ListenerDeployment(cfg),
-		RBACAPIDeployment(cfg), RBACWorkerDeployment(cfg), CeleryBeatDeployment(cfg),
-		IngressDeployment(cfg), EnvoyDeployment(cfg), UIDeployment(cfg)}
+		RBACAPIDeployment(cfg)}
+	if !RBACBackendIsGo(cfg) {
+		deployments = append(deployments, RBACWorkerDeployment(cfg))
+	}
+	deployments = append(deployments, CeleryBeatDeployment(cfg),
+		IngressDeployment(cfg), EnvoyDeployment(cfg), UIDeployment(cfg))
 	deployments = append(deployments, CeleryWorkerDeployments(cfg)...)
 	if costv1alpha1.ROSEnabled(cfg) {
 		deployments = append(deployments, KruizeDeployment(cfg), ROSAPIDeployment(cfg), ROSProcessorDeployment(cfg), ROSPollerDeployment(cfg), ROSHousekeeperDeployment(cfg))
