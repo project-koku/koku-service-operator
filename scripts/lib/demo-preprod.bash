@@ -16,6 +16,8 @@ patch_operator_dockerfile() {
     -e 's|COPY --from=builder /workspace/wait-for /wait-for|COPY --from=builder /tmp/wait-for /wait-for|' \
     "$file" >"$tmp"
   mv "$tmp" "$file"
+  # Shipped Dockerfile already writes manager/wait-for/rbac-mini under /tmp|/out;
+  # the substitutions above are idempotent no-ops when those paths are present.
 }
 
 # Fill the BYOI sample CR: apps domain, public Keycloak issuer, lab TLS skip-verify.

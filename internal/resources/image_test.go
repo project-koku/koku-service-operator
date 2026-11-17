@@ -78,6 +78,33 @@ func TestMissingWorkloadImages_EmptyCR(t *testing.T) {
 	}
 }
 
+func TestMissingWorkloadImages_GoBackendSkipsRBACImage(t *testing.T) {
+	t.Parallel()
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			Auth: costv1alpha1.AuthConfig{
+				Envoy: costv1alpha1.EnvoySpec{Image: costv1alpha1.ImageSpec{Repository: "e", Tag: "1"}},
+			},
+			UI: costv1alpha1.UIConfig{
+				OAuthProxy: costv1alpha1.OAuthProxySpec{Image: costv1alpha1.ImageSpec{Repository: "o", Tag: "1"}},
+				App:        costv1alpha1.UIAppSpec{Image: costv1alpha1.ImageSpec{Repository: "u", Tag: "1"}},
+			},
+			CostManagement: costv1alpha1.CostManagementConfig{
+				API: costv1alpha1.KokuAPISpec{Image: costv1alpha1.ImageSpec{Repository: "k", Tag: "1"}},
+			},
+			RBAC:    costv1alpha1.RBACConfig{Backend: "go"},
+			Ingress: costv1alpha1.IngressConfig{Image: costv1alpha1.ImageSpec{Repository: "i", Tag: "1"}},
+		},
+	}
+	missing := MissingWorkloadImages(cfg)
+	if slices.Contains(missing, "spec.rbac.image") {
+		t.Fatalf("go backend must not require spec.rbac.image, got %v", missing)
+	}
+	if len(missing) != 0 {
+		t.Errorf("unexpected missing images: %v", missing)
+	}
+}
+
 func TestMissingWorkloadImages_EmptyCR_DefaultBYOIDoesNotRequireBundledDBCache(t *testing.T) {
 	t.Parallel()
 	missing := MissingWorkloadImages(&costv1alpha1.CostManagementServiceConfig{})

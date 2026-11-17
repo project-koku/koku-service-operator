@@ -1,0 +1,2 @@
+# Placeholder so Dockerfile COPY rbac-mini-src/ works in CI.
+# make prepare-rbac-mini-src fills this when RBAC_MINI_LOCAL_DIR is set.

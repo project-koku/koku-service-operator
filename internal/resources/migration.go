@@ -148,11 +148,16 @@ echo "=== ROS migrations completed ==="`
 // Mounts embedded rbac-config JSON into insights-rbac seed paths, then runs
 // manage.py seeds (permissions, roles, groups) so Default admin access
 // includes admin_default cost-management/sources roles.
-// Returns nil when spec.rbac.image repository or tag is unset.
+// Returns nil when the workload image cannot be resolved (missing
+// spec.rbac.image for django, or empty OperatorImage for go).
 func RBACMigrationJob(cfg *costv1alpha1.CostManagementServiceConfig, imageTag string) *batchv1.Job {
-	image, ok := ImageRef(cfg.Spec.RBAC.Image)
+	image, ok := rbacWorkloadImage(cfg)
 	if !ok {
 		return nil
+	}
+	if RBACBackendIsGo(cfg) {
+		// Operator image ref is the upgrade key for embedded Mini; ignore CR tag.
+		imageTag = OperatorImage
 	}
 
 	env := rbacMigrationEnv(cfg)
@@ -213,14 +218,14 @@ echo "=== insights-rbac migration job completed ==="`
 
 func rbacGoMigrationScript() string {
 	return `set -e
-echo "=== rbac-go migration job ==="
-rbac-go migrate
+echo "=== rbac-mini migration job ==="
+/usr/local/bin/rbac-mini migrate
 echo "✓ Migrations complete"
 
 echo "Seeding roles..."
-rbac-go seed
+/usr/local/bin/rbac-mini seed
 echo "✓ Seeding complete"
-echo "=== rbac-go migration job completed ==="`
+echo "=== rbac-mini migration job completed ==="`
 }
 
 // -----------------------------------------------------------------------------

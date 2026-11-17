@@ -211,14 +211,66 @@ func TestRBACAPIDeploymentDjangoDefault(t *testing.T) {
 }
 
 func TestRBACAPIDeploymentGoBackend(t *testing.T) {
-	c := RBACAPIDeployment(goBackendCfg()).Spec.Template.Spec.Containers[0]
-	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-go" || c.Command[1] != "serve" {
-		t.Errorf("Command = %v, want [/usr/local/bin/rbac-go serve]", c.Command)
+	old := OperatorImage
+	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
+	t.Cleanup(func() { OperatorImage = old })
+
+	cfg := goBackendCfg()
+	c := RBACAPIDeployment(cfg).Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 2 || c.Command[0] != "/usr/local/bin/rbac-mini" || c.Command[1] != "serve" {
+		t.Errorf("Command = %v, want [/usr/local/bin/rbac-mini serve]", c.Command)
 	}
 	if len(c.Args) != 2 || c.Args[0] != "--addr" || c.Args[1] != ":8080" {
 		t.Errorf("Args = %v, want [--addr :8080]", c.Args)
 	}
 	if c.WorkingDir != "" {
 		t.Errorf("WorkingDir = %q, want empty (image default)", c.WorkingDir)
+	}
+	if c.Image != OperatorImage {
+		t.Errorf("Image = %q, want OperatorImage %q (ignore spec.rbac.image)", c.Image, OperatorImage)
+	}
+}
+
+func TestRBACAPIDeploymentDjangoUsesSpecImage(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "test"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image: costv1alpha1.ImageSpec{Repository: "quay.io/test/insights-rbac", Tag: "v1"},
+			},
+		},
+	}
+	c := RBACAPIDeployment(cfg).Spec.Template.Spec.Containers[0]
+	if c.Image != "quay.io/test/insights-rbac:v1" {
+		t.Errorf("Image = %q, want quay.io/test/insights-rbac:v1", c.Image)
+	}
+}
+
+func TestRBACWorkloadImage(t *testing.T) {
+	old := OperatorImage
+	t.Cleanup(func() { OperatorImage = old })
+
+	django := &costv1alpha1.CostManagementServiceConfig{
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image: costv1alpha1.ImageSpec{Repository: "quay.io/test/rbac", Tag: "v2"},
+			},
+		},
+	}
+	got, ok := rbacWorkloadImage(django)
+	if !ok || got != "quay.io/test/rbac:v2" {
+		t.Errorf("django rbacWorkloadImage = %q, %v; want quay.io/test/rbac:v2, true", got, ok)
+	}
+
+	OperatorImage = "quay.io/project-koku/koku-service-operator:dev"
+	goCfg := goBackendCfg()
+	got, ok = rbacWorkloadImage(goCfg)
+	if !ok || got != OperatorImage {
+		t.Errorf("go rbacWorkloadImage = %q, %v; want %q, true", got, ok, OperatorImage)
+	}
+
+	OperatorImage = ""
+	if _, ok := rbacWorkloadImage(goCfg); ok {
+		t.Error("go backend with empty OperatorImage must fail closed")
 	}
 }

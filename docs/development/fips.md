@@ -1,12 +1,14 @@
 # Native Go FIPS builds and verification
 
-The release image builds both `/manager` and `/wait-for` with the Red Hat Go
-toolchain and its native Go cryptographic module. This implements the security
-goal of [COST-8215](https://redhat.atlassian.net/browse/COST-8215) using native
-cryptography rather than the ticket's originally prescribed CGO/OpenSSL backend.
-The ticket's implementation-specific acceptance criteria need to reflect this
-decision. The operator image's evidence does not establish compliance of Envoy,
-Keycloak, Koku, or other managed applications.
+The release image builds `/manager`, `/wait-for`, and `/usr/local/bin/rbac-mini`
+with the Red Hat Go toolchain and its native Go cryptographic module. This
+implements the security goal of [COST-8215](https://redhat.atlassian.net/browse/COST-8215)
+using native cryptography rather than the ticket's originally prescribed
+CGO/OpenSSL backend. The ticket's implementation-specific acceptance criteria
+need to reflect this decision. The operator image's evidence does not establish
+compliance of Envoy, Keycloak, Koku, or other managed applications. `rbac-mini`
+is the embedded Go RBAC backend ([COST-8610](https://redhat.atlassian.net/browse/COST-8610));
+see [rbac-backend-go.md](rbac-backend-go.md).
 
 ## Build contract
 
@@ -40,7 +42,7 @@ make docker-build IMG=koku-service-operator:fips-check
 make verify-fips IMG=koku-service-operator:fips-check
 ```
 
-`verify-fips` checks both executables in the final runtime image:
+`verify-fips` checks all three executables in the final runtime image:
 
 1. The compiled-in `auto` default enables native FIPS on a simulated FIPS host.
 2. Explicit `on` and test-only `only` modes report the selected module enabled.
@@ -52,11 +54,12 @@ The host simulation uses the Red Hat toolchain's
 installed in FIPS mode, and must not be set in customer deployments.
 `GODEBUG=fips140=only` is for testing, not a production default.
 
-Both executables accept `--fips-status` before their normal required arguments:
+All three executables accept `--fips-status` before their normal required arguments:
 
 ```sh
 docker run --rm --entrypoint /manager koku-service-operator:fips-check --fips-status
 docker run --rm --entrypoint /wait-for koku-service-operator:fips-check --fips-status
+docker run --rm --entrypoint /usr/local/bin/rbac-mini koku-service-operator:fips-check --fips-status
 ```
 
 They print JSON containing `enabled` and `version`, obtained from the native
@@ -114,10 +117,10 @@ filesystem semantics rather than bind-mount translation:
 ```
 
 `--path` is the actual root filesystem, not an OCI bundle parent directory.
-Do not use `--rpm-scan`: `/manager` and `/wait-for` are copied into the image
-and are not RPM-owned. Inspect their individual report rows. The scanner can
-analyze ELF files for a different target architecture, but that is not a
-runtime test for that architecture.
+Do not use `--rpm-scan`: `/manager`, `/wait-for`, and `/usr/local/bin/rbac-mini`
+are copied into the image and are not RPM-owned. Inspect their individual
+report rows. The scanner can analyze ELF files for a different target
+architecture, but that is not a runtime test for that architecture.
 
 ## FIPS-enabled OpenShift acceptance
 

@@ -396,7 +396,8 @@ type RBACConfig struct {
 	Worker       RBACComponentSpec `json:"worker,omitempty"`
 	KeycloakSync KeycloakSyncSpec  `json:"keycloakSync,omitempty"`
 	// Backend selects the RBAC implementation: empty (or "django") runs
-	// insights-rbac; "go" runs rbac-mini / rbac-go (beta — experimental).
+	// insights-rbac; "go" runs the rbac-mini binary embedded in the operator
+	// image (beta — experimental). When backend is go, spec.rbac.image is ignored.
 	Backend string `json:"backend,omitempty"`
 }
 

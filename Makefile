@@ -216,8 +216,32 @@ run: manifests generate fmt vet ## Run a controller from your host (pins cache v
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# Optional path to a local rbac-mini checkout. When set, docker-build stages it
+# into rbac-mini-src/ so the Dockerfile skips git clone of RBAC_MINI_REF.
+# Example: make docker-build RBAC_MINI_LOCAL_DIR=../rbac-mini
+# Leave empty to use the Dockerfile git pin (preferred for release/CRC smoke).
+RBAC_MINI_LOCAL_DIR ?=
+
+.PHONY: prepare-rbac-mini-src
+prepare-rbac-mini-src: ## Stage rbac-mini-src/ for Dockerfile (local tree or empty → git clone).
+	@mkdir -p rbac-mini-src
+	@# Keep tracked .gitkeep; remove any previously staged Mini sources.
+	@find rbac-mini-src -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +
+	@if [ -n "$(RBAC_MINI_LOCAL_DIR)" ]; then \
+		if [ ! -f "$(RBAC_MINI_LOCAL_DIR)/go.mod" ]; then \
+			echo "RBAC_MINI_LOCAL_DIR=$(RBAC_MINI_LOCAL_DIR): go.mod not found" >&2; \
+			exit 1; \
+		fi; \
+		echo "Staging local rbac-mini from $(RBAC_MINI_LOCAL_DIR)"; \
+		rsync -a \
+			--exclude .git --exclude rbac.db --exclude coverage.out --exclude bin/ \
+			"$(RBAC_MINI_LOCAL_DIR)/" rbac-mini-src/; \
+	else \
+		echo "rbac-mini-src/ empty — Dockerfile will git clone RBAC_MINI_REF"; \
+	fi
+
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build: prepare-rbac-mini-src ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
 .PHONY: verify-fips
@@ -238,7 +262,7 @@ crc-dev: ## Install CRDs and RBAC on CRC (namespace=$(CRC_NAMESPACE)).
 
 .PHONY: crc-operator-image
 crc-operator-image: ## Build and push operator image to the CRC internal registry.
-	$(MAKE) docker-build IMG=$(CRC_OPERATOR_IMG)
+	$(MAKE) docker-build IMG=$(CRC_OPERATOR_IMG) RBAC_MINI_LOCAL_DIR="$(RBAC_MINI_LOCAL_DIR)"
 	./scripts/push-image-crc.sh $(CRC_OPERATOR_IMG)
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple

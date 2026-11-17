@@ -34,7 +34,7 @@ func KeycloakSyncConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) *corev
 // group membership into RBAC Tenant/Principal/Group records.
 func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1.CronJob {
 	spec := cfg.Spec.RBAC.KeycloakSync
-	image, _ := ImageRef(cfg.Spec.RBAC.Image)
+	image, _ := rbacWorkloadImage(cfg)
 
 	schedule := spec.Schedule
 	if schedule == "" {
@@ -83,7 +83,7 @@ func KeycloakSyncCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *batchv1
 		// service CA. The script adds it to the default trust store. Mount it only
 		// for verified HTTPS: the service-CA ConfigMap starts empty until injection,
 		// and an unused but unmountable key would block the Pod.
-		// Django-only for now: rbac-go relies on the system trust store and reads
+		// Django-only for now: rbac-mini relies on the system trust store and reads
 		// no CA file yet.
 		if keycloakSyncVerifiesTLS(cfg) {
 			env = append(env, EnvVal("KEYCLOAK_CA_FILE", "/etc/keycloak-ca/ca.crt"))
@@ -162,7 +162,7 @@ func rbacSyncWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
 // discovery across org- groups replaces the embedded Python script.
 func rbacSyncCommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 	if RBACBackendIsGo(cfg) {
-		return []string{"/usr/local/bin/rbac-go", "sync"}
+		return []string{"/usr/local/bin/rbac-mini", "sync"}
 	}
 	return []string{"/bin/bash", "-c"}
 }

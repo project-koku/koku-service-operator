@@ -2090,7 +2090,8 @@ spec:
                   backend:
                     description: |-
                       Backend selects the RBAC implementation: empty (or "django") runs
-                      insights-rbac; "go" runs rbac-mini / rbac-go (beta — experimental).
+                      insights-rbac; "go" runs the rbac-mini binary embedded in the operator
+                      image (beta — experimental). When backend is go, spec.rbac.image is ignored.
                     type: string
                   image:
                     properties:

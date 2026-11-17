@@ -11,6 +11,10 @@ database/
 catalog.Dockerfile
 catalog/
 
+# Staged local Mini sources (placeholder .gitkeep stays tracked for CI COPY).
+/rbac-mini-src/*
+!/rbac-mini-src/.gitkeep
+
 # Test binary, built with `go test -c`
 *.test
 

@@ -531,7 +531,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 			return Result{}, fmt.Errorf("configmap %s: %w", cm.Name, err)
 		}
 	}
-	// Django-only seed JSON: rbac-go compiles its seed set into the binary.
+	// Django-only seed JSON: rbac-mini compiles its seed set into the binary.
 	if !resources.RBACBackendIsGo(cfg) {
 		permSeedCM, err := resources.RBACSeedPermissionsConfigMap(cfg)
 		if err != nil {
@@ -693,7 +693,11 @@ func migrationImageError(cfg *costv1alpha1.CostManagementServiceConfig) string {
 			return "spec.ros.image.repository and a valid tag or digest are required when ROS is enabled"
 		}
 	}
-	if _, ok := resources.ImageRef(cfg.Spec.RBAC.Image); !ok {
+	if resources.RBACBackendIsGo(cfg) {
+		if resources.OperatorImage == "" {
+			return "operator image is required for RBAC go backend (set --operator-image)"
+		}
+	} else if _, ok := resources.ImageRef(cfg.Spec.RBAC.Image); !ok {
 		return "spec.rbac.image.repository and a valid tag or digest are required"
 	}
 	return ""
@@ -852,7 +856,7 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 	return r.waitForCoreServiceReadiness(ctx, cfg)
 }
 
-// rbacObjects returns the RBAC objects to apply. The rbac-go backend is
+// rbacObjects returns the RBAC objects to apply. The rbac-mini backend is
 // workerless: the Celery worker is deleted (garbage-collected) instead of
 // applied when spec.rbac.backend is "go".
 func (r *CostManagementServiceConfigReconciler) rbacObjects(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) ([]client.Object, error) {
@@ -870,7 +874,7 @@ func (r *CostManagementServiceConfigReconciler) rbacObjects(ctx context.Context,
 }
 
 // reconcileRBACWorkerCondition publishes RBACWorkerReady as its own condition
-// so a down worker is not hidden behind RBACReady=True. The rbac-go backend has
+// so a down worker is not hidden behind RBACReady=True. The rbac-mini backend has
 // no worker, so it is always reported ready there.
 func (r *CostManagementServiceConfigReconciler) reconcileRBACWorkerCondition(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
 	if resources.RBACBackendIsGo(cfg) {
