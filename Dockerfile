@@ -53,7 +53,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG RBAC_MINI_REPO=https://github.com/project-koku/rbac-mini
 # Pin: rbac-mini main after FIPS + go 1.26.5 (PR #2 / COST-8610).
-ARG RBAC_MINI_REF=e7db2608f79be2576c66651198eccf29d51ddd83
+ARG RBAC_MINI_REF=2f4ba4f752b656f4ce5364674c40100f7f3a2926
 
 # Makefile always creates rbac-mini-src/ (local tree or .gitkeep placeholder).
 # Local tree has go.mod → build that. Otherwise clone the pin into a fresh dir
