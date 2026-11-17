@@ -46,22 +46,29 @@ and `--build-arg RBAC_MINI_REF=<sha>`.
 
 ### Local Mini override (optional)
 
-Default builds `git clone` the pinned `RBAC_MINI_REF`. To build from a local
-checkout instead (unpushed Mini changes):
+Default builds `git clone` the pinned `RBAC_MINI_REF`. An adjacent
+`../rbac-mini` checkout is **not** staged automatically. To build from a
+local checkout instead (unpushed Mini changes), pass the path explicitly:
 
 ```bash
 make docker-build IMG=... RBAC_MINI_LOCAL_DIR=../rbac-mini
+make crc-operator-image RBAC_MINI_LOCAL_DIR=../rbac-mini
 ```
 
-`make crc-operator-image` also auto-stages `../rbac-mini` when that `go.mod`
-exists; pass `RBAC_MINI_LOCAL_DIR=` (empty) to force the Dockerfile git pin.
+`make docker-buildx` also runs `prepare-rbac-mini-src`, so the same
+`RBAC_MINI_LOCAL_DIR` override applies on the multi-arch path. Leaving it
+unset clears any previously staged `rbac-mini-src/` contents and uses the
+Dockerfile git pin.
 
-## Keycloak sync
+## Keycloak sync (COST-8598)
 
 Enabling `spec.rbac.keycloakSync` still requires a client secret
 (`clientSecretRef`) for both backends. The go path runs
 `/usr/local/bin/rbac-mini sync` with the same `KEYCLOAK_*` / `SYNC_*` env as
-the Django script.
+the Django script (multi-org discovery via `SYNC_ORG_GROUP_PREFIX`, org-admin
+realm role via `SYNC_ORG_ADMIN_SUBGROUP`). Operator sample comments and this
+page are the customer-facing docs for flipping `backend: go` without a
+separate Quay RBAC image.
 
 ## Sample snippet (optional)
 
@@ -76,7 +83,26 @@ Django remains the documented default. For lab experiments only:
 #   rbac:
 #     backend: go   # beta — uses operator image; ignore image below for go
 #     # image: ...  # still required for django; unused when backend is go
+#     # keycloakSync:
+#     #   enabled: true
+#     #   clientSecretRef:
+#     #     name: keycloak-rbac-sync
 ```
+
+## Upgrade / rollback
+
+With `backend: go`, the Mini binary follows the **running operator image**.
+A `status.upgrade` rollback restores the CR spec but cannot restore a
+previous Mini binary — roll the operator Deployment (or OLM CSV) back to the
+previous operator image if you need the prior Mini. Freezing the resolved
+embedded image inside application revisions is a follow-up to the upgrade
+lifecycle work; it is intentionally out of scope for this beta embed.
+
+## CI coverage
+
+Unit tests cover image selection and command wiring. Pytest / CI e2e do not
+yet toggle `backend: go`; CRC smoke remains the integration check for beta.
+Add a CI job or pytest toggle before calling the go backend stable.
 
 ## FIPS
 
