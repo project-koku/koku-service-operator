@@ -77,10 +77,10 @@ func TestMigrationScriptsSyntax(t *testing.T) {
 }
 
 func TestRBACGoMigrationScript(t *testing.T) {
-	if got := rbacGoMigrationScript(); !strings.Contains(got, "rbac-go migrate") || !strings.Contains(got, "rbac-go seed") {
-		t.Errorf("go migration script missing rbac-go commands: %q", got)
+	if got := rbacGoMigrationScript(); !strings.Contains(got, "/usr/local/bin/rbac-mini migrate") || !strings.Contains(got, "/usr/local/bin/rbac-mini seed") {
+		t.Errorf("go migration script missing rbac-mini commands: %q", got)
 	}
-	for _, bad := range []string{"python", "manage.py"} {
+	for _, bad := range []string{"python", "manage.py", "rbac-go"} {
 		if strings.Contains(rbacGoMigrationScript(), bad) {
 			t.Errorf("go migration script should not contain %q", bad)
 		}
@@ -88,22 +88,52 @@ func TestRBACGoMigrationScript(t *testing.T) {
 }
 
 func TestRBACMigrationJobGoBackend(t *testing.T) {
+	old := OperatorImage
+	OperatorImage = "quay.io/project-koku/koku-service-operator:test"
+	t.Cleanup(func() { OperatorImage = old })
+
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-onprem", Namespace: "cost-tests"},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
 			RBAC: costv1alpha1.RBACConfig{
-				Image:   costv1alpha1.ImageSpec{Repository: "rbac-go", Tag: "v0.1.0"},
+				Image:   costv1alpha1.ImageSpec{Repository: "ignored-rbac", Tag: "v0.1.0"},
 				Backend: "go",
 			},
 		},
 	}
 	job := RBACMigrationJob(cfg, "test")
+	if job == nil {
+		t.Fatal("RBACMigrationJob returned nil for go backend with OperatorImage set")
+	}
 	pod := job.Spec.Template.Spec
 	if len(pod.Volumes) != 1 || pod.Volumes[0].Name != "tmp" {
 		t.Errorf("go job volumes = %v, want only tmp (no seed mounts)", pod.Volumes)
 	}
 	c := pod.Containers[0]
+	if c.Image != OperatorImage {
+		t.Errorf("Image = %q, want OperatorImage %q", c.Image, OperatorImage)
+	}
 	if len(c.Command) < 2 || c.Command[0] != "bash" || c.Command[1] != "-c" {
 		t.Errorf("Command = %v, want [bash -c script]", c.Command)
+	}
+	if !strings.Contains(c.Command[2], "/usr/local/bin/rbac-mini migrate") {
+		t.Errorf("script missing rbac-mini migrate: %q", c.Command[2])
+	}
+}
+
+func TestRBACMigrationJobGoBackendRequiresOperatorImage(t *testing.T) {
+	old := OperatorImage
+	OperatorImage = ""
+	t.Cleanup(func() { OperatorImage = old })
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image:   costv1alpha1.ImageSpec{Repository: "ignored", Tag: "v1"},
+				Backend: "go",
+			},
+		},
+	}
+	if job := RBACMigrationJob(cfg, "test"); job != nil {
+		t.Fatal("go backend with empty OperatorImage must return nil (fail closed)")
 	}
 }

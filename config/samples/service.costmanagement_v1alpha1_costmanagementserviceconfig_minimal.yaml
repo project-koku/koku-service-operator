@@ -88,6 +88,7 @@ spec:
         tag: "422f758"
 
   rbac:
+    # backend: go  # beta — uses operator image for Mini; ignores image below
     image:
       repository: quay.io/project-koku/insights-rbac
       tag: "34e25ed"

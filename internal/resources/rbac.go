@@ -126,14 +126,27 @@ func waitForRBACDB(cfg *costv1alpha1.CostManagementServiceConfig) corev1.Contain
 // RBAC API
 // -----------------------------------------------------------------------------
 
-// RBACBackendIsGo reports whether the experimental rbac-go implementation is
+// RBACBackendIsGo reports whether the experimental rbac-mini implementation is
 // selected (spec.rbac.backend: "go"). Empty (or "django") keeps insights-rbac.
 func RBACBackendIsGo(cfg *costv1alpha1.CostManagementServiceConfig) bool {
 	return cfg.Spec.RBAC.Backend == "go"
 }
 
-// rbacWorkingDir is the Django app dir; rbac-go ignores cwd (absolute paths,
-// /data workdir in-image), so it must not point at the Django tree.
+// rbacWorkloadImage returns the container image for RBAC API, migrate, and
+// Keycloak sync. When backend is go, always use OperatorImage (ignore
+// spec.rbac.image). Empty OperatorImage fails closed — same contract as wait-for.
+func rbacWorkloadImage(cfg *costv1alpha1.CostManagementServiceConfig) (string, bool) {
+	if RBACBackendIsGo(cfg) {
+		if OperatorImage == "" {
+			return "", false
+		}
+		return OperatorImage, true
+	}
+	return ImageRef(cfg.Spec.RBAC.Image)
+}
+
+// rbacWorkingDir is the Django app dir; rbac-mini ignores cwd (absolute paths),
+// so it must not point at the Django tree.
 func rbacWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if RBACBackendIsGo(cfg) {
 		return ""
@@ -143,7 +156,7 @@ func rbacWorkingDir(cfg *costv1alpha1.CostManagementServiceConfig) string {
 
 func rbacAPICommand(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 	if RBACBackendIsGo(cfg) {
-		return []string{"/usr/local/bin/rbac-go", "serve"}
+		return []string{"/usr/local/bin/rbac-mini", "serve"}
 	}
 	return []string{"gunicorn"}
 }
@@ -166,7 +179,7 @@ func rbacAPIArgs(cfg *costv1alpha1.CostManagementServiceConfig) []string {
 // Koku delegates all permission checks to this service via HTTP.
 func RBACAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	spec := cfg.Spec.RBAC
-	image, _ := ImageRef(spec.Image)
+	image, _ := rbacWorkloadImage(cfg)
 	replicas := ProfileReplicas(cfg, WorkloadRBACAPI, spec.API.Replicas)
 	falseVal := false
 	selLabels := SelectorLabels(cfg, "rbac-api")

@@ -5,7 +5,7 @@ set -euo pipefail
 image=${1:?usage: verify-fips.sh IMAGE}
 container_tool=${CONTAINER_TOOL:-docker}
 
-for binary in /manager /wait-for; do
+for binary in /manager /wait-for /usr/local/bin/rbac-mini; do
   for mode in auto on only; do
     # Leave GODEBUG unset for auto: this verifies the compiled-in default.
     env_args=(--env GOLANG_NATIVE_HOSTFIPS_OVERRIDE=1)

@@ -61,7 +61,10 @@ func MissingWorkloadImages(cfg *costv1alpha1.CostManagementServiceConfig) []stri
 	if masu.Repository != "" || masu.Tag != "" || masu.Digest != "" {
 		require(masu, "spec.costManagement.masu.image")
 	}
-	require(cfg.Spec.RBAC.Image, "spec.rbac.image")
+	// Go backend embeds Mini in the operator image; ignore spec.rbac.image.
+	if !RBACBackendIsGo(cfg) {
+		require(cfg.Spec.RBAC.Image, "spec.rbac.image")
+	}
 	require(cfg.Spec.Ingress.Image, "spec.ingress.image")
 	if costv1alpha1.ROSEnabled(cfg) {
 		require(cfg.Spec.ROS.Image, "spec.ros.image")

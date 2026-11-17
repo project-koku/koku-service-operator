@@ -34,7 +34,7 @@ func ApplicationRollout(d *appsv1.Deployment) *appsv1.Deployment {
 
 // ApplicationDeployments is the complete enabled set used for completion and
 // recovery. A zero-replica worker remains in the set as an intentionally off target.
-// The experimental rbac-go backend is workerless, so RBACWorkerDeployment is
+// The experimental rbac-mini backend is workerless, so RBACWorkerDeployment is
 // omitted when spec.rbac.backend is "go" (matching rbacObjects, which deletes it).
 func ApplicationDeployments(cfg *costv1alpha1.CostManagementServiceConfig) []*appsv1.Deployment {
 	deployments := []*appsv1.Deployment{KokuAPIDeployment(cfg), MasuDeployment(cfg), ListenerDeployment(cfg),
