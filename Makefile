@@ -399,7 +399,7 @@ endif
 
 YQ_VERSION ?= v4.53.6
 IMG_BASE = $(shell echo $(IMG) | cut -d: -f1)
-IMAGE_SHA ?= $(IMG)
+IMAGE_SHA := $(or $(IMAGE_SHA),$(IMG))
 OCP_VERSION ?= v4.22
 MIN_KUBE_VERSION = 1.25.0
 
@@ -503,5 +503,5 @@ catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
 
 .PHONY: catalog-build-multiplatform
-catalog-build-multiplatform: catalog-render ## Build and push a multiplatform FBC catalog image.
+catalog-build-multiplatform: catalog-render ## Buildx-push a multiplatform FBC catalog image (CI/publish target).
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 --push -f $(CATALOG_DIR).Dockerfile -t $(CATALOG_IMG) .
