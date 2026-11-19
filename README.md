@@ -19,6 +19,8 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | [docs/development/crc-testing.md](docs/development/crc-testing.md) | Local development and CRC testing guide |
 | [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
 | [docs/development/fips.md](docs/development/fips.md) | Native Go FIPS build, check-payload scan, and cluster verification |
+| [docs/oidc/PLAN.md](docs/oidc/PLAN.md) | COST-8520 external OIDC design and implementation plan |
+| [docs/oidc/KEYCLOAK-RBAC-MINI.md](docs/oidc/KEYCLOAK-RBAC-MINI.md) | Google-to-Keycloak setup with the operator's rbac-mini backend |
 | [docs/openshift-ci/openshift-ci.md](docs/openshift-ci/openshift-ci.md) | OpenShift CI (Prow): jobs, this repo’s scripts/images, redaction |
 | [config/samples/byoi/README.md](config/samples/byoi/README.md) | BYOI fixture (Postgres, Valkey, Kafka, MinIO, OAuth mirror) |
 | [docs/tasks.md](docs/tasks.md) | Implementation status per JIRA ticket |
