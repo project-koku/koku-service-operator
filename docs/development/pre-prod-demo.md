@@ -145,6 +145,10 @@ overrides).
   (CatalogSource in `openshift-marketplace`); restricted users get clear
   early errors instead of a mid-run failure. Use `--source=manual` with your
   administrator.
+- **`deploy-rhbk.sh` aborts with "curl TLS verification failed"** — the
+  cluster's router CA does not match the served certificate (replaced ingress
+  certificate, or a TLS-inspecting proxy in front of the `*.apps` domain).
+  Set `RHBK_INSECURE_TLS=1` for such labs.
 - **Build failures with podman** — `BUILD_MODE=docker` auto-detects docker
   (with buildx) or podman; the podman-docker shim is detected and avoided.
 

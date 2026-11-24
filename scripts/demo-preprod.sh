@@ -172,11 +172,42 @@ if [[ -n "$USER_CR_FILE" && ! -f "$USER_CR_FILE" ]]; then
   echo "error: --cr-file not found: ${USER_CR_FILE}" >&2
   exit 2
 fi
+# The user CR must land where the script expects (cross-model review #2): a
+# CR with different metadata.name/namespace applied elsewhere produced a false
+# "applied" and a 15-minute wait in the wrong namespace.
+if [[ -n "$USER_CR_FILE" ]]; then
+  read -r CR_FILE_NAME CR_FILE_NS <<<"$(python3 - "$USER_CR_FILE" <<'PY2'
+import re, sys
+text = open(sys.argv[1]).read()
+name = re.search(r"^\s*name:\s*(\S+)", text, re.M)
+ns = re.search(r"^\s*namespace:\s*(\S+)", text, re.M)
+print(f"{name.group(1) if name else '-'} {ns.group(1) if ns else '-'}")
+PY2
+)" || true
+  if [[ "$CR_FILE_NAME" != "$CR_NAME" || ( -n "$CR_FILE_NS" && "$CR_FILE_NS" != "$NAMESPACE" ) ]]; then
+    echo "error: --cr-file metadata (name: ${CR_FILE_NAME}, namespace: ${CR_FILE_NS:-<none>}) does not" >&2
+    echo "  match the script's target (name: ${CR_NAME}, namespace: ${NAMESPACE}). Fix the CR or set" >&2
+    echo "  CR_NAME/NAMESPACE to match." >&2
+    exit 2
+  fi
+fi
 validate_version_hint "${VERSION:-}" || exit 2
 if [[ -n "${CATALOG_IMG:-}" && ! "${CATALOG_IMG:-}" =~ ^[A-Za-z0-9._/:@-]+$ ]]; then
   echo "error: CATALOG_IMG has invalid characters (allowed: A-Za-z0-9._/:@-): ${CATALOG_IMG}" >&2
   exit 2
 fi
+# Everything interpolated into the cluster-admin OLM apply (cross-model review
+# #6): channel and names must be plain identifiers.
+if [[ -n "${CHANNEL:-}" && ! "${CHANNEL:-}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "error: CHANNEL must match [A-Za-z0-9._-]+ (got '${CHANNEL}')" >&2
+  exit 2
+fi
+for _nsvar in NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPACE CATALOG_NAME; do
+  if [[ -n "${!_nsvar:-}" && ! "${!_nsvar}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    echo "error: ${_nsvar} must be a DNS-1123 label (lowercase alphanumerics and '-'): ${!_nsvar}" >&2
+    exit 2
+  fi
+done
 case "$PROFILE" in
   ""|single-node) ;;
   *)
@@ -201,6 +232,12 @@ KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 KAFKA_CLUSTER_NAME="${KAFKA_CLUSTER_NAME:-cost-onprem-kafka}"
 CATALOG_REPO="${CATALOG_REPO:-quay.io/project-koku}"
+# A bare namespace would build a docker.io image reference while discovery
+# still queries quay.io (cross-model review #7) — normalize to a full host.
+case "$CATALOG_REPO" in
+  */*) : ;;
+  *) CATALOG_REPO="quay.io/${CATALOG_REPO}" ;;
+esac
 CATALOG_NAME="${CATALOG_NAME:-koku-service-operator-catalog}"
 VERSION="${VERSION:-}"
 CHANNEL="${CHANNEL:-beta}"
@@ -213,9 +250,9 @@ CR_FILE="${CR_FILE:-/tmp/koku-demo-preprod-${NAMESPACE}.yaml}"
 # real image. CATALOG_IMG set explicitly skips discovery entirely, and
 # --watch/--console skip it too (they never use the catalog — no network I/O
 # before the mode dispatch; review note).
-if [[ -z "${CATALOG_IMG:-}" && ( "$DEMO_WATCH" == "1" || "$DEMO_CONSOLE" == "1" ) ]]; then
+if [[ -z "${CATALOG_IMG:-}" && ( "$DEMO_WATCH" == "1" || "$DEMO_CONSOLE" == "1" || "$SOURCE" == "local" ) ]]; then
   CATALOG_IMG=""
-  CATALOG_VERSION="(not resolved)"
+  CATALOG_VERSION="(not used)"
 elif [[ -z "${CATALOG_IMG:-}" ]]; then
   REPO_PATH="${CATALOG_REPO#quay.io/}"
   REPO_PATH="${REPO_PATH%/}"
@@ -248,6 +285,13 @@ STEP_N=0
 # The step count and plan below must match what the selected source runs
 # (review warning #20): registry has no build steps; manual stops at the
 # instructions.
+# Flag-parsed values must be exported: the tmux wrapper serializes the
+# exported environment into the inner run (a pane inherits the tmux SERVER's
+# environment, not the caller's, so shell variables would be lost).
+export DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN PROFILE PREREQS_ONLY SKIP_PREREQS \
+       USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK CONTAINER_TOOL \
+       KUBE_CONTEXT OPEN_BROWSER CONSOLE_USERNAME CONSOLE_PASSWORD CR_FILE \
+       BUILD_MODE IMAGE_TAG IMG WATCHER STORAGE_CLASS DEMO_SMOKE DEMO_RHBK_CHANNEL
 case "$SOURCE" in
   registry) STEP_TOTAL=7 ;;
   local) STEP_TOTAL=8 ;;
@@ -274,6 +318,11 @@ step() {
 
 skip() {
   echo "${C_YELLOW}  -> skip: $*${C_RESET}"
+}
+# skip_step: a skip that REPLACES an entire plan step (only --reset's).
+skip_step() {
+  STEP_N=$((STEP_N + 1))
+  echo "${C_YELLOW}  -> [${STEP_N}/${STEP_TOTAL}] skip: $*${C_RESET}"
 }
 
 ok() {
@@ -410,21 +459,26 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  # Forward the raw invocation AND the flag-backed env forms: every flag must
-  # reach the inner run (review critical #13), and env forms like
-  # PREREQS_ONLY=1 must survive too — a tmux pane inherits the SERVER's
-  # environment, not the caller's, so plain exports do not carry over.
-  local fwd=""
-  if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
-    fwd="$(printf ' %q' "${ORIGINAL_ARGS[@]}")"
-  fi
-  local _v _env_fwd=""
-  for _v in DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN PROFILE PREREQS_ONLY SKIP_PREREQS \
-            USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK REALM_ADMIN_PASSWORD \
-            CONTAINER_TOOL KUBE_CONTEXT OPEN_BROWSER; do
-    _env_fwd+=" ${_v}=$(printf %q "${!_v:-}")"
-  done
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT")${_env_fwd} $(printf %q "$ROOT/scripts/demo-preprod.sh")${fwd}"
+  # The inner run must see the CALLER's effective configuration — flags, env
+  # vars, and env-file settings alike. A tmux pane inherits the SERVER's
+  # environment (not the caller's), so shell exports do not carry over when a
+  # server is already running, and a forwarded allowlist cannot scale to every
+  # configuration variable (cross-model review: ~25 documented variables were
+  # still dropped). Instead, serialize the whole exported environment plus the
+  # raw invocation into a runner script the pane executes.
+  local runner
+  runner="$(mktemp "${TMPDIR:-/tmp}/demo-preprod-runner.XXXXXX")"
+  chmod 600 "$runner"
+  {
+    declare -x -p
+    printf 'rm -f %q\n' "$runner"
+    printf 'exec %q' "$ROOT/scripts/demo-preprod.sh"
+    if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
+      printf ' %q' "${ORIGINAL_ARGS[@]}"
+    fi
+    printf '\n'
+  } >"$runner"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 bash $(printf %q "$runner")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -461,6 +515,20 @@ else
 fi
 require_reachable_cluster "$KUBECTL" || exit 1
 ok "using $($KUBECTL config current-context) — $($KUBECTL whoami --show-server)"
+
+# The registry source needs cluster-admin (CatalogSource in
+# openshift-marketplace): check BEFORE the prerequisites install, not after
+# (cross-model review #3 — a restricted user otherwise waits tens of minutes
+# for the mid-run failure the docs promise to avoid).
+if [[ "$SOURCE" == "registry" ]]; then
+  if ! "$KUBECTL" auth can-i create catalogsources -n openshift-marketplace >/dev/null 2>&1; then
+    echo "error: the registry source needs cluster-admin: it creates a CatalogSource" >&2
+    echo "  in openshift-marketplace. Use --source=manual and have your cluster" >&2
+    echo "  administrator install the operator, or run on a cluster where you have" >&2
+    echo "  cluster-admin." >&2
+    exit 1
+  fi
+fi
 
 # Customer-friendly early failure: the demo namespaces must exist or be
 # creatable (a developer sandbox or restricted user cannot create them). With
@@ -517,18 +585,26 @@ start_watch_tmux() {
     "$KUBECTL -n $(printf %q "$NAMESPACE") get cmsc $(printf %q "$CR_NAME") -w" C-m
   tmux split-window -h -t "${TMUX_SESSION}:demo" \
     "$KUBECTL -n $(printf %q "$NAMESPACE") get pods -w"
-  local _wfwd=""
-  if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
-    _wfwd="$(printf ' %q' "${ORIGINAL_ARGS[@]}")"
-  fi
-  local _v _wenv=""
-  for _v in DEMO_NO_OPEN OPEN_BROWSER PROFILE ARCH_CHECK REALM_ADMIN_PASSWORD KUBE_CONTEXT; do
-    _wenv+=" ${_v}=$(printf %q "${!_v:-}")"
-  done
+  local runner
+  runner="$(mktemp "${TMPDIR:-/tmp}/demo-preprod-runner.XXXXXX")"
+  chmod 600 "$runner"
+  {
+    declare -x -p
+    printf 'rm -f %q\n' "$runner"
+    printf 'exec %q' "$SCRIPT"
+    if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
+      printf ' %q' "${ORIGINAL_ARGS[@]}"
+    fi
+    printf '\n'
+  } >"$runner"
   tmux split-window -v -t "${TMUX_SESSION}:demo.1" \
-    "cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_NO_TMUX=1${_wenv} $(printf %q "$SCRIPT")${_wfwd}"
+    "cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_NO_TMUX=1 bash $(printf %q "$runner")"
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
-  tmux attach-session -t "$TMUX_SESSION"
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$TMUX_SESSION"
+  else
+    tmux attach-session -t "$TMUX_SESSION"
+  fi
 }
 
 # Realm-user password read-back for the summary: runs BEFORE the watch
@@ -592,6 +668,7 @@ if [[ -n "$USER_CR_FILE" ]]; then
   CR_TO_APPLY="$USER_CR_FILE"
 else
   CR_RENDER_TMP="$(mktemp)"
+trap 'rm -f "${CR_RENDER_TMP:-}"' EXIT
   render_preprod_cr \
     "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
     "$CR_RENDER_TMP" \
@@ -759,7 +836,13 @@ kafka_ready() {
   [[ "$("$KUBECTL" -n "$KAFKA_NAMESPACE" get kafka "$KAFKA_CLUSTER_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
 }
 infra_ready() {
-  deploy_available "$KUBECTL" "$INFRA_NAMESPACE" postgresql
+  # SKIP_INFRA skips Postgres AND Valkey AND MinIO AND the minio-init job —
+  # all four must be healthy before skipping (cross-model review #4: one
+  # surviving component green-lit a partially torn-down infra).
+  deploy_available "$KUBECTL" "$INFRA_NAMESPACE" postgresql \
+    && deploy_available "$KUBECTL" "$INFRA_NAMESPACE" valkey \
+    && deploy_available "$KUBECTL" "$INFRA_NAMESPACE" minio \
+    && [[ "$("$KUBECTL" -n "$INFRA_NAMESPACE" get job minio-init -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)" == "True" ]]
 }
 keycloak_ready() {
   [[ "$("$KUBECTL" -n "$KEYCLOAK_NAMESPACE" get keycloak keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
@@ -860,7 +943,7 @@ fix_keycloak_hostname_v2() {
 }
 
 if [[ "$SKIP_PREREQS" == "1" ]]; then
-  skip "BYOI skipped (--skip-prereqs): the operator installs on existing infrastructure"
+  skip_step "BYOI skipped (--skip-prereqs): the operator installs on existing infrastructure"
 else
 step "BYOI dependencies (Kafka, Postgres, Valkey, MinIO, Keycloak)"
 if [[ "$NODE_ARCH" == "arm64" ]] && ! keycloak_ready; then
@@ -1041,18 +1124,19 @@ olm_install() {
 
 if [[ "$SOURCE" == "registry" ]]; then
   step "Operator install (registry via OLM)"
-  if ! "$KUBECTL" auth can-i create catalogsources -n openshift-marketplace >/dev/null 2>&1; then
-    echo "error: the registry source needs cluster-admin: it creates a CatalogSource" >&2
-    echo "  in openshift-marketplace. Use --source=manual and have your cluster" >&2
-    echo "  administrator install the operator, or run on a cluster where you have" >&2
-    echo "  cluster-admin." >&2
-    exit 1
-  fi
+  local_preexisting_csv=0
   if [[ -n "$(olm_existing_csvs "$KUBECTL" "$NAMESPACE")" ]]; then
     warn_existing_install "$NAMESPACE"
+    local_preexisting_csv=1
   fi
   olm_install
-  ok "operator installed from ${CATALOG_IMG}"
+  if [[ "$local_preexisting_csv" == "1" ]]; then
+    # Cross-model review #8: do not claim an install from the new catalog when
+    # the pre-existing (equal-version) CSV simply stayed in place.
+    ok "kept the existing install in ${NAMESPACE} (run --reset to change version)"
+  else
+    ok "operator installed from ${CATALOG_IMG}"
+  fi
   if [[ "$ARCH_CHECK" == "1" ]]; then
     op_img="$(installed_operator_image "$KUBECTL" "$NAMESPACE")" || op_img=""
     if [[ -n "$op_img" ]]; then

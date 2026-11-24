@@ -654,6 +654,7 @@ plan_po="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run
 assert_contains "$plan_po" "stopping after the prerequisites" "prereqs-only plan states it stops"
 
 tmp_cr8="$(mktemp)"
+printf 'apiVersion: service.costmanagement.openshift.io/v1alpha1\nkind: CostManagementServiceConfig\nmetadata:\n  name: cost-management\n  namespace: cost-byoi\n' >"$tmp_cr8"
 plan_sp="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --skip-prereqs --cr-file "$tmp_cr8" 2>&1)"
 rm -f "$tmp_cr8"
 assert_contains "$plan_sp" "CR:          " "skip-prereqs plan shows the user CR"
@@ -772,16 +773,26 @@ EOF
 chmod +x "${tbin}/tmux"
 fx13="$(mktemp)"
 printf 'v0.0.1\n' >"$fx13"
-# The outer process exits after start_tmux; the stub captures the inner command.
+# The outer process exits after start_tmux; the stub captures the inner
+# command, which points at a runner file carrying the caller's full exported
+# environment plus the raw invocation. Assert against the RUNNER (the
+# cross-model review proved command-line allowlists drop documented vars).
 env -u KUBE_CONTEXT PATH="${tbin}:$PATH" REGISTRY_TAG_FIXTURE="$fx13" \
   ./scripts/demo-preprod.sh --prereqs-only --version v0.0.1 --channel stable >/dev/null 2>&1 || true
-inner_cmd="$(grep 'send-keys' "$tlog" | grep demo-preprod.sh | tail -1)"
-assert_contains "$inner_cmd" "--prereqs-only" "tmux inner run receives --prereqs-only"
-assert_contains "$inner_cmd" "--version" "tmux inner run receives --version"
-assert_contains "$inner_cmd" "v0.0.1" "tmux inner run receives the version value"
-assert_contains "$inner_cmd" "--channel" "tmux inner run receives --channel"
-assert_contains "$inner_cmd" "stable" "tmux inner run receives the channel value"
-rm -rf "$tbin" "$fx13"
+inner_cmd="$(grep 'send-keys' "$tlog" | grep demo-preprod-runner | tail -1 || true)"
+assert_contains "$inner_cmd" "bash " "inner runs via the env runner"
+assert_contains "$inner_cmd" "demo-preprod-runner" "inner command names the runner"
+runner13="$(printf '%s\n' "$inner_cmd" | grep -oE '/[^ ]*demo-preprod-runner[^ ]*' | head -1 || true)"
+if [[ -z "$runner13" || ! -f "$runner13" ]]; then
+  echo "FAIL: cannot locate the runner file from: $inner_cmd" >&2
+  fail=1
+else
+  runner_body="$(cat "$runner13")"
+  assert_contains "$runner_body" "--prereqs-only" "runner receives --prereqs-only"
+  assert_contains "$runner_body" "--version v0.0.1" "runner receives --version v0.0.1"
+  assert_contains "$runner_body" "--channel stable" "runner receives --channel stable"
+fi
+rm -rf "$tbin" "$fx13" "$runner13"
 
 # --- #14: .local.env overrides the example defaults (behavior test) ---
 demo_root14="$(mktemp -d)"
@@ -914,11 +925,29 @@ printf '%s\n' "\$*" >> "${tlog2}"
 exit 0
 EOF
 chmod +x "${tbin2}/tmux"
+# Cross-model review regression: variables beyond any allowlist (SOURCE,
+# NAMESPACE, CATALOG_IMG, DEMO_SMOKE, image overrides) must reach the inner
+# run — the runner serializes the whole exported environment.
 env -u KUBE_CONTEXT PATH="${tbin2}:$PATH" REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
-  PREREQS_ONLY=1 ./scripts/demo-preprod.sh >/dev/null 2>&1 || true
-env2_cmd="$(grep 'send-keys' "$tlog2" | grep demo-preprod.sh | tail -1)"
-assert_contains "$env2_cmd" "PREREQS_ONLY=1" "tmux inner run receives the PREREQS_ONLY env form"
-rm -rf "$tbin2"
+  SOURCE=manual NAMESPACE=crosscheck-ns CR_NAME=crosscheck-cr CATALOG_IMG=quay.io/x/catalog:v9.9.9 \
+  DEMO_SMOKE=1 DEMO_KOKU_IMAGE=quay.io/me/koku-build PREREQS_ONLY=1 \
+  ./scripts/demo-preprod.sh >/dev/null 2>&1 || true
+env2_cmd="$(grep 'send-keys' "$tlog2" | grep demo-preprod-runner | tail -1 || true)"
+runner2="$(printf '%s\n' "$env2_cmd" | grep -oE '/[^ ]*demo-preprod-runner[^ ]*' | head -1 || true)"
+if [[ -z "$runner2" || ! -f "$runner2" ]]; then
+  echo "FAIL: cannot locate the runner file from: $env2_cmd" >&2
+  fail=1
+else
+  env2_body="$(cat "$runner2")"
+  assert_contains "$env2_body" 'SOURCE="manual"' "runner carries SOURCE"
+  assert_contains "$env2_body" 'NAMESPACE="crosscheck-ns"' "runner carries NAMESPACE"
+  assert_contains "$env2_body" 'CR_NAME="crosscheck-cr"' "runner carries CR_NAME"
+  assert_contains "$env2_body" 'CATALOG_IMG="quay.io/x/catalog:v9.9.9"' "runner carries CATALOG_IMG (digest pin preserved)"
+  assert_contains "$env2_body" 'DEMO_SMOKE="1"' "runner carries DEMO_SMOKE"
+  assert_contains "$env2_body" 'DEMO_KOKU_IMAGE="quay.io/me/koku-build"' "runner carries image overrides"
+  assert_contains "$env2_body" 'PREREQS_ONLY="1"' "runner carries the PREREQS_ONLY env form"
+fi
+rm -rf "$tbin2" "$runner2"
 
 # ungated fixture aborts the install outright
 ungated="$(env -u KUBE_CONTEXT -u DEMO_ALLOW_FIXTURES REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
@@ -931,6 +960,48 @@ bad_img="$(env -u KUBE_CONTEXT CATALOG_IMG='bad"img' ./scripts/demo-preprod.sh -
 assert_eq "$bi_rc" "2" "CATALOG_IMG with a quote is rejected"
 img_plan="$(env -u KUBE_CONTEXT CATALOG_IMG=quay.io/example/catalog:v9.9.9 ./scripts/demo-preprod.sh --dry-run 2>&1)"
 assert_contains "$img_plan" "version:     v9.9.9" "explicit CATALOG_IMG version shows the tag, not a digest fragment"
+
+# --- cross-model review: cr-file reconciliation, channel validation, repo normalization ---
+badcr="$(mktemp)"
+sed 's/  namespace: cost-byoi$/  namespace: elsewhere-ns/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$badcr"
+cr_mismatch="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --cr-file "$badcr" 2>&1)" && cm_rc=0 || cm_rc=$?
+assert_eq "$cm_rc" "2" "cr-file with mismatched namespace is rejected before anything runs"
+assert_contains "$cr_mismatch" "elsewhere-ns" "mismatch error names the CR's namespace"
+rm -f "$badcr"
+
+bad_ch="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --channel $'beta\nevil: x' 2>&1)" && ch_rc=0 || ch_rc=$?
+assert_eq "$ch_rc" "2" "multiline channel rejected"
+assert_contains "$bad_ch" "CHANNEL" "channel error names the variable"
+
+repo_norm="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --catalog-repo project-koku 2>&1)"
+assert_contains "$repo_norm" "catalog:     quay.io/project-koku/koku-service-operator-catalog:" "bare catalog repo normalizes to quay.io"
+
+# RBACWorkerReady is non-gating: a fixture missing only it still passes
+vdir2="$(mktemp -d)"
+python3 - "$vdir2" <<'PY'
+import json
+conds = [
+ {"type":"Available","status":"True","reason":"AllComponentsReady"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"False","reason":"ReconcileComplete"},
+ {"type":"Degraded","status":"False","reason":"ReconcileComplete"},
+]
+for t in ["DiscoveryComplete","DatabaseReady","CacheReady","KafkaReady","StorageReady",
+          "AuthenticationReady","SchemaUpToDate","RBACReady","IngressReady","GatewayReady"]:
+    conds.append({"type":t,"status":"True","reason":"ok"})
+json.dump({"status":{"phase":"Ready","conditions":conds}}, open(f"{__import__('sys').argv[1]}/cmsc.json","w"))
+PY
+cat >"${vdir2}/oc" <<EOF
+#!/bin/bash
+if [[ "\$2" == "cmsc" ]]; then cat "${vdir2}/cmsc.json"; exit 0; fi
+exit 0
+EOF
+chmod +x "${vdir2}/oc"
+wk_out="$(verify_conditions "${vdir2}/oc" cost-demo cost-management)" && wk_rc=0 || wk_rc=$?
+assert_eq "$wk_rc" "0" "missing RBACWorkerReady does not fail the verification (non-gating)"
+assert_not_contains "$wk_out" "FAIL" "no failures with RBACWorkerReady absent"
+rm -rf "$vdir2"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2

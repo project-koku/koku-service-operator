@@ -177,8 +177,9 @@ registry_list_tags() {
     cat "$REGISTRY_TAG_FIXTURE"
     return 0
   fi
-  local out
-  if ! out="$(python3 - "$repo" 2>/dev/null <<'PY'
+  local out _tagerr
+  _tagerr="$(mktemp)"
+  if ! out="$(python3 - "$repo" 2>"$_tagerr" <<'PY'
 import json, sys, urllib.request
 
 repo = sys.argv[1]
@@ -198,8 +199,12 @@ print("\n".join(tags))
 PY
 )"; then
     echo "error: failed to list tags of quay.io/${repo} (registry unreachable or API error)" >&2
+    rm -f "$_tagerr"
     return 1
   fi
+  # Surface the python's own warnings; swallow tracebacks.
+  grep -v -e '^Traceback' -e '^  File ' "$_tagerr" >&2 || true
+  rm -f "$_tagerr"
   printf '%s\n' "$out"
 }
 
@@ -666,8 +671,7 @@ d = json.load(sys.stdin)
 conds = {c["type"]: c for c in d.get("status", {}).get("conditions", [])}
 positive = ["Available", "UIReady", "DiscoveryComplete", "DatabaseReady",
             "CacheReady", "KafkaReady", "StorageReady", "AuthenticationReady",
-            "SchemaUpToDate", "RBACWorkerReady", "RBACReady", "IngressReady",
-            "GatewayReady"]
+            "SchemaUpToDate", "RBACReady", "IngressReady", "GatewayReady"]
 negative = ["Progressing", "Degraded"]
 fails = 0
 
@@ -691,9 +695,13 @@ for t in negative:
         row(t, "PASS", "False (%s)" % c.get("reason", ""))
     else:
         row(t, "FAIL", "%s (%s)" % (c.get("status"), c.get("reason", ""))); fails += 1
-c = conds.get("ROSEnabled")
-if c is not None:
-    row("ROSEnabled", "INFO", "%s (%s)" % (c.get("status"), c.get("reason", "")))
+# Informational conditions: present in status but explicitly non-gating
+# (RBACWorkerReady per the CRD docs) or contextual (ROSEnabled while ROS is
+# off, CoreServicesReady is a roll-up) — printed, never fatal.
+for _info in ("ROSEnabled", "RBACWorkerReady", "CoreServicesReady"):
+    c = conds.get(_info)
+    if c is not None:
+        row(_info, "INFO", "%s (%s)" % (c.get("status"), c.get("reason", "")))
 sys.exit(1 if fails else 0)
 '
 }

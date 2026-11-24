@@ -208,10 +208,22 @@ safe_curl() {
                 esac
                 shift 2
                 ;;
-            -d|--data|--data-raw|--data-binary)
+            -d|--data|--data-raw)
                 if [ -z "$body_file" ]; then
                     body_file="$(mktemp "${TMPDIR:-/tmp}/rhbk-body-XXXXXX")"
                     sanitized+=(--data "@$body_file")
+                else
+                    printf '&' >>"$body_file"
+                fi
+                printf '%s' "$2" >>"$body_file"
+                shift 2
+                ;;
+            --data-binary)
+                # Binary-safe by definition: keep --data-binary semantics
+                # (curl's plain --data strips CR/LF from file bodies).
+                if [ -z "$body_file" ]; then
+                    body_file="$(mktemp "${TMPDIR:-/tmp}/rhbk-body-XXXXXX")"
+                    sanitized+=(--data-binary "@$body_file")
                 else
                     printf '&' >>"$body_file"
                 fi
@@ -239,6 +251,20 @@ safe_curl() {
             return 0
         fi
         case "$status" in
+            # TLS verification failures: the extracted router CA does not
+            # match the served certificate (replaced ingress cert, TLS
+            # inspecting proxy). Actionable, not a generic retry.
+            51|53|54|58|59|60|66|77|82|83|90|91)
+                # Not echo_warning: this is actionable and must survive LOG_LEVEL=ERROR.
+                echo "warning: curl TLS verification failed (exit ${status}): the router CA does not" >&2
+                echo "  match the served certificate (replaced ingress certificate or TLS-inspecting" >&2
+                echo "  proxy). Set RHBK_INSECURE_TLS=1 to skip verification for this lab." >&2
+                printf '%s' "$body"
+                trap - INT TERM HUP
+                rm -f "$hdr_file" "$body_file"
+                rm -f "$err"
+                return 0
+                ;;
             6|7|28)
                 echo_warning "curl failed (exit ${status}, attempt ${attempt}/${retries})" >&2
                 if [ "$attempt" -lt "$retries" ]; then

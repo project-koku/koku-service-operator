@@ -146,3 +146,48 @@ charset validation as `--version` and its derived version shows the tag, not a
 digest fragment; dead `ui_deploy_ready` removed; `safe_curl` handles the
 `--header`/`--data-binary` long forms and quotes its removals. Accepted: OCI
 charset false positives (`+` in tags) — loud and rare.
+
+---
+
+## Cross-model review (DeepSeek-V4.1-Flash-1017, 2026-11-25)
+
+A third, independent review by a different model family over the full branch,
+deliberately unanchored from the previous findings. Verdict: **BLOCK** — one
+critical, seven warnings. All verified against the code before acting; fixed:
+
+1. **CRITICAL — the tmux env allowlist did not scale.** With a tmux server
+   already running, panes inherit the SERVER's environment, so ~25 documented
+   variables (SOURCE, NAMESPACE, CR_NAME, CATALOG_IMG, DEMO_SMOKE,
+   DEMO_*_IMAGE, KAFKA_*, …) were silently re-derived from defaults —
+   `SOURCE=local` installed the published operator; a pinned CATALOG_IMG was
+   re-resolved. Fixed structurally: the caller's entire exported environment
+   (flags, env, env files) is serialized into a runner script the pane
+   executes; the tests assert the previously-dropped variables arrive.
+2. `--cr-file` never reconciled metadata.name/namespace — a CR applied
+   elsewhere printed a false "applied" and waited 15 minutes in the wrong
+   namespace. Now rejected at validation time (before anything runs).
+3. The registry cluster-admin pre-check ran after the whole BYOI install —
+   moved into preflight.
+4. `infra_ready` judged four components by one (postgresql) — now requires
+   Postgres, Valkey, MinIO, and the minio-init job.
+5. TLS verification failures (curl 60 &c.) hit the generic retry branch with
+   no hint — now a distinct branch naming the cause and RHBK_INSECURE_TLS=1
+   (documented in the env example and runbook).
+6. `--channel`/names reached the cluster-admin apply unvalidated — charset
+   guards added.
+7. A bare `--catalog-repo` built a docker.io image while discovery queried
+   quay.io — bare namespaces now normalize to quay.io.
+8. "operator installed from X" printed even when the pre-existing CSV simply
+   stayed — now "kept the existing install (run --reset to change version)".
+
+Also fixed from the notes: `--data-binary` keeps binary-safe semantics;
+CR_RENDER_TMP is trap-cleaned; the watch tmux wrapper guards nested sessions;
+in-step skips no longer advance the plan counter; `--source=local` skips
+catalog resolution; the pagination warning reaches the caller's stderr;
+RBACWorkerReady (documented non-gating) is informational in the verification
+table, and CoreServicesReady is listed.
+
+Accepted with rationale: CONTAINER_TOOL applies to BUILD_MODE=docker (auto
+prefers the in-cluster build for internal-registry IMG); --reset's
+CatalogSource/RBAC deletion on shared clusters (single-tenant demo
+assumption); recorded-response registry-API tests as a follow-up.

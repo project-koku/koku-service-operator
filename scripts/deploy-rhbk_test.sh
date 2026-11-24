@@ -272,6 +272,24 @@ case "$(cat "$arglog")" in
   *) echo "FAIL: without a CA the call falls back to -k" >&2; fail=1 ;;
 esac
 
+# TLS verification failure is actionable (cross-model review #5)
+cat >"${stub_dir}/curl" <<'EOF'
+#!/usr/bin/env bash
+echo "curl: (60) SSL certificate problem" >&2
+exit 60
+EOF
+chmod +x "${stub_dir}/curl"
+tls_out="$(safe_curl https://keycloak.example/realms/master 2>&1)" && tls_rc=0 || tls_rc=$?
+assert_eq "$tls_rc" "0" "TLS failure returns safely under set -e"
+case "$tls_out" in
+  *"RHBK_INSECURE_TLS=1"*) : ;;
+  *) echo "FAIL: TLS failure must point at RHBK_INSECURE_TLS=1 (got: $tls_out)" >&2; fail=1 ;;
+esac
+case "$tls_out" in
+  *"TLS verification failed"*) : ;;
+  *) echo "FAIL: TLS failure is named as such" >&2; fail=1 ;;
+esac
+
 if [[ "$fail" -ne 0 ]]; then
   echo "deploy-rhbk_test: FAILED" >&2
   exit 1
