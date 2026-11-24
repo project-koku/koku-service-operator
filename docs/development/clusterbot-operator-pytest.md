@@ -13,7 +13,7 @@ cluster-bot reproduction are tracked in
 |--------------|-------------|
 | [clusterbot.md](clusterbot.md) | Quick Redpanda smoke (`scripts/clusterbot-smoke.sh`) — no AMQ Streams pytest infra |
 | [allnamespaces.md](allnamespaces.md) | AllNamespaces watch vs suggested install NS |
-| [pre-prod-install.md](pre-prod-install.md) | Full BYOI + UI OAuth mirror |
+| [pre-prod-demo.md](pre-prod-demo.md) | Full BYOI + UI OAuth mirror |
 | [crc-testing.md](crc-testing.md) | Laptop `make run` against CRC |
 | [cmsc-e2e.md](cmsc-e2e.md) | Operator lifecycle Go e2e after stack is Ready (COST-7698; not pytest) |
 | [openshift-ci.md](../openshift-ci/openshift-ci.md) | Prow analogue: OLM catalog install + same stack/pytest scripts |
@@ -481,7 +481,7 @@ images and reconciliation — out of G0 beta scope.
 
 ## Optional — UI login (`Phase=Ready`)
 
-See [pre-prod-install.md](pre-prod-install.md) and `mirror-ui-oauth-secret.sh`.
+See [pre-prod-demo.md](pre-prod-demo.md) and `mirror-ui-oauth-secret.sh`.
 
 ## Problems we hit (and fixes)
 

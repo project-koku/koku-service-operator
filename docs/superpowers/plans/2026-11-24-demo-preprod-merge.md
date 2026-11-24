@@ -223,10 +223,10 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Delete: `docs/development/pre-prod-install.md`, `docs/development/pre-prod-olm-demo-runbook.md`
 - Modify: `docs/development/crc-testing.md`, `scripts/README.md`, `scripts/demo-preprod.env.example`
 
-- [ ] **Step 1: Write the merged runbook** covering: prerequisites, the three sources, version/arch discovery and their failure modes, `--prereqs-only`/`--skip-prereqs --cr-file`, profiles, reset, the verification table, manual-mode console instructions, and the arm64 template; cross-reference upstream #219/#220.
-- [ ] **Step 2: Update** `crc-testing.md` (profile semantics, arm64 template path), `scripts/README.md` (new entrypoint surface), env example comments.
-- [ ] **Step 3: Verify** every command in the runbook exists in `--help` (grep the help output for each documented flag).
-- [ ] **Step 4: Commit** — `docs: single runbook for the merged demo installer (#11)`
+- [x] **Step 1: Write the merged runbook** covering: prerequisites, the three sources, version/arch discovery and their failure modes, `--prereqs-only`/`--skip-prereqs --cr-file`, profiles, reset, the verification table, manual-mode console instructions, and the arm64 template; cross-reference upstream #219/#220.
+- [x] **Step 2: Update** `crc-testing.md` (profile semantics, arm64 template path), `scripts/README.md` (new entrypoint surface), env example comments.
+- [x] **Step 3: Verify** every command in the runbook exists in `--help` (grep the help output for each documented flag).
+- [x] **Step 4: Commit** — `docs: single runbook for the merged demo installer (#11)`
 
 ---
 

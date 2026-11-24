@@ -132,7 +132,7 @@ Recommended: operator + CMSC both in `cost-onprem`. BYOI may stay in
 `cost-byoi-infra`, `kafka`, `keycloak`, `openshift-storage`, etc.
 
 `make deploy` scaffolds into `cost-onprem`. Full walkthrough:
-[clusterbot.md](clusterbot.md). UI + Keycloak path: [pre-prod-install.md](pre-prod-install.md).
+[clusterbot.md](clusterbot.md). UI + Keycloak path: [pre-prod-demo.md](pre-prod-demo.md).
 OLMv1 sample: [config/samples/olmv1/](../../config/samples/olmv1/).
 
 ## Cluster Bot / pytest

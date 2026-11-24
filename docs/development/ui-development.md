@@ -8,7 +8,7 @@ The UI source lives in the **`project-koku/koku-ui`** repo (`apps/…` paths bel
 are relative to that checkout); seeding and cluster wiring live in this repo.
 
 For the cluster install itself see
-[crc-testing.md](crc-testing.md) / [pre-prod-install.md](pre-prod-install.md).
+[crc-testing.md](crc-testing.md) / [pre-prod-demo.md](pre-prod-demo.md).
 
 ---
 

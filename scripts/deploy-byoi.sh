@@ -3,7 +3,7 @@
 #   Kafka (AMQ Streams) → Postgres/Valkey/MinIO → Keycloak/RHBK → UI OAuth mirror.
 #
 # This does NOT install the operator or apply the CostManagementServiceConfig.
-# See docs/development/pre-prod-install.md (Part B) and scripts/deploy-incluster.sh.
+# See docs/development/pre-prod-demo.md (Part B) and scripts/deploy-incluster.sh.
 #
 # Usage (from operator repo root):
 #   ./scripts/deploy-byoi.sh
@@ -234,4 +234,4 @@ fi
 echo ""
 echo "Next (Part B): build/push an amd64 operator image, then:"
 echo "  IMG=<image> ./scripts/deploy-incluster.sh ${NAMESPACE}"
-echo "Render/apply a CR with matching hosts (see docs/development/pre-prod-install.md)."
+echo "Render/apply a CR with matching hosts (see docs/development/pre-prod-demo.md)."
