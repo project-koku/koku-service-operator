@@ -186,7 +186,7 @@ rm -f "$fx_manual"
 assert_contains "$plan_manual" "CR file:     " "manual plan shows the CR file"
 assert_contains "$plan_manual" "Install the operator through the OpenShift console" "manual plan previews the console step"
 assert_contains "$plan_manual" "quay.io/project-koku/koku-service-operator-catalog:latest" "manual plan falls back to latest when no semver tag exists"
-assert_contains "$plan_manual" "operator:    v0.0.1" "manual plan names the operator version"
+assert_contains "$plan_manual" "version:     latest" "manual plan shows the truthful resolved version"
 assert_contains "$plan_manual" "--watch" "manual plan points at --watch"
 
 # Ported from demo-preprod-olm_test.sh (offline greps against the merged script)

@@ -192,7 +192,6 @@ KAFKA_CLUSTER_NAME="${KAFKA_CLUSTER_NAME:-cost-onprem-kafka}"
 CATALOG_REPO="${CATALOG_REPO:-quay.io/project-koku}"
 CATALOG_NAME="${CATALOG_NAME:-koku-service-operator-catalog}"
 VERSION="${VERSION:-}"
-OPERATOR_VERSION="${OPERATOR_VERSION:-v0.0.1}"
 CHANNEL="${CHANNEL:-beta}"
 ARCH_CHECK="${ARCH_CHECK:-1}"
 CONSOLE_USERNAME="${CONSOLE_USERNAME:-kubeadmin}"
@@ -206,9 +205,12 @@ if [[ -z "${CATALOG_IMG:-}" ]]; then
   REPO_PATH="${REPO_PATH%/}"
   if RESOLVED_VERSION="$(resolve_catalog_version "${REPO_PATH}/koku-service-operator-catalog" "${VERSION:-}")"; then
     CATALOG_IMG="${CATALOG_REPO}/koku-service-operator-catalog:${RESOLVED_VERSION}"
+    CATALOG_VERSION="$RESOLVED_VERSION"
   else
     exit 1
   fi
+else
+  CATALOG_VERSION="${CATALOG_IMG##*:}"
 fi
 export CATALOG_IMG
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
@@ -226,7 +228,14 @@ IMG="${IMG:-image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/koku-s
 export IMG
 
 STEP_N=0
-STEP_TOTAL=8
+# The step count and plan below must match what the selected source runs
+# (review warning #20): registry has no build steps; manual stops at the
+# instructions.
+case "$SOURCE" in
+  registry) STEP_TOTAL=7 ;;
+  local) STEP_TOTAL=8 ;;
+  manual) STEP_TOTAL=4 ;;
+esac
 
 if [[ -t 1 ]]; then
   C_BOLD="$(tput bold 2>/dev/null || true)"
@@ -275,7 +284,7 @@ Pre-prod demo plan
   context:     ${KUBE_CONTEXT:-<current>}
   source:      ${SOURCE}
   catalog:     ${CATALOG_IMG}
-  operator:    ${OPERATOR_VERSION}
+  version:     ${CATALOG_VERSION}
   app NS:      ${NAMESPACE}  (CR ${CR_NAME})
   infra NS:    ${INFRA_NAMESPACE}
   kafka NS:    ${KAFKA_NAMESPACE}
@@ -290,15 +299,35 @@ Pre-prod demo plan
   profile:     ${PROFILE:-default}$([[ "$PROFILE" == "single-node" ]] && echo "  (Kafka 1 broker + 1 controller, 10Gi/5Gi)")
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
-  [1/8] Preflight (context, oc, RHBK script, StorageClass)
-  [2/8] --reset: delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}
-  [3/8] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
-  [4/8] Operator image (${BUILD_MODE}: docker or OpenShift binary build)
-  [5/8] In-cluster operator (./scripts/deploy-incluster.sh)
-  [6/8] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
-  [7/8] Wait until UI Deployment is Ready
-  [8/8] open the UI Route
+  [1/${STEP_TOTAL}] Preflight (context, oc, RHBK script, StorageClass)
+  [2/${STEP_TOTAL}] --reset: delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}
+  [3/${STEP_TOTAL}] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
 EOF
+  case "$SOURCE" in
+    registry)
+      cat <<EOF
+  [4/${STEP_TOTAL}] Operator install (registry via OLM: CatalogSource, OperatorGroup, Subscription)
+  [5/${STEP_TOTAL}] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
+  [6/${STEP_TOTAL}] Wait for UI Deployment + CMSC verification table
+  [7/${STEP_TOTAL}] open the UI Route
+EOF
+      ;;
+    local)
+      cat <<EOF
+  [4/${STEP_TOTAL}] Operator image (${BUILD_MODE}: docker or OpenShift binary build)
+  [5/${STEP_TOTAL}] In-cluster operator (./scripts/deploy-incluster.sh)
+  [6/${STEP_TOTAL}] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
+  [7/${STEP_TOTAL}] Wait for UI Deployment + CMSC verification table
+  [8/${STEP_TOTAL}] open the UI Route
+EOF
+      ;;
+    manual)
+      cat <<EOF
+  [4/${STEP_TOTAL}] Render CR + console install instructions (then --watch)
+EOF
+      ;;
+  esac
+
   if [[ "$PREREQS_ONLY" == "1" ]]; then
     echo "  Prereqs only: stopping after the prerequisites."
   fi
@@ -885,7 +914,7 @@ Install the operator through the OpenShift console:
      with image ${CATALOG_IMG} and source type grpc.
   2. Wait for the catalog source to be Ready, then open Ecosystem -> Software Catalog.
      Search for Cost Management Service Operator and click Install.
-  3. Verify that the catalog offers ${OPERATOR_VERSION}, then choose channel ${CHANNEL},
+  3. Verify that the catalog offers ${CATALOG_VERSION}, then choose channel ${CHANNEL},
      installation mode All namespaces on the cluster, installed namespace
      ${NAMESPACE}, and Automatic approval. Click Install.
   4. Wait until Installed Operators shows the CSV as Succeeded, then run:
