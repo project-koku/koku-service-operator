@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-24-demo-preprod-merge-design.md`
 
-**Issue tracking:** pgarciaq/koku-service-operator issues #1–#11 (each task names its issue). Upstream: project-koku/koku-service-operator#219 (arm64), #220 (versioning).
+**Issue tracking:** pgarciaq/koku-service-operator issues #1–#12 (each task names its issue). Upstream: project-koku/koku-service-operator#219 (arm64), #220 (versioning).
 
 ## Global Constraints
 
@@ -230,6 +230,25 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 
 ---
 
+### Task 13: Container tool abstraction — docker/podman (issue #12; executes after Task 5, see order table)
+
+**Files:**
+- Modify: `scripts/demo-preprod.sh` (`docker_up` ~551, `build_docker` ~570, auto-mode selection ~578–592)
+- Modify: `scripts/demo-preprod.env.example` (document `CONTAINER_TOOL`)
+- Test: `scripts/demo-preprod_test.sh`
+
+**Interfaces:**
+- Consumes: `NODE_ARCH` from Task 5.
+- Produces (lib): `container_tool` → prints `docker|podman|none` (honors `CONTAINER_TOOL` env override; docker only when `docker buildx version` succeeds; else podman when `command -v podman`; else `none`). `docker_up` becomes the capability probe (buildx check — the podman-docker shim fails it). `build_docker` branches: docker → `docker buildx build --platform linux/${NODE_ARCH} -t "$IMG" --push "$ROOT"`; podman → `podman build --platform linux/${NODE_ARCH} -t "$IMG" "$ROOT"` then `podman push "$IMG"`. Auto-mode preference: openshift when `IMG` is the internal registry, else the detected tool, else openshift.
+
+- [ ] **Step 1: Write the failing tests** — with a stub `bin` dir prepended to `PATH`: (a) stub `docker` whose `info` succeeds but `buildx version` fails (podman-docker shim emulation) → `docker_up` returns false and `container_tool` prints `none` (or `podman` when a stub podman is present); (b) capable docker stub → `container_tool` prints `docker`; (c) build-command emission: docker path emits one `buildx build … --push`; podman path emits `build` followed by `push`; (d) `CONTAINER_TOOL=podman` override wins.
+- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL on the new assertions.
+- [ ] **Step 3: Implement** the lib helper, the capability probe, and the branching build function per the interfaces above; document `CONTAINER_TOOL` and the `oc registry login` note for podman pushes to the internal registry in the env example.
+- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [ ] **Step 5: Commit** — `feat(demo): docker/podman container tool abstraction for local builds (#12)`
+
+---
+
 ## Task order and issue mapping
 
 | Order | Task | Issue | Depends on |
@@ -239,12 +258,13 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 | 3 | Task 3 | #2 | Task 1 |
 | 4 | Task 4 | #3 | Tasks 1, 3 |
 | 5 | Task 5 | #4 | Task 1 |
-| 6 | Task 6 | #9 | Tasks 1, 2 |
-| 7 | Task 7 | #5 | Task 1 |
-| 8 | Task 8 | #6 | Task 1 |
-| 9 | Task 9 | #8 | Task 1 |
-| 10 | Task 10 | #7 | Task 4 |
-| 11 | Task 11 | #10 | all functional tasks |
-| 12 | Task 12 | #11 | all functional tasks |
+| 6 | Task 13 | #12 | Tasks 1, 5 |
+| 7 | Task 6 | #9 | Tasks 1, 2 |
+| 8 | Task 7 | #5 | Task 1 |
+| 9 | Task 8 | #6 | Task 1 |
+| 10 | Task 9 | #8 | Task 1 |
+| 11 | Task 10 | #7 | Task 4 |
+| 12 | Task 11 | #10 | all functional tasks |
+| 13 | Task 12 | #11 | all functional tasks |
 
-Tasks 5–9 are mutually independent after Task 1 and can be executed in any order or in parallel; the order above is the recommended sequence (default path and safety first, then UX, then teardown, then consolidation). E2E checkpoints requiring a cluster: end of Task 4 (amd64 registry install), Task 5 (arm64 negative), Task 10 (reset cycle).
+Tasks 6–9 and 13 are mutually independent after their dependencies and can be executed in any order or in parallel; the order above is the recommended sequence (default path and safety first, then UX, then teardown, then consolidation). E2E checkpoints requiring a cluster: end of Task 4 (amd64 registry install), Task 5 (arm64 negative), Task 10 (reset cycle).
