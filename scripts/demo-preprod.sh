@@ -644,6 +644,10 @@ if [[ "$DEMO_RESET" == "1" ]]; then
   fi
   "$KUBECTL" delete consolelink "${CR_NAME}-cost-management" --ignore-not-found=true >/dev/null || true
   "$KUBECTL" delete clusterrole,clusterrolebinding -l "app.kubernetes.io/instance=${CR_NAME}" --ignore-not-found=true >/dev/null || true
+  # OLM objects go after the CMSC deletion (the operator cleared its finalizer
+  # above) and before the namespaces: Subscription, CSV, OperatorGroup in the
+  # app namespace, plus our CatalogSource in openshift-marketplace.
+  reset_olm_objects "$KUBECTL" "$NAMESPACE" "$CATALOG_NAME"
 
   delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloakrealmimport
   delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloak keycloak

@@ -652,6 +652,65 @@ fi
 bad_prof="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --profile=bogus 2>&1)" && prof_rc=0 || prof_rc=$?
 assert_eq "$prof_rc" "2" "unknown profile rejected"
 
+# --- Task 10 (#7): reset removes OLM objects ---
+stub_dir="$(mktemp -d)"
+cat >"${stub_dir}/oc-reset" <<EOF
+#!/bin/bash
+echo "\$*" >> "${stub_dir}/log"
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-reset"
+reset_olm_objects "${stub_dir}/oc-reset" cost-demo koku-service-operator-catalog >/dev/null 2>&1
+reset_cmds="$(cat "${stub_dir}/log")"
+rm -rf "$stub_dir"
+assert_contains "$reset_cmds" "delete subscription koku-service-operator -n cost-demo --ignore-not-found" "reset removes the Subscription"
+assert_contains "$reset_cmds" "delete csv -l operators.coreos.com/koku-service-operator.cost-demo -n cost-demo --ignore-not-found" "reset removes CSVs by label"
+assert_contains "$reset_cmds" "delete operatorgroup koku-service-operator-group -n cost-demo --ignore-not-found" "reset removes the OperatorGroup"
+assert_contains "$reset_cmds" "delete catalogsource koku-service-operator-catalog -n openshift-marketplace --ignore-not-found" "reset removes the CatalogSource"
+
+grep -Fq 'reset_olm_objects "$KUBECTL" "$NAMESPACE" "$CATALOG_NAME"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the reset block must call reset_olm_objects" >&2
+  fail=1
+}
+
+# --- Task 11 (#10): consolidation — remaining acceptance coverage ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+for _flag in --reset --dry-run --no-tmux --rebuild --no-open --version --catalog-repo --channel --source; do
+  case "$help_out" in
+    *"$_flag"*) ;;
+    *) echo "FAIL: help must document $_flag" >&2; fail=1 ;;
+  esac
+done
+
+# KUBE_CONTEXT defaults to empty (current context), never clusterbot
+grep -Fq 'KUBE_CONTEXT="${KUBE_CONTEXT:-}"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: KUBE_CONTEXT must default to the current context" >&2
+  fail=1
+}
+
+# ARCH_CHECK=0 skip path exists and warns
+grep -Fq 'ARCH_CHECK=0 — image architecture checks skipped' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: ARCH_CHECK=0 must warn that checks are skipped" >&2
+  fail=1
+}
+
+# --cr-file passthrough: the apply step uses the resolved CR, not a fixed path
+grep -Fq '"$KUBECTL" apply -f "$CR_TO_APPLY"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the apply step must use the resolved CR (rendered or user-provided)" >&2
+  fail=1
+}
+
+# The arm64 template is parseable as an env file (comments + KEY=VALUE only)
+while IFS= read -r _line || [[ -n "$_line" ]]; do
+  _line="${_line%$'\r'}"
+  [[ "$_line" =~ ^[[:space:]]*# ]] && continue
+  [[ -z "${_line//[[:space:]]/}" ]] && continue
+  [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
+    echo "FAIL: demo-preprod.arm64.env has a non-assignment line: ${_line}" >&2
+    fail=1
+  }
+done <"${ROOT}/scripts/demo-preprod.arm64.env"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

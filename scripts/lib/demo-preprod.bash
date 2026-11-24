@@ -678,3 +678,18 @@ Demo/evaluation profile — not for production.
   OIDC insecureSkipVerify. For production see docs/install/production.md.
 EOF
 }
+
+# Remove the OLM objects a registry-source install created: Subscription,
+# CSVs (by OLM's package label), OperatorGroup in the app namespace, and the
+# CatalogSource in openshift-marketplace. Called by --reset AFTER the CMSC
+# deletion (the operator must survive long enough to clear its finalizer).
+reset_olm_objects() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local catalog_name="${3:?catalog source name required}"
+  echo "  removing OLM objects (Subscription, CSV, OperatorGroup, CatalogSource)…"
+  "$kubectl" delete subscription koku-service-operator -n "$namespace" --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete csv -l "operators.coreos.com/koku-service-operator.${namespace}" -n "$namespace" --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete operatorgroup koku-service-operator-group -n "$namespace" --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete catalogsource "$catalog_name" -n openshift-marketplace --ignore-not-found >/dev/null 2>&1 || true
+}
