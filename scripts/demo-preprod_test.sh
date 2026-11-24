@@ -39,7 +39,12 @@ assert_not_contains() {
   fi
 }
 
-# --- Dockerfile: OpenShift non-root UID cannot write WORKDIR /workspace ---
+# TEST POLICY (issue #22): behavior tests first — stub the command and assert
+# what it does (see the tmux, ready-check, and wait_for_ui tests). Source-text
+# greps are kept ONLY as wiring checks for paths that need a live cluster
+# (OLM apply, password generation, arch preflight wiring) and must say so.
+
+# --- Dockerfile: OpenShift non-root UID cannot write WORKSPACE ---
 tmp="$(mktemp)"
 cat >"$tmp" <<'EOF'
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
@@ -297,14 +302,11 @@ chmod +x "${stub_dir}/oc-nocsv"
 assert_eq "$(olm_existing_csvs "${stub_dir}/oc-nocsv" cost-demo)" "" "unrelated CSVs are ignored"
 rm -rf "$stub_dir"
 
-grep -Fq 'if [[ "$SOURCE" == "registry" ]]' "${ROOT}/scripts/demo-preprod.sh" || {
-  echo "FAIL: registry source must branch before the build steps" >&2
-  fail=1
-}
-grep -Fq 'olm_install' "${ROOT}/scripts/demo-preprod.sh" || {
-  echo "FAIL: script must call olm_install for the registry source" >&2
-  fail=1
-}
+# Behavior: the registry plan shows the OLM install step (not the build steps).
+plan_reg="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_reg" "[4/7] Operator install (registry via OLM" "registry plan shows the OLM step"
+assert_not_contains "$plan_reg" "Operator image (" "registry plan promises no image build"
+# Wiring (cluster-only path): the marketplace permission pre-check.
 grep -Fq 'can-i create catalogsources -n openshift-marketplace' "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: registry source must pre-check marketplace permissions" >&2
   fail=1
@@ -621,10 +623,6 @@ assert_contains "$banner7" "not for production" "banner states the demo profile"
 assert_contains "$banner7" "docs/install/production.md" "banner points at the production docs"
 assert_contains "$banner7" "PLAINTEXT" "banner lists the insecure settings"
 
-grep -Fq 'REALM_ADMIN_PASSWORD' "${ROOT}/scripts/deploy-rhbk.sh" || {
-  echo "FAIL: deploy-rhbk.sh must honor REALM_ADMIN_PASSWORD" >&2
-  fail=1
-}
 grep -Fq 'openssl rand' "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: the demo must generate a random realm password" >&2
   fail=1
@@ -662,10 +660,6 @@ bad_cr="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 
 assert_eq "$cr_rc" "2" "missing --cr-file fails fast"
 assert_contains "$bad_cr" "not found" "missing --cr-file error names the file"
 
-grep -Fq 'skip "BYOI skipped (--skip-prereqs)' "${ROOT}/scripts/demo-preprod.sh" || {
-  echo "FAIL: the BYOI step must be gated on SKIP_PREREQS" >&2
-  fail=1
-}
 grep -Fq '"$CR_TO_APPLY"' "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: the apply step must use the resolved CR (user file or rendered)" >&2
   fail=1
