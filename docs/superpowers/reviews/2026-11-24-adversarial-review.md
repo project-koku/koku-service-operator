@@ -4,7 +4,7 @@ Date: 2026-11-24
 Branch: `pgarciaq-installation-script-enhancements` (22 commits vs `main`, ~2,500 insertions / 992 deletions)
 Method: three independent fresh reviewers (Saboteur, New Hire, Security Auditor), each with a hostile
 mandate and a mandatory-findings rule; findings deduplicated and cross-promoted (2+ personas → +1 severity).
-Verdict: **BLOCK** — 4 critical findings; no PR until resolved.
+Verdict: **BLOCK** — 4 critical findings; no PR until resolved. Fix work: fork issues #13–#24.
 
 ## Critical findings
 
