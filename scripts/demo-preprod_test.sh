@@ -165,6 +165,41 @@ bad_src="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=bogus ./scripts/demo-preprod
 assert_eq "$bad_rc" "2" "invalid SOURCE exits 2"
 assert_contains "$bad_src" "registry, local or manual" "invalid SOURCE names the valid values"
 
+# --- Task 2 (#1): manual source, --watch/--console; demo-preprod-olm.sh absorbed ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--watch" "help documents --watch"
+assert_contains "$help_out" "--console" "help documents --console"
+
+if [[ -e "${ROOT}/scripts/demo-preprod-olm.sh" ]]; then
+  echo "FAIL: demo-preprod-olm.sh must be absorbed into demo-preprod.sh" >&2
+  fail=1
+fi
+
+plan_manual="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=manual ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_manual" "CR file:     " "manual plan shows the CR file"
+assert_contains "$plan_manual" "Install the operator through the OpenShift console" "manual plan previews the console step"
+assert_contains "$plan_manual" "quay.io/project-koku/koku-service-operator-catalog:latest" "manual plan keeps the published catalog default"
+assert_contains "$plan_manual" "operator:    v0.0.1" "manual plan names the operator version"
+assert_contains "$plan_manual" "--watch" "manual plan points at --watch"
+
+# Ported from demo-preprod-olm_test.sh (offline greps against the merged script)
+grep -Fq 'CONSOLE_URL="https://console-openshift-console.${DOMAIN}"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: prepare output must derive the OpenShift Console URL" >&2
+  fail=1
+}
+grep -Fq 'if [[ "$DEMO_CONSOLE" == "1" ]]' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must offer a no-mutation Console URL mode" >&2
+  fail=1
+}
+grep -Fq 'Console username: ${CONSOLE_USERNAME}' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must print the console username" >&2
+  fail=1
+}
+grep -Fq "crc console --credentials" "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must explain where the kubeadmin password comes from" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

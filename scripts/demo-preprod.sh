@@ -14,6 +14,9 @@
 #   local     build the operator from this checkout, deploy in-cluster
 #   manual    prepare prereqs + CR; you install the operator via the console
 #
+#   ./scripts/demo-preprod.sh --watch         # observe an existing install until the UI is ready
+#   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username
+#
 # Settings: env vars, then scripts/demo-preprod.local.env, then
 # scripts/demo-preprod.env.example (and scripts/demo-preprod.crc.env with --crc).
 #
@@ -36,9 +39,11 @@ DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
 DEMO_CRC="${DEMO_CRC:-0}"
+DEMO_WATCH="${DEMO_WATCH:-0}"
+DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
 
 usage() {
-  sed -n '2,22p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$SCRIPT" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -49,6 +54,8 @@ while [[ $# -gt 0 ]]; do
     --rebuild) DEMO_REBUILD=1 ;;
     --no-open) DEMO_NO_OPEN=1 ;;
     --crc) DEMO_CRC=1 ;;
+    --watch) DEMO_WATCH=1 ;;
+    --console) DEMO_CONSOLE=1 ;;
     --source)
       [[ $# -ge 2 ]] || { echo "error: --source requires a value (registry|local|manual)" >&2; exit 2; }
       SOURCE="$2"
@@ -124,6 +131,13 @@ INFRA_NAMESPACE="${INFRA_NAMESPACE:-cost-byoi-infra}"
 KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 KAFKA_CLUSTER_NAME="${KAFKA_CLUSTER_NAME:-cost-onprem-kafka}"
+CATALOG_NAME="${CATALOG_NAME:-koku-service-operator-catalog}"
+CATALOG_IMG="${CATALOG_IMG:-quay.io/project-koku/koku-service-operator-catalog:latest}"
+OPERATOR_VERSION="${OPERATOR_VERSION:-v0.0.1}"
+CHANNEL="${CHANNEL:-beta}"
+CONSOLE_USERNAME="${CONSOLE_USERNAME:-kubeadmin}"
+CONSOLE_PASSWORD="${CONSOLE_PASSWORD:-}"
+CR_FILE="${CR_FILE:-/tmp/koku-demo-preprod-${NAMESPACE}.yaml}"
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
 BUILD_MODE="${BUILD_MODE:-auto}"
 IMAGE_TAG="${IMAGE_TAG:-preprod}"
@@ -210,6 +224,17 @@ Pre-prod demo plan
   [7/8] Wait until UI Deployment is Ready
   [8/8] open the UI Route
 EOF
+  if [[ "$SOURCE" == "manual" ]]; then
+    cat <<EOF
+  catalog:     ${CATALOG_IMG}
+  operator:    ${OPERATOR_VERSION}
+  CR file:     ${CR_FILE}
+
+  Manual source: after the prerequisites, the CMSC is rendered to the CR file.
+  Install the operator through the OpenShift console (instructions printed at
+  the end of the run), then observe with: ./scripts/demo-preprod.sh --watch
+EOF
+  fi
 }
 
 if [[ "$DEMO_DRY_RUN" == "1" ]]; then
@@ -268,7 +293,7 @@ start_tmux() {
   fi
 }
 
-if [[ -z "${DEMO_INNER:-}" && "$DEMO_NO_TMUX" != "1" ]] && command -v tmux >/dev/null 2>&1; then
+if [[ -z "${DEMO_INNER:-}" && "$DEMO_NO_TMUX" != "1" && "$DEMO_WATCH" != "1" && "$DEMO_CONSOLE" != "1" ]] && command -v tmux >/dev/null 2>&1; then
   start_tmux
   exit 0
 fi
@@ -314,6 +339,66 @@ DOMAIN="$(read_apps_domain "$KUBECTL")" || exit 1
 ok "apps domain=${DOMAIN}"
 KEYCLOAK_ISSUER="https://keycloak-${KEYCLOAK_NAMESPACE}.${DOMAIN}"
 UI_URL="https://${CR_NAME}-ui-${NAMESPACE}.${DOMAIN}"
+CONSOLE_URL="https://console-openshift-console.${DOMAIN}"
+
+print_console_access() {
+  echo "OpenShift Console: ${CONSOLE_URL}"
+  echo "Console username: ${CONSOLE_USERNAME}"
+  if [[ -n "$CONSOLE_PASSWORD" ]]; then
+    echo "Console password: ${CONSOLE_PASSWORD}"
+  else
+    echo "Console password: set CONSOLE_PASSWORD, or retrieve it from your cluster's"
+    echo "  provisioning output (kubeadmin; CRC prints it via 'crc console --credentials')."
+  fi
+}
+
+# Observe an existing install: wait for the UI Deployment, then open the Route.
+# Deadline-bounded wait lands with the verification-table task; until then this
+# mirrors the absorbed demo-preprod-olm.sh behavior.
+wait_for_ui() {
+  echo "Waiting for deployment/${CR_NAME}-ui in ${NAMESPACE}..."
+  until "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${CR_NAME}-ui" --timeout=30s; do
+    sleep 5
+  done
+  echo "UI ready: ${UI_URL}"
+  echo "UI login: admin / admin"
+  if [[ "$DEMO_NO_OPEN" != "1" && "$OPEN_BROWSER" == "1" ]] && command -v open >/dev/null 2>&1; then
+    open "$UI_URL" || true
+  fi
+}
+
+start_watch_tmux() {
+  need_cmd tmux
+  tmux has-session -t "$TMUX_SESSION" 2>/dev/null && tmux kill-session -t "$TMUX_SESSION"
+  tmux new-session -d -s "$TMUX_SESSION" -n demo
+  tmux send-keys -t "${TMUX_SESSION}:demo.0" \
+    "$KUBECTL -n $(printf %q "$NAMESPACE") get cmsc $(printf %q "$CR_NAME") -w" C-m
+  tmux split-window -h -t "${TMUX_SESSION}:demo" \
+    "$KUBECTL -n $(printf %q "$NAMESPACE") get pods -w"
+  tmux split-window -v -t "${TMUX_SESSION}:demo.1" \
+    "cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_NO_TMUX=1 OPEN_BROWSER=$(printf %q "$OPEN_BROWSER") $(printf %q "$SCRIPT") --watch"
+  tmux select-pane -t "${TMUX_SESSION}:demo.0"
+  tmux attach-session -t "$TMUX_SESSION"
+}
+
+if [[ "$DEMO_CONSOLE" == "1" ]]; then
+  print_console_access
+  exit 0
+fi
+
+if [[ "$DEMO_WATCH" == "1" ]]; then
+  if ! "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+    echo "error: CMSC ${NAMESPACE}/${CR_NAME} is not present." >&2
+    echo "  Run --source=manual (or registry/local) first; --watch observes an existing install." >&2
+    exit 1
+  fi
+  if [[ "$DEMO_NO_TMUX" == "1" ]]; then
+    wait_for_ui
+  else
+    start_watch_tmux
+  fi
+  exit 0
+fi
 
 # Helpers used by --reset and later skip-if-ready checks. Defined before reset
 # because deleting the app namespace kills the operator; we must delete the CR
@@ -571,6 +656,40 @@ else
   [[ -n "$KC_FIX_PID" ]] && wait "$KC_FIX_PID" 2>/dev/null || true
 fi
 ok "BYOI ready"
+
+if [[ "$SOURCE" == "manual" ]]; then
+  step "Operator install (manual)"
+  render_preprod_cr \
+    "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
+    "$CR_FILE" \
+    "$DOMAIN" \
+    "$KEYCLOAK_ISSUER" \
+    "$NAMESPACE" \
+    "$CR_NAME"
+  ok "CMSC rendered to ${CR_FILE}"
+  print_console_access
+  cat <<EOF
+
+Install the operator through the OpenShift console:
+
+  1. Administrator -> Cluster Settings -> Configuration -> OperatorHub -> Sources.
+     Create a CatalogSource named ${CATALOG_NAME} in openshift-marketplace,
+     with image ${CATALOG_IMG} and source type grpc.
+  2. Wait for the catalog source to be Ready, then open Ecosystem -> Software Catalog.
+     Search for Cost Management Service Operator and click Install.
+  3. Verify that the catalog offers ${OPERATOR_VERSION}, then choose channel ${CHANNEL},
+     installation mode All namespaces on the cluster, installed namespace
+     ${NAMESPACE}, and Automatic approval. Click Install.
+  4. Wait until Installed Operators shows the CSV as Succeeded, then run:
+
+        ${KUBECTL} apply -f ${CR_FILE}
+
+Then start the demo observers:
+
+  ./scripts/demo-preprod.sh --watch
+EOF
+  exit 0
+fi
 
 step "Operator image"
 BUILT_IMAGE=0

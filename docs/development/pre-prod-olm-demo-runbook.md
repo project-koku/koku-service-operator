@@ -1,5 +1,10 @@
 # Pre-prod OLM demo runbook
 
+> **Deprecated:** `scripts/demo-preprod-olm.sh` has been absorbed into
+> `scripts/demo-preprod.sh`: use `--source=manual` for the prepare phase and
+> `--watch` to observe. This runbook will be rewritten accordingly; until
+> then, substitute those commands for the script invocations below.
+
 Use this on a freshly provisioned Cluster Bot OpenShift cluster. It keeps the
 existing `scripts/demo-preprod.sh` path untouched and installs the published OLM
 catalog through the OpenShift console instead of building or pushing an
