@@ -385,6 +385,10 @@ KEYCLOAK_ISSUER="https://keycloak-${KEYCLOAK_NAMESPACE}.${DOMAIN}"
 UI_URL="https://${CR_NAME}-ui-${NAMESPACE}.${DOMAIN}"
 CONSOLE_URL="https://console-openshift-console.${DOMAIN}"
 
+ui_deploy_ready() {
+  [[ "$("$KUBECTL" -n "$NAMESPACE" get deploy "${CR_NAME}-ui" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
+}
+
 print_console_access() {
   echo "OpenShift Console: ${CONSOLE_URL}"
   echo "Console username: ${CONSOLE_USERNAME}"
@@ -396,19 +400,28 @@ print_console_access() {
   fi
 }
 
-# Observe an existing install: wait for the UI Deployment, then open the Route.
-# Deadline-bounded wait lands with the verification-table task; until then this
-# mirrors the absorbed demo-preprod-olm.sh behavior.
+# Deadline-bounded wait for the CMSC to reach Ready and the UI Deployment to
+# roll out: polls the CMSC conditions for visibility every 15s, up to 15m; on
+# success opens the Route; on timeout prints the CMSC status tail. Used by
+# both the main flow and --watch.
 wait_for_ui() {
-  echo "Waiting for deployment/${CR_NAME}-ui in ${NAMESPACE}..."
-  until "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${CR_NAME}-ui" --timeout=30s; do
-    sleep 5
+  local deadline=$((SECONDS + 900))
+  while (( SECONDS < deadline )); do
+    "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='phase={.status.phase}{"\n"}{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true
+    if ui_deploy_ready; then
+      "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${CR_NAME}-ui" --timeout=120s
+      echo "UI ready: ${UI_URL}"
+      echo "UI login: admin / admin"
+      if [[ "$DEMO_NO_OPEN" != "1" && "$OPEN_BROWSER" == "1" ]] && command -v open >/dev/null 2>&1; then
+        open "$UI_URL" || true
+      fi
+      return 0
+    fi
+    sleep 15
   done
-  echo "UI ready: ${UI_URL}"
-  echo "UI login: admin / admin"
-  if [[ "$DEMO_NO_OPEN" != "1" && "$OPEN_BROWSER" == "1" ]] && command -v open >/dev/null 2>&1; then
-    open "$UI_URL" || true
-  fi
+  echo "error: UI Deployment ${CR_NAME}-ui did not become Available within 15m" >&2
+  "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o yaml 2>/dev/null | tail -80 >&2 || true
+  return 1
 }
 
 start_watch_tmux() {
@@ -437,7 +450,11 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
     exit 1
   fi
   if [[ "$DEMO_NO_TMUX" == "1" ]]; then
-    wait_for_ui
+    wait_for_ui || exit 1
+    verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
+      echo "error: CMSC verification failed — see the table above" >&2
+      exit 1
+    }
   else
     start_watch_tmux
   fi
@@ -620,9 +637,7 @@ oauth_secret_ready() {
 image_present() {
   "$KUBECTL" -n "$NAMESPACE" get imagestreamtag "koku-service-operator:${IMAGE_TAG}" >/dev/null 2>&1
 }
-ui_deploy_ready() {
-  [[ "$("$KUBECTL" -n "$NAMESPACE" get deploy "${CR_NAME}-ui" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
-}
+# ui_deploy_ready is defined early (before --watch) alongside the wait helpers.
 
 # RHBK / Keycloak operator: the channel deploy-rhbk.sh pins (stable-v22) ships
 # amd64-only operator images. On the arm64 CRC node we pre-create the
@@ -949,21 +964,12 @@ ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"
 echo "  watching ${NAMESPACE}/${CR_NAME} (UIReady includes the UI rollout)…"
-deadline=$((SECONDS + 900))
-while (( SECONDS < deadline )); do
-  "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='phase={.status.phase}{"\n"}{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true
-  if ui_deploy_ready; then
-    "$KUBECTL" -n "$NAMESPACE" rollout status "deploy/${CR_NAME}-ui" --timeout=120s
-    break
-  fi
-  sleep 15
-done
-if ! ui_deploy_ready; then
-  echo "error: UI Deployment ${CR_NAME}-ui did not become Available within 15m" >&2
-  "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o yaml | tail -80 >&2 || true
-  exit 1
-fi
+wait_for_ui || exit 1
 ok "UI Deployment Ready"
+verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
+  echo "error: CMSC verification failed — see the table above" >&2
+  exit 1
+}
 
 step "Open the UI"
 echo "  ${UI_URL}"

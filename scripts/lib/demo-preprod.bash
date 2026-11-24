@@ -594,3 +594,56 @@ build_operator_image() {
       ;;
   esac
 }
+
+# Print a pass/fail table of the CMSC conditions and exit non-zero when any
+# expected condition is unhealthy. Positive conditions pass on True;
+# Progressing/Degraded pass on False (their healthy state); ROSEnabled is
+# informational (False is expected while ROS is disabled). Absent conditions
+# are reported as MISSING and count as failures.
+verify_conditions() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local cr="${3:?CR name required}"
+  local json
+  json="$("$kubectl" get cmsc "$cr" -n "$namespace" -o json 2>/dev/null)" || {
+    echo "error: cannot read CMSC ${namespace}/${cr}" >&2
+    return 1
+  }
+  printf '%s\n' "$json" | python3 -c '
+import json, sys
+
+d = json.load(sys.stdin)
+conds = {c["type"]: c for c in d.get("status", {}).get("conditions", [])}
+positive = ["Available", "UIReady", "DiscoveryComplete", "DatabaseReady",
+            "CacheReady", "KafkaReady", "StorageReady", "AuthenticationReady",
+            "SchemaUpToDate", "RBACWorkerReady", "RBACReady", "IngressReady",
+            "GatewayReady"]
+negative = ["Progressing", "Degraded"]
+fails = 0
+
+def row(name, state, detail):
+    print(f"  {name:<18} {state:<5} {detail}")
+
+print("CMSC verification:")
+for t in positive:
+    c = conds.get(t)
+    if c is None:
+        row(t, "FAIL", "MISSING"); fails += 1
+    elif c.get("status") == "True":
+        row(t, "PASS", "True (%s)" % c.get("reason", ""))
+    else:
+        row(t, "FAIL", "%s (%s)" % (c.get("status"), c.get("reason", ""))); fails += 1
+for t in negative:
+    c = conds.get(t)
+    if c is None:
+        row(t, "FAIL", "MISSING"); fails += 1
+    elif c.get("status") == "False":
+        row(t, "PASS", "False (%s)" % c.get("reason", ""))
+    else:
+        row(t, "FAIL", "%s (%s)" % (c.get("status"), c.get("reason", ""))); fails += 1
+c = conds.get("ROSEnabled")
+if c is not None:
+    row("ROSEnabled", "INFO", "%s (%s)" % (c.get("status"), c.get("reason", "")))
+sys.exit(1 if fails else 0)
+'
+}

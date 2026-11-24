@@ -132,11 +132,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 **Interfaces:**
 - Produces: `wait_for_ui` (deadline 900s; polls CMSC phase/conditions every 15s; on timeout prints the CMSC status tail and exits 1) and `verify_conditions` (prints a pass/fail table of CMSC conditions `Available, UIReady, Progressing, Degraded, DiscoveryComplete, DatabaseReady, CacheReady, KafkaReady, StorageReady, AuthenticationReady, SchemaUpToDate, RBACReady, IngressReady, GatewayReady`; `True` = pass; anything else = fail with `.reason`).
 
-- [ ] **Step 1: Write the failing tests** — `verify_conditions` against a fixture CMSC status JSON (via `KUBECTL` stub printing the fixture): all-True fixture → exit 0 and table rows; a fixture with `KafkaReady=False (TopicMissing)` → exit non-zero and the row shows the reason.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** both helpers; replace the OLM-script-style unbounded wait (absorbed in Task 2) with `wait_for_ui`; call `verify_conditions` after the UI is ready.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: Commit** — `feat(demo): deadline-bounded UI wait and CMSC verification table (#9)`
+- [x] **Step 1: Write the failing tests** — `verify_conditions` against a fixture CMSC status JSON (via `KUBECTL` stub printing the fixture): all-True fixture → exit 0 and table rows; a fixture with `KafkaReady=False (TopicMissing)` → exit non-zero and the row shows the reason.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** both helpers; replace the OLM-script-style unbounded wait (absorbed in Task 2) with `wait_for_ui`; call `verify_conditions` after the UI is ready.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: Commit** — `feat(demo): deadline-bounded UI wait and CMSC verification table (#9)`
 
 ### Task 7: Demo-profile hardening (issue #5)
 

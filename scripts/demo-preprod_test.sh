@@ -483,6 +483,72 @@ grep -Fq 'build_operator_image' "${ROOT}/scripts/demo-preprod.sh" || {
   fail=1
 }
 
+# --- Task 6 (#9): unified wait and post-install verification ---
+vdir="$(mktemp -d)"
+cat >"${vdir}/cmsc-alltrue.json" <<'EOF'
+{"status":{"phase":"Ready","conditions":[
+ {"type":"Available","status":"True","reason":"AllComponentsReady"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"False","reason":"ReconcileComplete"},
+ {"type":"Degraded","status":"False","reason":"ReconcileComplete"},
+ {"type":"ROSEnabled","status":"False","reason":"Disabled"},
+ {"type":"DiscoveryComplete","status":"True","reason":"Discovered"},
+ {"type":"DatabaseReady","status":"True","reason":"DatabaseReachable"},
+ {"type":"CacheReady","status":"True","reason":"CacheReachable"},
+ {"type":"KafkaReady","status":"True","reason":"KafkaContractValid"},
+ {"type":"StorageReady","status":"True","reason":"StorageBucketsAccessible"},
+ {"type":"AuthenticationReady","status":"True","reason":"OIDCReachable"},
+ {"type":"SchemaUpToDate","status":"True","reason":"MigrationComplete"},
+ {"type":"RBACWorkerReady","status":"True","reason":"RBACWorkerAvailable"},
+ {"type":"RBACReady","status":"True","reason":"RBACAvailable"},
+ {"type":"IngressReady","status":"True","reason":"IngressReady"},
+ {"type":"GatewayReady","status":"True","reason":"GatewayReady"}
+]}}
+EOF
+cat >"${vdir}/cmsc-bad.json" <<'EOF'
+{"status":{"phase":"Degraded","conditions":[
+ {"type":"Available","status":"False","reason":"WaitingForRBAC"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"True","reason":"Reconciling"},
+ {"type":"Degraded","status":"True","reason":"MigrationFailed"},
+ {"type":"KafkaReady","status":"False","reason":"TopicMissing"}
+]}}
+EOF
+mk_oc_cmsc() {
+  cat >"$1" <<EOF
+#!/bin/bash
+if [[ "\$2" == "cmsc" ]]; then cat "$2"; exit 0; fi
+exit 0
+EOF
+  chmod +x "$1"
+}
+mk_oc_cmsc "${vdir}/oc-good" "${vdir}/cmsc-alltrue.json"
+mk_oc_cmsc "${vdir}/oc-bad" "${vdir}/cmsc-bad.json"
+
+good_out="$(verify_conditions "${vdir}/oc-good" cost-demo cost-management)" && good_rc=0 || good_rc=$?
+assert_eq "$good_rc" "0" "all-True conditions pass"
+assert_contains "$good_out" "Available" "table lists Available"
+assert_contains "$good_out" "PASS" "table marks passes"
+assert_contains "$good_out" "INFO" "ROSEnabled is informational"
+assert_not_contains "$good_out" "FAIL" "no failures on the healthy fixture"
+
+bad_out="$(verify_conditions "${vdir}/oc-bad" cost-demo cost-management)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "1" "failing conditions fail"
+assert_contains "$bad_out" "FAIL" "table marks failures"
+assert_contains "$bad_out" "TopicMissing" "failure row shows the reason"
+assert_contains "$bad_out" "KafkaReady" "failure row names the condition"
+assert_contains "$bad_out" "MISSING" "absent conditions are reported"
+rm -rf "${vdir}"
+
+grep -Fq 'verify_conditions "$KUBECTL"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: main flow must run the CMSC verification table" >&2
+  fail=1
+}
+grep -Fq 'wait_for_ui || exit 1' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the wait step must use the deadline-bounded wait_for_ui" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
