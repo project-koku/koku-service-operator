@@ -9,7 +9,7 @@ Upstream issues: project-koku/koku-service-operator#219 (arm64), #220 (release v
 One customer-facing script that installs a demo/evaluation Cost Management
 self-managed environment on any OpenShift cluster: prerequisites, operator,
 and UI — with the operator's install source selectable (published registry
-image, local source build, or console-guided), architecture-aware,
+image, local source build, or manual-guided), architecture-aware,
 version-selectable, idempotent, and resettable. `scripts/demo-preprod.sh`
 absorbs `scripts/demo-preprod-olm.sh`, which is removed.
 
@@ -33,7 +33,7 @@ different version than requested.
 
 1. Single script replaces both; `demo-preprod-olm.sh` is deleted (tests and
    runbook ported/rewritten).
-2. Install source selectable: `--source=registry|local|console` (default
+2. Install source selectable: `--source=registry|local|manual` (default
    `registry`).
 3. Architecture autodiscovery from the target cluster + image-arch preflight
    validation of everything the install will reference.
@@ -83,12 +83,15 @@ different version than requested.
 | 4 | Build identifier | Catalog image tag: `vX.Y.Z` \| commit SHA (short/long) \| `latest`/`main`; optional `@sha256:` digest suffix |
 | 5 | Alternate registry | `--catalog-repo=<quay namespace>` (image name `koku-service-operator-catalog` fixed) |
 | 6 | Local source build | Keep current build modes (`docker`/`openshift`/`auto`), arch-aware platform selection |
-| 7 | Console mode | Keep (renamed from "manual" to `console`); mirrors article path |
+| 7 | Manual mode | Keep, named `manual` (prepare everything, print console instructions, user installs); mirrors article path |
 | 8 | Arch mismatch behavior | Hard fail listing offending images; escape hatch via env override |
 | 9 | User-provided prereqs | `--skip-prereqs` + `--cr-file <path>` only |
 | 10 | Teardown | `--reset` extended to OLM objects |
 | 11 | `--crc` | Becomes a single-node/small-cluster **sizing profile**: Kafka 1+1/15Gi. Does **not** force `BUILD_MODE`, architecture, or image overrides. `--profile=single-node` is the primary name; `--crc` stays as an alias. |
-| 12 | Demo hardening | Strip `IQE_TEST_RUN` and `CURRENCY_URL` from default render; demo banner at start/end; final summary lists insecure settings; random Keycloak admin password (printed once at the end) |
+| 12 | Demo hardening | Strip `IQE_TEST_RUN` and `CURRENCY_URL` from default render; demo banner at start/end; final summary lists insecure settings; random **realm-user** password (see hardening) |
+| 13 | KUBE_CONTEXT default | The current kube context (empty = current), not `clusterbot`; the env example stops defaulting it |
+| 14 | `demo-preprod.crc.env` fate | Split: Kafka sizing moves into the single-node profile (in-script); arm64 image overrides become an opt-in template (`demo-preprod.arm64.env`, copied into `.local.env`, never auto-loaded) |
+| 15 | Bundle-match verification | Cheap pre-existing-install detection + `--reset` advice; exact `opm render` check only when `opm` is installed (no new mandatory dependency) |
 
 ## Design
 
@@ -97,7 +100,7 @@ different version than requested.
 ```
 ./scripts/demo-preprod.sh [flags]
 
-  --source=registry|local|console   install source (default: registry)
+  --source=registry|local|manual   install source (default: registry)
   --version=<tag>                   catalog tag: vX.Y.Z | <commit-sha> | latest (default: discovered latest stable)
   --catalog-repo=quay.io/project-koku   quay namespace for the catalog image
   --channel=beta                    OLM subscription channel
@@ -107,7 +110,7 @@ different version than requested.
   --profile=single-node | --crc     small-cluster sizing profile (alias)
   --reset                           teardown: CMSC, OLM objects, namespaces
   --rebuild                         force operator image rebuild (local source)
-  --watch                           resume/observe mode (console source)
+  --watch                           resume/observe mode (manual source)
   --dry-run                         print the plan and exit
   --no-tmux, --no-open              disable tmux layout / browser launch
 ```
@@ -139,13 +142,17 @@ documented in the usage header and in comments in the env example file.
      `${CATALOG_REPO}/koku-service-operator-catalog:${VERSION}`, grpc,
      `openshift-marketplace`), OperatorGroup (AllNamespaces) + Subscription
      (channel `beta`, Automatic) in the app namespace; wait for CSV
-     `Succeeded`; verify the installed CSV's bundle matches the requested
-     catalog image (detect equal-version-different-bundle and advise
-     `--reset`).
+     `Succeeded`. Pre-existing-install detection: if a CSV already exists
+     before install, warn that — because every current bundle shares CSV
+     version `0.0.1` (upstream #220) — OLM will not treat a different
+     catalog tag as an upgrade, and advise `--reset` when changing
+     versions. Exact bundle verification (`opm render` of the catalog
+     against the installed CSV) runs only when `opm` is installed; it is
+     never a mandatory dependency.
    - **local**: existing build path (`BUILD_MODE=auto|docker|openshift`),
      with `docker` mode using the discovered node arch for
      `buildx --platform`; then `deploy-incluster.sh`.
-   - **console**: render the CR to a persistent file, print article-style
+   - **manual**: render the CR to a persistent file, print article-style
      console instructions naming the resolved catalog image and tag, exit 0.
      `--watch` resumes and waits for the CMSC/CSV to appear.
 5. **Apply CR** — rendered CR (see hardening below) or the user's `--cr-file`.
@@ -164,11 +171,17 @@ documented in the usage header and in comments in the env example file.
 - Query the registry tag API (public quay, unauthenticated; pagination
   handled) for `${CATALOG_REPO}/koku-service-operator-catalog`; select the
   highest tag matching `^v?\d+\.\d+\.\d+$`.
+- **Steady state today**: the published repo carries exactly one semver tag
+  (`v0.0.1`, cut 2026-09-15) while CI pushes `latest`/`main`/SHA tags per
+  merge. Until upstream #220 lands, the default therefore resolves to
+  `v0.0.1` — the version the Red Hat Beta article pins. Producing further
+  semver tags is upstream #220's ask, not this work.
 - `--version` accepts `vX.Y.Z`, a commit SHA (short or long — every main
   build is tagged), `latest`/`main`, or a tag with an `@sha256:…` digest
   suffix for absolute pinning.
-- No semver tag found → fall back to `:latest` **with a loud warning**
-  (expected for personal dev repos like `quay.io/martin_povolny`).
+- No semver tag found → fall back to `:latest` **with a loud warning** —
+  the documented normal case for personal dev repos (e.g.
+  `quay.io/martin_povolny`), never silent.
 - Each catalog image contains exactly one bundle, so the catalog tag pins
   the operator build; CSV contents are never parsed for version selection.
 
@@ -186,6 +199,14 @@ documented in the usage header and in comments in the env example file.
   image referenced by the rendered CR. Local source: the operator image is
   built for the node arch (openshift mode is native; docker mode uses
   `--platform`), so only workloads are checked.
+- **BYOI operand images** (AMQ Streams operands, `rhel10/postgresql-16`,
+  valkey, minio — chosen inside `deploy-kafka.sh`/`deploy-rhbk.sh`/infra
+  manifests, not in the rendered CR) are covered by a **post-deploy pass**:
+  after the BYOI step, read the running pod images in the prereq namespaces
+  (`oc get pods -o jsonpath`) and run the same arch check on them; pods
+  already failing with image errors are reported with arch context. This
+  avoids mining image references out of the prereq scripts while still
+  catching a half-dead stack.
 - **Mismatch**: hard fail, listing each offending image and the cluster arch,
   with the upstream #219 context; escape hatch: `ARCH_CHECK=0`.
 
@@ -199,8 +220,14 @@ documented in the usage header and in comments in the env example file.
 - Final summary lists every insecure setting in use: Keycloak credentials,
   Kafka PLAINTEXT, `sslMode: disable`, `insecureSkipVerify`, and points to
   `docs/install/production.md`.
-- `deploy-rhbk.sh` generates a random admin password (stored in a Secret,
-  printed once at the end of the install) instead of `admin/admin`.
+- `deploy-rhbk.sh` accepts an explicit realm-user password (env var). The
+  merged script generates a random one, stores it in a Secret, and prints it
+  once at the end of the install, replacing the `admin/admin` UI login.
+  `deploy-rhbk.sh`'s own default stays `admin/admin` so IQE/CI consumers
+  (`run-iqe-tests.sh` authenticates as the `admin` realm user) are
+  unaffected; migrating IQE to read the Secret is out of scope. (The RHBK
+  *master* admin is already random via the operator's
+  `keycloak-initial-admin` Secret — unrelated to this change.)
 
 ### Single-node profile
 
@@ -211,6 +238,18 @@ min.insync follow the broker count, as today). It does **not** set
 and **not** override workload images — arch is autodiscovered, and image
 overrides remain available through `DEMO_*_IMAGE` env vars for development
 workflows.
+
+`demo-preprod.crc.env` is split along the same line: its Kafka sizing keys
+move into the single-node profile (in-script constants/env), and its arm64
+workload image overrides become an opt-in, documented template
+(`scripts/demo-preprod.arm64.env`) that developers copy into
+`demo-preprod.local.env` — never auto-loaded by any flag. Until upstream
+#219 ships multi-arch workload images, that template (pointing at community
+arm64 rebuilds) remains the documented arm64 dev path; the arch preflight
+still hard-fails a default registry install on arm64 with the #219
+explanation. `KUBE_CONTEXT` defaults to the **current** context (not
+`clusterbot`); the env example stops defaulting it and keeps it as a
+commented hint for dev workflows.
 
 ### Reset (teardown)
 
