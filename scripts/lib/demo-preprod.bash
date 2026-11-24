@@ -693,3 +693,16 @@ reset_olm_objects() {
   "$kubectl" delete operatorgroup koku-service-operator-group -n "$namespace" --ignore-not-found >/dev/null 2>&1 || true
   "$kubectl" delete catalogsource "$catalog_name" -n openshift-marketplace --ignore-not-found >/dev/null 2>&1 || true
 }
+
+# True when the Deployment exists and has at least one available replica.
+# Kubernetes omits .status.availableReplicas when it is zero, so an EMPTY
+# result must count as not-ready — the previous `[[ "" != "0" ]]` passed a
+# crash-looping deployment as healthy (review critical #16).
+deploy_available() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local deployment="${3:?deployment name required}"
+  local n
+  n="$("$kubectl" -n "$namespace" get deploy "$deployment" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
+  [[ -n "$n" && "$n" != "0" ]]
+}

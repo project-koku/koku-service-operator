@@ -747,6 +747,37 @@ assert_contains "$plan14" "custom-kafka" "local.env KAFKA_NAMESPACE overrides th
 assert_not_contains "$plan14" "cost-byoi " "example default namespace is not used when overridden"
 rm -rf "${demo_root14}" "$fx14"
 
+# --- #16: zero/empty availableReplicas is NOT ready (behavior test) ---
+rbin="$(mktemp -d)"
+mk_oc_avail() {
+  cat >"${rbin}/oc" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"availableReplicas"* ]]; then
+  printf '%s' "$1"
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "${rbin}/oc"
+}
+mk_oc_avail "1"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "0" "one available replica is ready"
+mk_oc_avail ""
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "EMPTY availableReplicas (zero, omitted by k8s) is not ready"
+mk_oc_avail "0"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "explicit zero replicas is not ready"
+cat >"${rbin}/oc" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${rbin}/oc"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "missing deployment is not ready"
+rm -rf "$rbin"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

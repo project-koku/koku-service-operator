@@ -442,7 +442,7 @@ UI_URL="https://${CR_NAME}-ui-${NAMESPACE}.${DOMAIN}"
 CONSOLE_URL="https://console-openshift-console.${DOMAIN}"
 
 ui_deploy_ready() {
-  [[ "$("$KUBECTL" -n "$NAMESPACE" get deploy "${CR_NAME}-ui" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
+  deploy_available "$KUBECTL" "$NAMESPACE" "${CR_NAME}-ui"
 }
 
 print_console_access() {
@@ -567,7 +567,7 @@ need_ns() {
   fi
 }
 operator_ready() {
-  [[ "$("$KUBECTL" -n "$NAMESPACE" get deploy koku-service-operator -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
+  deploy_available "$KUBECTL" "$NAMESPACE" koku-service-operator
 }
 clear_finalizers() {
   local ns="$1" kind="$2"
@@ -697,8 +697,7 @@ kafka_ready() {
   [[ "$("$KUBECTL" -n "$KAFKA_NAMESPACE" get kafka "$KAFKA_CLUSTER_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
 }
 infra_ready() {
-  "$KUBECTL" -n "$INFRA_NAMESPACE" get deploy postgresql >/dev/null 2>&1 \
-    && [[ "$("$KUBECTL" -n "$INFRA_NAMESPACE" get deploy postgresql -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)" != "0" ]]
+  deploy_available "$KUBECTL" "$INFRA_NAMESPACE" postgresql
 }
 keycloak_ready() {
   [[ "$("$KUBECTL" -n "$KEYCLOAK_NAMESPACE" get keycloak keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
