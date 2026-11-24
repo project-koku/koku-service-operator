@@ -77,10 +77,14 @@ In the OpenShift console, use the **Administrator** perspective:
    cluster**, installed namespace **cost-byoi**, and **Automatic** approval.
    Click **Install**. Do not accept a newer release for this demo.
 
-Although the package currently advertises the AllNamespaces OLM mode, select
-`cost-byoi` as its installed namespace for this demo. The controller watches
-its own service-account namespace, so the CMSC and application workloads must
-remain in `cost-byoi`.
+The package installs in AllNamespaces mode and the controller watches for
+`CostManagementServiceConfig` resources in **every** namespace (in-cluster with
+no `WATCH_NAMESPACE`, the manager pins its cache cluster-wide — see
+`watchNamespace()` in `cmd/main.go`). The CMSC may therefore live in any
+namespace; `cost-byoi` is used here only as a demo convention. What must stay
+together are the application Secrets the CR references (database, cache,
+object storage, and the UI OAuth client Secret) — they must exist in the same
+namespace as the CMSC.
 
 Confirm OLM installed the package before applying the CMSC:
 
