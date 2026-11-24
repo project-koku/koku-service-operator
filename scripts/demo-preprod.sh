@@ -333,6 +333,8 @@ need_cmd "$KUBECTL"
 need_cmd python3
 need_cmd openssl
 
+demo_profile_banner
+
 step "Preflight"
 if [[ -n "${KUBE_CONTEXT}" ]]; then
   echo "Cluster context: ${KUBE_CONTEXT}"
@@ -411,7 +413,7 @@ wait_for_ui() {
     if ui_deploy_ready; then
       "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${CR_NAME}-ui" --timeout=120s
       echo "UI ready: ${UI_URL}"
-      echo "UI login: admin / admin"
+      echo "UI login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
       if [[ "$DEMO_NO_OPEN" != "1" && "$OPEN_BROWSER" == "1" ]] && command -v open >/dev/null 2>&1; then
         open "$UI_URL" || true
       fi
@@ -736,6 +738,13 @@ kafka_ready && SKIP_KAFKA=1 && skip "Kafka ${KAFKA_CLUSTER_NAME} already Ready"
 infra_ready && SKIP_INFRA=1 && skip "infra in ${INFRA_NAMESPACE} already rolled out"
 keycloak_ready && SKIP_KEYCLOAK=1 && skip "Keycloak already Ready"
 oauth_secret_ready && SKIP_OAUTH_MIRROR=1 && skip "OAuth client Secret already present"
+# Demo hardening: a fresh Keycloak provisioning gets a random realm-user
+# password (stored in a Secret afterwards). IQE/CI set REALM_ADMIN_PASSWORD
+# themselves or use DEMO_SMOKE; deploy-rhbk.sh's own default stays admin/admin.
+if [[ "$SKIP_KEYCLOAK" != "1" && -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
+  REALM_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+  export REALM_ADMIN_PASSWORD
+fi
 if [[ "${SKIP_KAFKA}${SKIP_INFRA}${SKIP_KEYCLOAK}${SKIP_OAUTH_MIRROR}" == "1111" ]]; then
   skip "all BYOI stages healthy"
 else
@@ -749,6 +758,17 @@ else
   [[ -n "$KC_FIX_PID" ]] && wait "$KC_FIX_PID" 2>/dev/null || true
 fi
 ok "BYOI ready"
+
+# Realm-user password bookkeeping (demo hardening): a fresh Keycloak got our
+# generated password — store it in a Secret; a pre-existing Keycloak keeps
+# whatever password it was provisioned with — read it back if we left one.
+if [[ "${SKIP_KEYCLOAK:-0}" != "1" && -n "${REALM_ADMIN_PASSWORD:-}" ]]; then
+  printf '%s' "$REALM_ADMIN_PASSWORD" | "$KUBECTL" -n "$NAMESPACE" create secret generic "${CR_NAME}-realm-admin" \
+    --from-file=password=/dev/stdin --dry-run=client -o yaml | "$KUBECTL" apply -f - >/dev/null
+  ok "realm-user password stored in Secret ${NAMESPACE}/${CR_NAME}-realm-admin"
+elif [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
+  REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+fi
 
 # Post-deploy arch pass: BYOI operand images are chosen inside the prereq
 # scripts, not in the CR — verify what actually got scheduled.
@@ -973,7 +993,7 @@ verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
 
 step "Open the UI"
 echo "  ${UI_URL}"
-echo "  Keycloak realm user: admin / admin"
+echo "  Keycloak realm user: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
 if [[ "$DEMO_NO_OPEN" == "1" || "$OPEN_BROWSER" == "0" ]]; then
   skip "browser launch disabled"
 elif command -v open >/dev/null 2>&1; then
@@ -984,5 +1004,7 @@ else
 fi
 
 echo ""
+demo_profile_banner
+echo ""
 echo "${C_BOLD}${C_GREEN}Demo complete.${C_RESET} UI: ${UI_URL}"
-echo "Login: admin / admin"
+echo "Login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"

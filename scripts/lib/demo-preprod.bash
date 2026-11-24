@@ -89,6 +89,27 @@ for env_key, needle in _overrides:
         raise SystemExit(f"render_preprod_cr: {env_key} set but sample line not found: {needle}")
     text = text.replace(needle, repl)
 
+# Demo-profile hardening: the default render drops the CI/test-only env vars
+# (IQE keeps them via DEMO_SMOKE=1 or the smoke sample). Strict — a drifted
+# sample must fail the render rather than silently leak the vars.
+if os.environ.get("DEMO_SMOKE", "") != "1":
+    _demo_env_blocks = [
+        "      # Live exchange rates for IQE smoke (applied to all koku containers).\n"
+        "      # Leave unset for airgapped on-prem.\n"
+        "      env:\n"
+        '        CURRENCY_URL: "https://open.er-api.com/v6/latest/USD"\n',
+        "      # Registers masu test-only routes (/enabled_tags/) for IQE. Lab/CI only.\n"
+        "      env:\n"
+        '        IQE_TEST_RUN: "True"\n',
+    ]
+    for block in _demo_env_blocks:
+        if block not in text:
+            raise SystemExit(
+                "render_preprod_cr: demo env block not found in sample CR (drift?): "
+                + block.splitlines()[0].strip()
+            )
+        text = text.replace(block, "")
+
 Path(dest).write_text(text)
 PY
 }
@@ -646,4 +667,14 @@ if c is not None:
     row("ROSEnabled", "INFO", "%s (%s)" % (c.get("status"), c.get("reason", "")))
 sys.exit(1 if fails else 0)
 '
+}
+
+# Demo/evaluation profile banner: this installer is not for production, and the
+# summary lists the insecure settings the demo profile uses.
+demo_profile_banner() {
+  cat <<'EOF'
+Demo/evaluation profile — not for production.
+  Insecure settings in use: demo realm user, Kafka PLAINTEXT, sslMode=disable,
+  OIDC insecureSkipVerify. For production see docs/install/production.md.
+EOF
 }

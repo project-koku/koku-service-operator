@@ -549,6 +549,47 @@ grep -Fq 'wait_for_ui || exit 1' "${ROOT}/scripts/demo-preprod.sh" || {
   fail=1
 }
 
+# --- Task 7 (#5): demo-profile hardening ---
+tmp7="$(mktemp)"
+render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp7" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+rendered7="$(cat "$tmp7")"
+assert_not_contains "$rendered7" "IQE_TEST_RUN" "default render drops IQE_TEST_RUN"
+assert_not_contains "$rendered7" "CURRENCY_URL" "default render drops CURRENCY_URL"
+assert_not_contains "$rendered7" "open.er-api.com" "default render drops the external currency API"
+rm -f "$tmp7"
+
+tmp7="$(mktemp)"
+DEMO_SMOKE=1 render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp7" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+unset DEMO_SMOKE
+rendered7="$(cat "$tmp7")"
+assert_contains "$rendered7" "IQE_TEST_RUN" "smoke escape hatch keeps IQE_TEST_RUN"
+assert_contains "$rendered7" "CURRENCY_URL" "smoke escape hatch keeps CURRENCY_URL"
+rm -f "$tmp7"
+
+banner7="$(demo_profile_banner)"
+assert_contains "$banner7" "not for production" "banner states the demo profile"
+assert_contains "$banner7" "docs/install/production.md" "banner points at the production docs"
+assert_contains "$banner7" "PLAINTEXT" "banner lists the insecure settings"
+
+grep -Fq 'REALM_ADMIN_PASSWORD' "${ROOT}/scripts/deploy-rhbk.sh" || {
+  echo "FAIL: deploy-rhbk.sh must honor REALM_ADMIN_PASSWORD" >&2
+  fail=1
+}
+grep -Fq 'openssl rand' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must generate a random realm password" >&2
+  fail=1
+}
+grep -Fq 'realm-admin' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must store the realm password in a Secret" >&2
+  fail=1
+}
+grep -Fq 'demo_profile_banner' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must print the profile banner" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

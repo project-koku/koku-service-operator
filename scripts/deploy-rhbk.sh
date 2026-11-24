@@ -1689,9 +1689,11 @@ json.dump(users, sys.stdout)
         echo_warning "No realmUsers found in $VALUES_FILE, using defaults"
     fi
 
-    # Default: single admin user matching historical behavior
-    cat <<'DEFAULT_USERS'
-[{"username":"admin","password":"admin","email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"1234567","accountNumber":"7890123","orgAdmin":true}]
+    # Default: single admin user matching historical behavior.
+    # REALM_ADMIN_PASSWORD overrides the password (demo-preprod.sh sets a
+    # random one; IQE/CI keep the default by not setting it).
+    cat <<DEFAULT_USERS
+[{"username":"admin","password":"${REALM_ADMIN_PASSWORD:-admin}","email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"1234567","accountNumber":"7890123","orgAdmin":true}]
 DEFAULT_USERS
 }
 

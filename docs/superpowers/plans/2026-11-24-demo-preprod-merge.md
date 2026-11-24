@@ -149,11 +149,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 **Interfaces:**
 - Produces: `render_preprod_cr` drops the `IQE_TEST_RUN` env block (masu) and `CURRENCY_URL` env (koku api) from the rendered output; `deploy-rhbk.sh` honors `REALM_ADMIN_PASSWORD` (default unchanged: `admin`); `demo-preprod.sh` generates one via `openssl rand`, exports it to `deploy-rhbk.sh`, stores it in Secret `{CR_NAME}-realm-admin` (same namespace), prints it once at the end.
 
-- [ ] **Step 1: Write the failing tests** — (a) rendered CR does not contain `IQE_TEST_RUN` or `CURRENCY_URL`; (b) rendered CR still contains them when `DEMO_SMOKE=1` is set (CI escape hatch); (c) end banner helper output contains `not for production` and `docs/install/production.md`.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** — render changes (drop lines post-substitution), `REALM_ADMIN_PASSWORD` in `deploy-rhbk.sh`'s `get_realm_users_json` path, generation + Secret + print in the demo script, banners and insecure-settings summary (realm credentials, Kafka PLAINTEXT, `sslMode: disable`, `insecureSkipVerify`).
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` and the smoke-variant render — expect PASS; confirm `costmanagementserviceconfig-smoke.yaml` untouched.
-- [ ] **Step 5: Commit** — `feat(demo): demo-profile hardening — no test routes, random realm password, banners (#5)`
+- [x] **Step 1: Write the failing tests** — (a) rendered CR does not contain `IQE_TEST_RUN` or `CURRENCY_URL`; (b) rendered CR still contains them when `DEMO_SMOKE=1` is set (CI escape hatch); (c) end banner helper output contains `not for production` and `docs/install/production.md`.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** — render changes (drop lines post-substitution), `REALM_ADMIN_PASSWORD` in `deploy-rhbk.sh`'s `get_realm_users_json` path, generation + Secret + print in the demo script, banners and insecure-settings summary (realm credentials, Kafka PLAINTEXT, `sslMode: disable`, `insecureSkipVerify`).
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` and the smoke-variant render — expect PASS; confirm `costmanagementserviceconfig-smoke.yaml` untouched.
+- [x] **Step 5: Commit** — `feat(demo): demo-profile hardening — no test routes, random realm password, banners (#5)`
 
 ### Task 8: `--prereqs-only`, `--skip-prereqs`, `--cr-file` (issue #6)
 
