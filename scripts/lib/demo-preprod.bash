@@ -214,6 +214,10 @@ resolve_catalog_version() {
   local tags="" tags_ok=1
   if ! tags="$(registry_list_tags "$repo")"; then
     tags="" tags_ok=0
+  else
+    # Fixture lines may carry a digest column ("tag sha256:..."); match on
+    # the bare tags (pin_tag_digest reads digests separately).
+    tags="$(printf '%s\n' "$tags" | awk 'NF {print $1}')"
   fi
 
   if [[ -z "$tag" ]]; then
@@ -226,21 +230,21 @@ resolve_catalog_version() {
     local best
     best="$(printf '%s\n' "$tags" | python3 -c '
 import re, sys
-vs = [l.strip() for l in sys.stdin if re.fullmatch(r"v?\d+\.\d+\.\d+", l.strip())]
+vs = [p for l in sys.stdin for p in l.split()[:1] if re.fullmatch(r"v?\d+\.\d+\.\d+", p)]
 print(max(vs, key=lambda v: tuple(int(x) for x in v.lstrip("v").split("."))) if vs else "")
 ')"
     if [[ -n "$best" ]]; then
-      printf '%s\n' "$best"
+      pin_tag_digest "$repo" "$best"
       return 0
     fi
     warn="no semver tag found in quay.io/${repo}; falling back to :latest (a moving target — pin --version for reproducibility)"
     echo "warning: ${warn}" >&2
-    printf 'latest\n'
+    pin_tag_digest "$repo" latest
     return 0
   fi
 
   if [[ "$tag" == "latest" || "$tag" == "main" ]]; then
-    printf '%s\n' "$tag"
+    pin_tag_digest "$repo" "$tag" "$digest"
     return 0
   fi
 
@@ -252,18 +256,18 @@ print(max(vs, key=lambda v: tuple(int(x) for x in v.lstrip("v").split("."))) if 
   fi
 
   if printf '%s\n' "$tags" | grep -Fxq "$tag"; then
-    printf '%s%s\n' "$tag" "$digest"
+    pin_tag_digest "$repo" "$tag" "$digest"
     return 0
   fi
   if printf '%s\n' "$tags" | grep -Fxq "v${tag}"; then
-    printf 'v%s%s\n' "$tag" "$digest"
+    pin_tag_digest "$repo" "v${tag}" "$digest"
     return 0
   fi
   if [[ "$tag" =~ ^[0-9a-f]{7,40}$ ]]; then
     local m
     m="$(printf '%s\n' "$tags" | awk -v h="$tag" 'index(h, $0) == 1 || index($0, h) == 1' | head -1)"
     if [[ -n "$m" ]]; then
-      printf '%s%s\n' "$m" "$digest"
+      pin_tag_digest "$repo" "$m" "$digest"
       return 0
     fi
   fi
@@ -781,4 +785,58 @@ validate_version_hint() {
     return 1
   fi
   return 0
+}
+
+# Print the manifest digest of a tag (empty when unknown). Closes the
+# tag→pull TOCTOU: the resolved version is pinned as tag@sha256:<digest> so
+# OLM pulls exactly what was resolved (review warning #19). Fixture lines may
+# carry "tag sha256:<digest>" pairs; lines without a digest are fine.
+registry_manifest_digest() {
+  local repo="${1:?repository path required}"
+  local tag="${2:?tag required}"
+  if [[ -n "${REGISTRY_TAG_FIXTURE:-}" ]]; then
+    fixtures_allowed REGISTRY_TAG_FIXTURE || return 1
+    awk -v t="$tag" '$1 == t && NF >= 2 { print $2; exit }' "$REGISTRY_TAG_FIXTURE" 2>/dev/null || true
+    return 0
+  fi
+  local out
+  out="$(python3 - "$repo" "$tag" 2>/dev/null <<'PY'
+import json, sys, urllib.request
+
+repo, tag = sys.argv[1], sys.argv[2]
+page = 1
+while True:
+    url = (f"https://quay.io/api/v1/repository/{repo}/tag/"
+           f"?limit=100&page={page}&filter_tag_name=like:{tag}&onlyActiveTags=true")
+    with urllib.request.urlopen(url, timeout=30) as r:
+        d = json.load(r)
+    for t in d.get("tags", []):
+        if t.get("name") == tag:
+            print(t.get("manifest_digest") or "")
+            raise SystemExit
+    if not d.get("has_additional"):
+        raise SystemExit
+    page += 1
+PY
+)" || return 0
+  printf '%s\n' "$out"
+}
+
+# Print tag@sha256:<digest> — the user-supplied suffix verbatim when given,
+# otherwise the digest discovered from the registry (bare tag when unknown).
+pin_tag_digest() {
+  local repo="${1:?repository path required}"
+  local tag="${2:?tag required}"
+  local suffix="${3:-}"
+  if [[ -n "$suffix" ]]; then
+    printf '%s%s\n' "$tag" "$suffix"
+    return 0
+  fi
+  local d
+  d="$(registry_manifest_digest "$repo" "$tag")"
+  if [[ -n "$d" ]]; then
+    printf '%s@%s\n' "$tag" "$d"
+  else
+    printf '%s\n' "$tag"
+  fi
 }

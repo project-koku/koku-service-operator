@@ -868,6 +868,19 @@ DEMO_KOKU_TAG='x"y' render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanag
 assert_eq "$render17_rc" "1" "override value with a quote fails the render"
 rm -f "$tmp17"
 
+# --- #19: resolved versions are pinned by digest when known ---
+fx19="$(mktemp)"
+printf 'main\nv0.0.1 sha256:%s\nv0.0.3 sha256:%s\n' "$(printf 'b%.0s' {1..64})" "$(printf 'c%.0s' {1..64})" >"$fx19"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog "")"
+assert_eq "$out" "v0.0.3@sha256:$(printf 'c%.0s' {1..64})" "discovered semver is digest-pinned"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1)"
+assert_eq "$out" "v0.0.1@sha256:$(printf 'b%.0s' {1..64})" "explicit tag is digest-pinned"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog main)"
+assert_eq "$out" "main" "fixture without a digest stays a bare tag"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog "v0.0.1@sha256:$(printf 'd%.0s' {1..64})")"
+assert_eq "$out" "v0.0.1@sha256:$(printf 'd%.0s' {1..64})" "user-supplied digest is preserved verbatim"
+rm -f "$fx19"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
