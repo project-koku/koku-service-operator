@@ -590,6 +590,43 @@ grep -Fq 'demo_profile_banner' "${ROOT}/scripts/demo-preprod.sh" || {
   fail=1
 }
 
+# --- Task 8 (#6): prereqs-only, skip-prereqs, --cr-file ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--prereqs-only" "help documents --prereqs-only"
+assert_contains "$help_out" "--skip-prereqs" "help documents --skip-prereqs"
+assert_contains "$help_out" "--cr-file" "help documents --cr-file"
+
+plan_po="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only 2>&1)"
+assert_contains "$plan_po" "stopping after the prerequisites" "prereqs-only plan states it stops"
+
+tmp_cr8="$(mktemp)"
+plan_sp="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --skip-prereqs --cr-file "$tmp_cr8" 2>&1)"
+rm -f "$tmp_cr8"
+assert_contains "$plan_sp" "CR:          " "skip-prereqs plan shows the user CR"
+assert_contains "$plan_sp" "user-provided; rendering skipped" "plan marks the CR as user-provided"
+assert_contains "$plan_sp" "BYOI is skipped" "skip-prereqs plan states BYOI is skipped"
+
+bad_combo="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only --skip-prereqs 2>&1)" && combo_rc=0 || combo_rc=$?
+assert_eq "$combo_rc" "2" "prereqs-only + skip-prereqs rejected"
+assert_contains "$bad_combo" "mutually exclusive" "combo error names the conflict"
+
+bad_cr="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --cr-file /nonexistent-cr.yaml 2>&1)" && cr_rc=0 || cr_rc=$?
+assert_eq "$cr_rc" "2" "missing --cr-file fails fast"
+assert_contains "$bad_cr" "not found" "missing --cr-file error names the file"
+
+grep -Fq 'skip "BYOI skipped (--skip-prereqs)' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the BYOI step must be gated on SKIP_PREREQS" >&2
+  fail=1
+}
+grep -Fq '"$CR_TO_APPLY"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the apply step must use the resolved CR (user file or rendered)" >&2
+  fail=1
+}
+grep -Fq 'USER_CR_FILE' "${ROOT}/scripts/demo-preprod.env.example" || {
+  echo "FAIL: env example documents the user CR override" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

@@ -165,11 +165,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 **Interfaces:**
 - Produces: `PREREQS_ONLY`/`--prereqs-only` (stop after BYOI with a summary + next-steps print), `SKIP_PREREQS`/`--skip-prereqs` (skip BYOI and the OAuth-secret mirror), `CR_FILE`/`--cr-file <path>` (apply that YAML instead of the rendered CR; mutually exclusive with `SOURCE=manual`'s generated file — `--cr-file` wins with a warning).
 
-- [ ] **Step 1: Write the failing tests** — help documents all three; dry-run with `--prereqs-only` prints `stopping after prerequisites`; dry-run with `--skip-prereqs --cr-file /tmp/x.yaml` prints `CR: /tmp/x.yaml` and no BYOI step.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** the flags and flow gates (BYOI step guarded by `SKIP_PREREQS != 1`; CR-apply step uses `$CR_FILE` when set).
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: Commit** — `feat(demo): prereqs-only and operator-only modes with --cr-file (#6)`
+- [x] **Step 1: Write the failing tests** — help documents all three; dry-run with `--prereqs-only` prints `stopping after prerequisites`; dry-run with `--skip-prereqs --cr-file /tmp/x.yaml` prints `CR: /tmp/x.yaml` and no BYOI step.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** the flags and flow gates (BYOI step guarded by `SKIP_PREREQS != 1`; CR-apply step uses `$CR_FILE` when set).
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: Commit** — `feat(demo): prereqs-only and operator-only modes with --cr-file (#6)`
 
 ### Task 9: `--profile=single-node` and `crc.env` split (issue #8)
 

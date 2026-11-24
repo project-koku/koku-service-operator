@@ -16,6 +16,8 @@
 #
 #   ./scripts/demo-preprod.sh --watch         # observe an existing install until the UI is ready
 #   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username
+#   ./scripts/demo-preprod.sh --prereqs-only  # install prerequisites only, then stop
+#   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
 #
 # Settings: env vars, then scripts/demo-preprod.local.env, then
 # scripts/demo-preprod.env.example (and scripts/demo-preprod.crc.env with --crc).
@@ -41,9 +43,12 @@ DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
 DEMO_CRC="${DEMO_CRC:-0}"
 DEMO_WATCH="${DEMO_WATCH:-0}"
 DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
+PREREQS_ONLY="${PREREQS_ONLY:-0}"
+SKIP_PREREQS="${SKIP_PREREQS:-0}"
+USER_CR_FILE="${USER_CR_FILE:-}"
 
 usage() {
-  sed -n '2,24p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+  sed -n '2,26p' "$SCRIPT" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +61,13 @@ while [[ $# -gt 0 ]]; do
     --crc) DEMO_CRC=1 ;;
     --watch) DEMO_WATCH=1 ;;
     --console) DEMO_CONSOLE=1 ;;
+    --prereqs-only) PREREQS_ONLY=1 ;;
+    --skip-prereqs) SKIP_PREREQS=1 ;;
+    --cr-file)
+      [[ $# -ge 2 ]] || { echo "error: --cr-file requires a path" >&2; exit 2; }
+      USER_CR_FILE="$2"
+      shift
+      ;;
     --source)
       [[ $# -ge 2 ]] || { echo "error: --source requires a value (registry|local|manual)" >&2; exit 2; }
       SOURCE="$2"
@@ -140,6 +152,14 @@ case "$SOURCE" in
     exit 2
     ;;
 esac
+if [[ "$PREREQS_ONLY" == "1" && "$SKIP_PREREQS" == "1" ]]; then
+  echo "error: --prereqs-only and --skip-prereqs are mutually exclusive" >&2
+  exit 2
+fi
+if [[ -n "$USER_CR_FILE" && ! -f "$USER_CR_FILE" ]]; then
+  echo "error: --cr-file not found: ${USER_CR_FILE}" >&2
+  exit 2
+fi
 NAMESPACE="${NAMESPACE:-cost-byoi}"
 CR_NAME="${CR_NAME:-cost-management}"
 INFRA_NAMESPACE="${INFRA_NAMESPACE:-cost-byoi-infra}"
@@ -256,6 +276,15 @@ Pre-prod demo plan
   [7/8] Wait until UI Deployment is Ready
   [8/8] open the UI Route
 EOF
+  if [[ "$PREREQS_ONLY" == "1" ]]; then
+    echo "  Prereqs only: stopping after the prerequisites."
+  fi
+  if [[ "$SKIP_PREREQS" == "1" ]]; then
+    echo "  Skip prereqs: BYOI is skipped; the operator installs on existing infrastructure."
+  fi
+  if [[ -n "$USER_CR_FILE" ]]; then
+    echo "  CR:          ${USER_CR_FILE} (user-provided; rendering skipped)"
+  fi
   if [[ "$SOURCE" == "manual" ]]; then
     cat <<EOF
   CR file:     ${CR_FILE}
@@ -351,8 +380,14 @@ require_reachable_cluster "$KUBECTL" || exit 1
 ok "using $($KUBECTL config current-context) — $($KUBECTL whoami --show-server)"
 
 # Customer-friendly early failure: the demo namespaces must exist or be
-# creatable (a developer sandbox or restricted user cannot create them).
-for _ns in "$NAMESPACE" "$INFRA_NAMESPACE" "$KAFKA_NAMESPACE" "$KEYCLOAK_NAMESPACE"; do
+# creatable (a developer sandbox or restricted user cannot create them). With
+# --skip-prereqs only the application namespace matters.
+if [[ "$SKIP_PREREQS" == "1" ]]; then
+  _ns_list=("$NAMESPACE")
+else
+  _ns_list=("$NAMESPACE" "$INFRA_NAMESPACE" "$KAFKA_NAMESPACE" "$KEYCLOAK_NAMESPACE")
+fi
+for _ns in "${_ns_list[@]}"; do
   if ! "$KUBECTL" get ns "$_ns" >/dev/null 2>&1; then
     if ! "$KUBECTL" auth can-i create namespaces >/dev/null 2>&1; then
       echo "error: namespace '${_ns}' does not exist and this user cannot create namespaces." >&2
@@ -469,16 +504,22 @@ fi
 NODE_ARCH="$(cluster_node_arch "$KUBECTL")" || exit 1
 ok "cluster architecture ${NODE_ARCH}"
 
-# Render the CMSC once, early: the arch preflight needs its workload images,
-# and the apply step reuses it.
-CR_RENDER_TMP="$(mktemp)"
-render_preprod_cr \
-  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
-  "$CR_RENDER_TMP" \
-  "$DOMAIN" \
-  "$KEYCLOAK_ISSUER" \
-  "$NAMESPACE" \
-  "$CR_NAME"
+# Render the CMSC once, early (the arch preflight needs its workload images,
+# and the apply step reuses it) — unless the user supplied their own CR, in
+# which case that file is the single source for both.
+if [[ -n "$USER_CR_FILE" ]]; then
+  CR_TO_APPLY="$USER_CR_FILE"
+else
+  CR_RENDER_TMP="$(mktemp)"
+  render_preprod_cr \
+    "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
+    "$CR_RENDER_TMP" \
+    "$DOMAIN" \
+    "$KEYCLOAK_ISSUER" \
+    "$NAMESPACE" \
+    "$CR_NAME"
+  CR_TO_APPLY="$CR_RENDER_TMP"
+fi
 
 # Image-arch preflight: the catalog image (registry/manual sources) plus every
 # workload image of the rendered CR. The operator image inside the CSV is
@@ -490,7 +531,7 @@ if [[ "$ARCH_CHECK" == "1" ]]; then
   fi
   while IFS= read -r _img; do
     [[ -n "$_img" ]] && arch_images+=("$_img")
-  done < <(cr_workload_images "$CR_RENDER_TMP")
+  done < <(cr_workload_images "$CR_TO_APPLY")
   assert_arch_compatible "$NODE_ARCH" "${arch_images[@]}" || exit 1
   ok "image architectures compatible with ${NODE_ARCH}"
 else
@@ -617,11 +658,17 @@ fi
 
 # Pre-create so klock panes have a namespace from the start (empty table, not
 # NotFound). deploy-kafka.sh / deploy-rhbk.sh will then warn that the NS
-# already exists — that is expected and harmless.
-need_ns "$NAMESPACE"
-need_ns "$INFRA_NAMESPACE"
-need_ns "$KAFKA_NAMESPACE"
-need_ns "$KEYCLOAK_NAMESPACE"
+# already exists — that is expected and harmless. With --skip-prereqs only the
+# application namespace is ours to create; the user's infrastructure lives
+# wherever their CR points.
+if [[ "$SKIP_PREREQS" == "1" ]]; then
+  need_ns "$NAMESPACE"
+else
+  need_ns "$NAMESPACE"
+  need_ns "$INFRA_NAMESPACE"
+  need_ns "$KAFKA_NAMESPACE"
+  need_ns "$KEYCLOAK_NAMESPACE"
+fi
 
 kafka_ready() {
   [[ "$("$KUBECTL" -n "$KAFKA_NAMESPACE" get kafka "$KAFKA_CLUSTER_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
@@ -729,6 +776,9 @@ crc_fix_keycloak_hostname_v2() {
   return 1
 }
 
+if [[ "$SKIP_PREREQS" == "1" ]]; then
+  skip "BYOI skipped (--skip-prereqs): the operator installs on existing infrastructure"
+else
 step "BYOI dependencies (Kafka, Postgres, Valkey, MinIO, Keycloak)"
 if [[ "$DEMO_CRC" == "1" ]] && ! keycloak_ready; then
   ensure_rhbk_channel "$KEYCLOAK_NAMESPACE" "${DEMO_RHBK_CHANNEL:-stable-v26}"
@@ -760,14 +810,11 @@ fi
 ok "BYOI ready"
 
 # Realm-user password bookkeeping (demo hardening): a fresh Keycloak got our
-# generated password — store it in a Secret; a pre-existing Keycloak keeps
-# whatever password it was provisioned with — read it back if we left one.
+# generated password — store it in a Secret.
 if [[ "${SKIP_KEYCLOAK:-0}" != "1" && -n "${REALM_ADMIN_PASSWORD:-}" ]]; then
   printf '%s' "$REALM_ADMIN_PASSWORD" | "$KUBECTL" -n "$NAMESPACE" create secret generic "${CR_NAME}-realm-admin" \
     --from-file=password=/dev/stdin --dry-run=client -o yaml | "$KUBECTL" apply -f - >/dev/null
   ok "realm-user password stored in Secret ${NAMESPACE}/${CR_NAME}-realm-admin"
-elif [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
-  REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 fi
 
 # Post-deploy arch pass: BYOI operand images are chosen inside the prereq
@@ -784,12 +831,45 @@ if [[ "$ARCH_CHECK" == "1" ]]; then
     ok "BYOI pod images compatible with ${NODE_ARCH}"
   fi
 fi
+fi # end SKIP_PREREQS gate
+
+# A pre-existing Keycloak keeps whatever password it was provisioned with —
+# read it back for the summary (also with --skip-prereqs: the Secret lives in
+# the app namespace and is ours to read).
+if [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
+  REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+fi
+
+if [[ "$PREREQS_ONLY" == "1" ]]; then
+  step "Prerequisites only"
+  cat <<EOF
+
+Prerequisites are ready:
+  app NS:      ${NAMESPACE}
+  infra NS:    ${INFRA_NAMESPACE}
+  kafka NS:    ${KAFKA_NAMESPACE}
+  keycloak NS: ${KEYCLOAK_NAMESPACE}
+
+Next steps:
+  - Install the published operator:   ./scripts/demo-preprod.sh --source=registry
+  - Build and install your own:        ./scripts/demo-preprod.sh --source=local
+  - Console-guided install:            ./scripts/demo-preprod.sh --source=manual
+  - On your own infrastructure:        ./scripts/demo-preprod.sh --skip-prereqs --cr-file <your-cmsc.yaml>
+EOF
+  exit 0
+fi
 
 if [[ "$SOURCE" == "manual" ]]; then
   step "Operator install (manual)"
-  cp "$CR_RENDER_TMP" "$CR_FILE"
-  rm -f "$CR_RENDER_TMP"
-  ok "CMSC rendered to ${CR_FILE}"
+  if [[ -n "$USER_CR_FILE" ]]; then
+    echo "  warning: --cr-file with --source=manual: the instructions below point at your" >&2
+    echo "  CR; the sample CR is not rendered." >&2
+    CR_FILE="$USER_CR_FILE"
+  else
+    cp "$CR_TO_APPLY" "$CR_FILE"
+    rm -f "$CR_RENDER_TMP"
+    ok "CMSC rendered to ${CR_FILE}"
+  fi
   print_console_access
   cat <<EOF
 
@@ -978,8 +1058,13 @@ ok "operator running"
 fi
 
 step "Apply CostManagementServiceConfig"
-"$KUBECTL" apply -f "$CR_RENDER_TMP"
-rm -f "$CR_RENDER_TMP"
+if [[ -n "$USER_CR_FILE" ]]; then
+  echo "  applying user-provided CR ${USER_CR_FILE}"
+fi
+"$KUBECTL" apply -f "$CR_TO_APPLY"
+if [[ -n "${CR_RENDER_TMP:-}" ]]; then
+  rm -f "$CR_RENDER_TMP"
+fi
 ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"
