@@ -38,6 +38,10 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/demo-preprod.bash"
 
+# Raw invocation, captured before flag parsing: the tmux wrapper re-invokes
+# the script with these so every flag reaches the inner run (criticals #13).
+ORIGINAL_ARGS=("$@")
+
 DEMO_RESET="${DEMO_RESET:-0}"
 DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
@@ -357,7 +361,14 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") PROFILE=$(printf %q "$PROFILE") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
+  # Forward the raw invocation: every flag must reach the inner run. Env-file
+  # variables survive via export; flag-parsed shell variables do not, so the
+  # flags themselves are re-parsed by the inner process (review critical #13).
+  local fwd=""
+  if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
+    fwd="$(printf ' %q' "${ORIGINAL_ARGS[@]}")"
+  fi
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") PROFILE=$(printf %q "$PROFILE") $(printf %q "$ROOT/scripts/demo-preprod.sh")${fwd}"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 

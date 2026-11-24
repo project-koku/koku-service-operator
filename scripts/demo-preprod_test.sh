@@ -711,6 +711,28 @@ while IFS= read -r _line || [[ -n "$_line" ]]; do
   }
 done <"${ROOT}/scripts/demo-preprod.arm64.env"
 
+# --- #13: tmux wrapper forwards every flag to the inner run (behavior test) ---
+tbin="$(mktemp -d)"
+tlog="${tbin}/tmux.log"
+cat >"${tbin}/tmux" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${tbin}/tmux"
+fx13="$(mktemp)"
+printf 'v0.0.1\n' >"$fx13"
+# The outer process exits after start_tmux; the stub captures the inner command.
+env -u KUBE_CONTEXT PATH="${tbin}:$PATH" REGISTRY_TAG_FIXTURE="$fx13" \
+  ./scripts/demo-preprod.sh --prereqs-only --version v0.0.1 --channel stable >/dev/null 2>&1 || true
+inner_cmd="$(grep 'send-keys' "$tlog" | grep demo-preprod.sh | tail -1)"
+assert_contains "$inner_cmd" "--prereqs-only" "tmux inner run receives --prereqs-only"
+assert_contains "$inner_cmd" "--version" "tmux inner run receives --version"
+assert_contains "$inner_cmd" "v0.0.1" "tmux inner run receives the version value"
+assert_contains "$inner_cmd" "--channel" "tmux inner run receives --channel"
+assert_contains "$inner_cmd" "stable" "tmux inner run receives the channel value"
+rm -rf "$tbin" "$fx13"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
