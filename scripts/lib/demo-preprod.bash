@@ -706,3 +706,39 @@ deploy_available() {
   n="$("$kubectl" -n "$namespace" get deploy "$deployment" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
   [[ -n "$n" && "$n" != "0" ]]
 }
+
+# Deadline-bounded wait for the UI Deployment: polls the CMSC conditions for
+# visibility, up to the deadline; on success prints the UI URL (and opens the
+# Route when asked); a FAILED rollout returns 1 immediately — never report
+# success after a failed rollout (review critical #15: the old
+# `wait_for_ui || exit 1` call shape disabled errexit inside this function).
+# Credential-free on purpose: callers print login details.
+# Args: kubectl namespace cr_name ui_url open_browser [deadline_secs poll_secs]
+wait_for_ui() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local cr_name="${3:?CR name required}"
+  local ui_url="${4:?UI URL required}"
+  local open_browser="${5:-0}"
+  local deadline_secs="${6:-900}"
+  local poll_secs="${7:-15}"
+  local deadline=$((SECONDS + deadline_secs))
+  while (( SECONDS < deadline )); do
+    "$kubectl" -n "$namespace" get cmsc "$cr_name" -o jsonpath='phase={.status.phase}{"\n"}{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true
+    if deploy_available "$kubectl" "$namespace" "${cr_name}-ui"; then
+      if ! "$kubectl" -n "$namespace" rollout status "deployment/${cr_name}-ui" --timeout=120s; then
+        echo "error: UI Deployment ${cr_name}-ui rollout failed" >&2
+        return 1
+      fi
+      echo "UI ready: ${ui_url}"
+      if [[ "$open_browser" == "1" ]] && command -v open >/dev/null 2>&1; then
+        open "$ui_url" || true
+      fi
+      return 0
+    fi
+    sleep "$poll_secs"
+  done
+  echo "error: UI Deployment ${cr_name}-ui did not become Available within $((deadline_secs / 60))m" >&2
+  "$kubectl" -n "$namespace" get cmsc "$cr_name" -o yaml 2>/dev/null | tail -80 >&2 || true
+  return 1
+}

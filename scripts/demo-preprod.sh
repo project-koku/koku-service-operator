@@ -456,29 +456,8 @@ print_console_access() {
   fi
 }
 
-# Deadline-bounded wait for the CMSC to reach Ready and the UI Deployment to
-# roll out: polls the CMSC conditions for visibility every 15s, up to 15m; on
-# success opens the Route; on timeout prints the CMSC status tail. Used by
-# both the main flow and --watch.
-wait_for_ui() {
-  local deadline=$((SECONDS + 900))
-  while (( SECONDS < deadline )); do
-    "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o jsonpath='phase={.status.phase}{"\n"}{range .status.conditions[*]}{.type}={.status} ({.reason}){"\n"}{end}' 2>/dev/null || true
-    if ui_deploy_ready; then
-      "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${CR_NAME}-ui" --timeout=120s
-      echo "UI ready: ${UI_URL}"
-      echo "UI login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
-      if [[ "$DEMO_NO_OPEN" != "1" && "$OPEN_BROWSER" == "1" ]] && command -v open >/dev/null 2>&1; then
-        open "$UI_URL" || true
-      fi
-      return 0
-    fi
-    sleep 15
-  done
-  echo "error: UI Deployment ${CR_NAME}-ui did not become Available within 15m" >&2
-  "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" -o yaml 2>/dev/null | tail -80 >&2 || true
-  return 1
-}
+# wait_for_ui lives in scripts/lib (parameterized, credential-free); the
+# call sites below print login details after it succeeds.
 
 start_watch_tmux() {
   need_cmd tmux
@@ -506,7 +485,10 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
     exit 1
   fi
   if [[ "$DEMO_NO_TMUX" == "1" ]]; then
-    wait_for_ui || exit 1
+    # Plain call: `wait_for_ui || exit 1` would disable errexit inside the
+    # function (review critical #15) and report success after a failed rollout.
+    wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$OPEN_BROWSER"
+    echo "UI login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
     verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
       echo "error: CMSC verification failed — see the table above" >&2
       exit 1
@@ -1091,7 +1073,7 @@ ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"
 echo "  watching ${NAMESPACE}/${CR_NAME} (UIReady includes the UI rollout)…"
-wait_for_ui || exit 1
+wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$OPEN_BROWSER"
 ok "UI Deployment Ready"
 verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
   echo "error: CMSC verification failed — see the table above" >&2

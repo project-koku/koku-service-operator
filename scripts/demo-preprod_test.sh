@@ -544,10 +544,54 @@ grep -Fq 'verify_conditions "$KUBECTL"' "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: main flow must run the CMSC verification table" >&2
   fail=1
 }
-grep -Fq 'wait_for_ui || exit 1' "${ROOT}/scripts/demo-preprod.sh" || {
-  echo "FAIL: the wait step must use the deadline-bounded wait_for_ui" >&2
-  fail=1
-}
+# --- #15: wait_for_ui never reports success after a failed rollout (behavior test) ---
+wbin="$(mktemp -d)"
+cat >"${wbin}/oc" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"rollout status"* ]]; then
+  exit "$ROLLOUT_RC"
+fi
+if [[ "$*" == *"availableReplicas"* ]]; then
+  echo "1"
+  exit 0
+fi
+if [[ "$*" == *" cmsc "* ]]; then
+  echo "phase=Progressing"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${wbin}/oc"
+
+export ROLLOUT_RC=1
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "1" "failed rollout fails the wait"
+assert_not_contains "$wout" "UI ready" "no success message after a failed rollout"
+assert_contains "$wout" "rollout failed" "failure names the rollout"
+
+export ROLLOUT_RC=0
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "0" "successful rollout passes"
+assert_contains "$wout" "UI ready" "success message printed"
+unset ROLLOUT_RC
+
+# Timeout path: deployment never becomes available; 2s deadline, 0s poll.
+cat >"${wbin}/oc" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"availableReplicas"* ]]; then
+  exit 1
+fi
+if [[ "$2" == "cmsc" ]]; then
+  echo "phase=Progressing"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${wbin}/oc"
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "1" "deadline expiry fails the wait"
+assert_contains "$wout" "did not become Available" "timeout message printed"
+rm -rf "$wbin"
 
 # --- Task 7 (#5): demo-profile hardening ---
 tmp7="$(mktemp)"
