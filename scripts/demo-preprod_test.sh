@@ -733,6 +733,20 @@ assert_contains "$inner_cmd" "--channel" "tmux inner run receives --channel"
 assert_contains "$inner_cmd" "stable" "tmux inner run receives the channel value"
 rm -rf "$tbin" "$fx13"
 
+# --- #14: .local.env overrides the example defaults (behavior test) ---
+demo_root14="$(mktemp -d)"
+mkdir -p "${demo_root14}/scripts/lib"
+cp -p "${ROOT}/scripts/demo-preprod.sh" "${ROOT}/scripts/demo-preprod.env.example" "${demo_root14}/scripts/"
+cp -p "${ROOT}/scripts/lib/demo-preprod.bash" "${demo_root14}/scripts/lib/"
+printf 'NAMESPACE=custom-ns\nKAFKA_NAMESPACE=custom-kafka\n' >"${demo_root14}/scripts/demo-preprod.local.env"
+fx14="$(mktemp)"
+printf 'v0.0.1\n' >"$fx14"
+plan14="$(cd "${demo_root14}" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx14" ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan14" "custom-ns" "local.env NAMESPACE overrides the example default"
+assert_contains "$plan14" "custom-kafka" "local.env KAFKA_NAMESPACE overrides the example default"
+assert_not_contains "$plan14" "cost-byoi " "example default namespace is not used when overridden"
+rm -rf "${demo_root14}" "$fx14"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

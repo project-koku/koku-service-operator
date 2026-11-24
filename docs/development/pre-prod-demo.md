@@ -126,8 +126,8 @@ in `openshift-marketplace` with the resolved catalog image (grpc), install
 ## Configuration
 
 All flags have environment-variable equivalents; the precedence is real
-environment > `scripts/demo-preprod.env.example` >
-`scripts/demo-preprod.local.env` (first file wins per variable). See the
+environment > `scripts/demo-preprod.local.env` >
+`scripts/demo-preprod.env.example` (first file wins per variable). See the
 comments in `scripts/demo-preprod.env.example` for the full list (namespaces,
 version selection, `CONTAINER_TOOL` docker/podman, `ARCH_CHECK`,
 `REALM_ADMIN_PASSWORD`, `DEMO_SMOKE`, profile, and the `DEMO_*_IMAGE`

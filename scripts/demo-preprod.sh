@@ -137,11 +137,13 @@ load_env_file() {
 
 # load_env_file only sets vars that are still unset (first file wins), so the
 # load order below is the precedence:
-#   real env > .env.example > .local.env
-# (arm64 workload image overrides live in scripts/demo-preprod.arm64.env — an
-# opt-in template you copy into .local.env; no flag auto-loads it.)
-load_env_file "${ROOT}/scripts/demo-preprod.env.example"
+#   real env > .local.env > .env.example
+# (.local.env must win over the example's uncommented defaults — review
+# critical #14. arm64 workload image overrides live in
+# scripts/demo-preprod.arm64.env — an opt-in template you copy into
+# .local.env; no flag auto-loads it.)
 load_env_file "${ROOT}/scripts/demo-preprod.local.env"
+load_env_file "${ROOT}/scripts/demo-preprod.env.example"
 
 # Default: the current kube context. Pin one with KUBE_CONTEXT=... when
 # juggling several clusters.
