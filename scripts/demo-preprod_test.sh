@@ -835,6 +835,39 @@ assert_eq "$gate_rc" "1" "fixture without the gate fails"
 assert_contains "$gate_out" "fixture mode is not enabled" "ungated fixture names the problem"
 rm -f "$gate_fx"
 
+# --- #17: inputs are validated before interpolation ---
+validate_version_hint "v0.0.1" && v17=0 || v17=$?
+validate_version_hint "latest" && : || v17=1
+validate_version_hint "474d937" && : || v17=1
+validate_version_hint "474d9370123456789abcdef0123456789abcdef0" && : || v17=1
+validate_version_hint "v0.0.1@sha256:$(printf 'a%.0s' {1..64})" && : || v17=1
+validate_version_hint "" && : || v17=1
+assert_eq "$v17" "0" "valid version hints pass"
+bad_v="$(validate_version_hint $'v0.0.1\nextra: yaml' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "multiline version rejected"
+bad_v="$(validate_version_hint 'v0.0.1@sha256:short' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "short digest rejected"
+bad_v="$(validate_version_hint 'a"b' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "quoted version rejected"
+
+# hostile REALM_ADMIN_PASSWORD survives as JSON (deploy-rhbk.sh builds it with jq --arg)
+pw17='bad"pass\word'
+json17="$(jq -n --arg pw "$pw17" '[{"username":"admin","password":$pw}]')"
+jq -e --arg pw "$pw17" '.[0].password == $pw' <<<"$json17" >/dev/null \
+  && : || { echo "FAIL: jq --arg must round-trip hostile passwords" >&2; fail=1; }
+grep -Fq 'jq -n --arg pw' "${ROOT}/scripts/deploy-rhbk.sh" || {
+  echo "FAIL: deploy-rhbk.sh must build the default users JSON with jq --arg" >&2
+  fail=1
+}
+
+# DEMO_* override charset
+tmp17="$(mktemp)"
+render17_rc=0
+DEMO_KOKU_TAG='x"y' render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp17" \
+  "apps.example.test" "https://kc.apps.example.test" "ns17" "cr17" >/dev/null 2>&1 || render17_rc=$?
+assert_eq "$render17_rc" "1" "override value with a quote fails the render"
+rm -f "$tmp17"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

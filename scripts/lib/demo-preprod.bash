@@ -81,6 +81,11 @@ for env_key, needle in _overrides:
     val = os.environ.get(env_key, "").strip()
     if not val:
         continue
+    # Override values are spliced into YAML and registry URLs: restrict to a
+    # safe reference charset (review warning #17).
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z0-9._/:@-]+", val):
+        raise SystemExit(f"render_preprod_cr: {env_key} has invalid characters (allowed: A-Za-z0-9._/:@-): {val!r}")
     if needle.startswith("repository: "):
         repl = "repository: " + val
     else:
@@ -754,4 +759,26 @@ fixtures_allowed() {
     echo "  real install they would silently fake version/architecture results." >&2
     return 1
   fi
+}
+
+# Validate a --version hint before it is interpolated into anything (OLM YAML,
+# registry URLs): a tag of v?[0-9A-Za-z._-] plus an optional @sha256:<64 hex>
+# digest suffix. Anything else — newlines, quotes, YAML — is rejected outright
+# (review warning #17: unvalidated input reached a cluster-admin oc apply).
+validate_version_hint() {
+  local hint="${1:-}"
+  [[ -z "$hint" ]] && return 0
+  local tag="${hint%%@*}"
+  local digest="${hint#*@}"
+  local re_tag='^v?[0-9A-Za-z._-]+$'
+  local re_digest='^sha256:[0-9a-f]{64}$'
+  if [[ "$hint" == *"@"* && ! "$digest" =~ $re_digest ]]; then
+    echo "error: version digest suffix must be @sha256:<64 lowercase hex> (got '@${digest}')" >&2
+    return 1
+  fi
+  if [[ ! "$tag" =~ $re_tag ]]; then
+    echo "error: VERSION must be a tag (vX.Y.Z, commit SHA, latest) with an optional @sha256 digest (got '${tag}')" >&2
+    return 1
+  fi
+  return 0
 }

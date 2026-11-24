@@ -1691,10 +1691,10 @@ json.dump(users, sys.stdout)
 
     # Default: single admin user matching historical behavior.
     # REALM_ADMIN_PASSWORD overrides the password (demo-preprod.sh sets a
-    # random one; IQE/CI keep the default by not setting it).
-    cat <<DEFAULT_USERS
-[{"username":"admin","password":"${REALM_ADMIN_PASSWORD:-admin}","email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"1234567","accountNumber":"7890123","orgAdmin":true}]
-DEFAULT_USERS
+    # random one; IQE/CI keep the default by not setting it). Built with
+    # jq --arg so any password characters survive as valid JSON (review #17).
+    jq -n --arg pw "${REALM_ADMIN_PASSWORD:-admin}" \
+      '[{"username":"admin","password":$pw,"email":"admin@test.com","firstName":"Admin","lastName":"User","orgId":"1234567","accountNumber":"7890123","orgAdmin":true}]'
 }
 
 # Create or update a single Keycloak realm user

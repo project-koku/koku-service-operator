@@ -165,6 +165,7 @@ if [[ -n "$USER_CR_FILE" && ! -f "$USER_CR_FILE" ]]; then
   echo "error: --cr-file not found: ${USER_CR_FILE}" >&2
   exit 2
 fi
+validate_version_hint "${VERSION:-}" || exit 2
 case "$PROFILE" in
   ""|single-node) ;;
   *)
