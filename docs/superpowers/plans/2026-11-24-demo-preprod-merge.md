@@ -183,11 +183,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 **Interfaces:**
 - Produces: `--profile=single-node` (alias `--crc`): sets `KAFKA_BROKER_REPLICAS=1 KAFKA_CONTROLLER_REPLICAS=1 KAFKA_BROKER_STORAGE=10Gi KAFKA_CONTROLLER_STORAGE=5Gi` only. The arch-override env layering from the old crc mode is removed; `demo-preprod.arm64.env` is never loaded by any flag.
 
-- [ ] **Step 1: Write the failing tests** — dry-run with `--profile=single-node` shows `profile: single-node` and Kafka sizing; dry-run with `--crc` is identical; the plan does not mention arm64 image overrides; `demo-preprod.crc.env` no longer exists.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** the profile flag, move the arm64 override block verbatim into `demo-preprod.arm64.env` with a header saying "copy to demo-preprod.local.env; never auto-loaded", delete `crc.env`, and drop the crc-specific env layering from the script.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: Commit** — `feat(demo): single-node sizing profile; split arm64 overrides into opt-in template (#8)`
+- [x] **Step 1: Write the failing tests** — dry-run with `--profile=single-node` shows `profile: single-node` and Kafka sizing; dry-run with `--crc` is identical; the plan does not mention arm64 image overrides; `demo-preprod.crc.env` no longer exists.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** the profile flag, move the arm64 override block verbatim into `demo-preprod.arm64.env` with a header saying "copy to demo-preprod.local.env; never auto-loaded", delete `crc.env`, and drop the crc-specific env layering from the script.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: Commit** — `feat(demo): single-node sizing profile; split arm64 overrides into opt-in template (#8)`
 
 ### Task 10: Extend `--reset` to OLM objects (issue #7)
 

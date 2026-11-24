@@ -18,9 +18,10 @@
 #   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username
 #   ./scripts/demo-preprod.sh --prereqs-only  # install prerequisites only, then stop
 #   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
+#   ./scripts/demo-preprod.sh --profile=single-node   # small-cluster Kafka sizing (alias: --crc)
 #
 # Settings: env vars, then scripts/demo-preprod.local.env, then
-# scripts/demo-preprod.env.example (and scripts/demo-preprod.crc.env with --crc).
+# scripts/demo-preprod.env.example.
 #
 # tmux (default): left pane = numbered steps; top-right = kubectl klock pods
 # in NAMESPACE; bottom-right = kubectl klock pods in KAFKA_NAMESPACE.
@@ -40,7 +41,7 @@ DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
-DEMO_CRC="${DEMO_CRC:-0}"
+PROFILE="${PROFILE:-}"
 DEMO_WATCH="${DEMO_WATCH:-0}"
 DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
 PREREQS_ONLY="${PREREQS_ONLY:-0}"
@@ -58,7 +59,15 @@ while [[ $# -gt 0 ]]; do
     --no-tmux) DEMO_NO_TMUX=1 ;;
     --rebuild) DEMO_REBUILD=1 ;;
     --no-open) DEMO_NO_OPEN=1 ;;
-    --crc) DEMO_CRC=1 ;;
+    --crc) PROFILE="single-node" ;;
+    --profile)
+      [[ $# -ge 2 ]] || { echo "error: --profile requires a value (single-node)" >&2; exit 2; }
+      PROFILE="$2"
+      shift
+      ;;
+    --profile=*)
+      PROFILE="${1#--profile=}"
+      ;;
     --watch) DEMO_WATCH=1 ;;
     --console) DEMO_CONSOLE=1 ;;
     --prereqs-only) PREREQS_ONLY=1 ;;
@@ -120,29 +129,17 @@ load_env_file() {
   done <"$file"
 }
 
-if [[ "$DEMO_CRC" == "1" ]]; then
-  # load_env_file only sets vars that are still unset (first file wins), so the
-  # load order below is the precedence:
-  #   real env > .local.env > .crc.env > .env.example
-  # The CRC/arm64 profile overrides the shipped amd64 defaults in .env.example
-  # (KUBE_CONTEXT, BUILD_MODE, Kafka sizing, image overrides) but still yields to
-  # anything you export or put in .local.env.
-  load_env_file "${ROOT}/scripts/demo-preprod.local.env"
-  load_env_file "${ROOT}/scripts/demo-preprod.crc.env"
-  load_env_file "${ROOT}/scripts/demo-preprod.env.example"
-else
-  # amd64 / clusterbot: unchanged, .crc.env is never read.
-  load_env_file "${ROOT}/scripts/demo-preprod.env.example"
-  load_env_file "${ROOT}/scripts/demo-preprod.local.env"
-fi
+# load_env_file only sets vars that are still unset (first file wins), so the
+# load order below is the precedence:
+#   real env > .env.example > .local.env
+# (arm64 workload image overrides live in scripts/demo-preprod.arm64.env — an
+# opt-in template you copy into .local.env; no flag auto-loads it.)
+load_env_file "${ROOT}/scripts/demo-preprod.env.example"
+load_env_file "${ROOT}/scripts/demo-preprod.local.env"
 
-if [[ "$DEMO_CRC" == "1" ]]; then
-  KUBE_CONTEXT="${KUBE_CONTEXT:-crc}"
-else
-  # Default: the current kube context. Pin one with KUBE_CONTEXT=... when
-  # juggling several clusters.
-  KUBE_CONTEXT="${KUBE_CONTEXT:-}"
-fi
+# Default: the current kube context. Pin one with KUBE_CONTEXT=... when
+# juggling several clusters.
+KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 SOURCE="${SOURCE:-registry}"
 case "$SOURCE" in
   registry|local|manual) ;;
@@ -159,6 +156,23 @@ fi
 if [[ -n "$USER_CR_FILE" && ! -f "$USER_CR_FILE" ]]; then
   echo "error: --cr-file not found: ${USER_CR_FILE}" >&2
   exit 2
+fi
+case "$PROFILE" in
+  ""|single-node) ;;
+  *)
+    echo "error: PROFILE must be single-node (got '${PROFILE}')" >&2
+    exit 2
+    ;;
+esac
+if [[ "$PROFILE" == "single-node" ]]; then
+  # Single-node / small-cluster sizing — nothing else. Architecture is
+  # autodiscovered; KUBE_CONTEXT and BUILD_MODE are never forced; arm64 image
+  # overrides are the opt-in demo-preprod.arm64.env template.
+  KAFKA_BROKER_REPLICAS="${KAFKA_BROKER_REPLICAS:-1}"
+  KAFKA_CONTROLLER_REPLICAS="${KAFKA_CONTROLLER_REPLICAS:-1}"
+  KAFKA_BROKER_STORAGE="${KAFKA_BROKER_STORAGE:-10Gi}"
+  KAFKA_CONTROLLER_STORAGE="${KAFKA_CONTROLLER_STORAGE:-5Gi}"
+  export KAFKA_BROKER_REPLICAS KAFKA_CONTROLLER_REPLICAS KAFKA_BROKER_STORAGE KAFKA_CONTROLLER_STORAGE
 fi
 NAMESPACE="${NAMESPACE:-cost-byoi}"
 CR_NAME="${CR_NAME:-cost-management}"
@@ -264,7 +278,7 @@ Pre-prod demo plan
   tmux:        ${TMUX_SESSION}  (NO_TMUX=${DEMO_NO_TMUX})
   reset:       ${DEMO_RESET}
   rebuild:     ${DEMO_REBUILD}
-  crc mode:    ${DEMO_CRC}$([[ "$DEMO_CRC" == "1" ]] && echo "  (arm64 image overrides + single-node Kafka from scripts/demo-preprod.crc.env)")
+  profile:     ${PROFILE:-default}$([[ "$PROFILE" == "single-node" ]] && echo "  (Kafka 1 broker + 1 controller, 10Gi/5Gi)")
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
   [1/8] Preflight (context, oc, RHBK script, StorageClass)
@@ -341,7 +355,7 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") DEMO_CRC=$(printf %q "$DEMO_CRC") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") PROFILE=$(printf %q "$PROFILE") $(printf %q "$ROOT/scripts/demo-preprod.sh")"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -398,16 +412,6 @@ for _ns in "${_ns_list[@]}"; do
     fi
   fi
 done
-
-if [[ "$DEMO_CRC" == "1" ]]; then
-  NODE_ARCH="$("$KUBECTL" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true)"
-  if [[ "$NODE_ARCH" != "arm64" ]]; then
-    echo "warning: --crc expects an arm64 node but the cluster reports '${NODE_ARCH:-unknown}'." >&2
-    echo "  The arm64 image overrides in scripts/demo-preprod.crc.env may not match this node." >&2
-  else
-    ok "node architecture ${NODE_ARCH} (arm64 image overrides from scripts/demo-preprod.crc.env)"
-  fi
-fi
 
 if [[ ! -x "$RHBK_SCRIPT" ]]; then
   echo "error: RHBK script not found or not executable: ${RHBK_SCRIPT}" >&2
@@ -689,9 +693,9 @@ image_present() {
 # ui_deploy_ready is defined early (before --watch) alongside the wait helpers.
 
 # RHBK / Keycloak operator: the channel deploy-rhbk.sh pins (stable-v22) ships
-# amd64-only operator images. On the arm64 CRC node we pre-create the
+# amd64-only operator images. On arm64 clusters we pre-create the
 # Subscription on an arm64-capable channel (stable-v26); deploy-rhbk.sh then
-# finds it and skips its own create. No-op on amd64 / clusterbot.
+# finds it and skips its own create. No-op on amd64 clusters.
 ensure_rhbk_channel() {
   local ns="$1" channel="$2"
   need_ns "$ns"
@@ -750,8 +754,8 @@ EOF
 # deploy-rhbk.sh creates + waits on the Keycloak CR: as soon as the CR shows a
 # bare hostname, rewrite it to https:// and delete keycloak-0 so the StatefulSet
 # rolls a pod with the fixed config. Exits on its own; a no-op if the value is
-# already a URL. --crc only.
-crc_fix_keycloak_hostname_v2() {
+# already a URL. arm64 clusters only (they need the stable-v26 channel).
+fix_keycloak_hostname_v2() {
   local ns="$1" end=$((SECONDS + 600)) h
   while (( SECONDS < end )); do
     h="$("$KUBECTL" -n "$ns" get keycloak keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || true)"
@@ -780,7 +784,7 @@ if [[ "$SKIP_PREREQS" == "1" ]]; then
   skip "BYOI skipped (--skip-prereqs): the operator installs on existing infrastructure"
 else
 step "BYOI dependencies (Kafka, Postgres, Valkey, MinIO, Keycloak)"
-if [[ "$DEMO_CRC" == "1" ]] && ! keycloak_ready; then
+if [[ "$NODE_ARCH" == "arm64" ]] && ! keycloak_ready; then
   ensure_rhbk_channel "$KEYCLOAK_NAMESPACE" "${DEMO_RHBK_CHANNEL:-stable-v26}"
 fi
 SKIP_KAFKA=0 SKIP_INFRA=0 SKIP_KEYCLOAK=0 SKIP_OAUTH_MIRROR=0
@@ -800,8 +804,8 @@ if [[ "${SKIP_KAFKA}${SKIP_INFRA}${SKIP_KEYCLOAK}${SKIP_OAUTH_MIRROR}" == "1111"
 else
   export SKIP_KAFKA SKIP_INFRA SKIP_KEYCLOAK SKIP_OAUTH_MIRROR
   KC_FIX_PID=""
-  if [[ "$DEMO_CRC" == "1" && "$SKIP_KEYCLOAK" != "1" ]]; then
-    crc_fix_keycloak_hostname_v2 "$KEYCLOAK_NAMESPACE" &
+  if [[ "$NODE_ARCH" == "arm64" && "$SKIP_KEYCLOAK" != "1" ]]; then
+    fix_keycloak_hostname_v2 "$KEYCLOAK_NAMESPACE" &
     KC_FIX_PID=$!
   fi
   ./scripts/deploy-byoi.sh
