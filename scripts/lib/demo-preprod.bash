@@ -44,8 +44,16 @@ from pathlib import Path
 
 src, dest, domain, issuer, namespace, name = sys.argv[1:7]
 text = Path(src).read_text()
-text = text.replace('  name: cost-management\n  namespace: cost-byoi\n', f'  name: {name}\n  namespace: {namespace}\n', 1)
-text = text.replace('clusterDomain: "apps.cluster.example.com"', f'clusterDomain: "{domain}"')
+# Primary substitutions are guarded (review warning #21): a drifted sample
+# must fail the render, not silently emit a CR for the wrong namespace/domain.
+needle_ns = "  name: cost-management\n  namespace: cost-byoi\n"
+if needle_ns not in text:
+    raise SystemExit("render_preprod_cr: sample CR name/namespace block not found (drift?)")
+needle_dom = 'clusterDomain: "apps.cluster.example.com"'
+if needle_dom not in text:
+    raise SystemExit("render_preprod_cr: clusterDomain placeholder not found (drift?)")
+text = text.replace(needle_ns, f"  name: {name}\n  namespace: {namespace}\n", 1)
+text = text.replace(needle_dom, f'clusterDomain: "{domain}"')
 old_url = '      url: "http://keycloak-service.keycloak.svc.cluster.local:8080"'
 new_block = (
     old_url

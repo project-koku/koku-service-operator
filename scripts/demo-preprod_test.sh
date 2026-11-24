@@ -881,6 +881,20 @@ out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-se
 assert_eq "$out" "v0.0.1@sha256:$(printf 'd%.0s' {1..64})" "user-supplied digest is preserved verbatim"
 rm -f "$fx19"
 
+# --- #21: drifted samples fail the render instead of rendering wrong ---
+tmp21a="$(mktemp)"; tmp21b="$(mktemp)"
+sed 's/clusterDomain: "apps.cluster.example.com"/clusterDomain: "renamed.example.com"/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$tmp21a"
+render21_rc=0
+render_preprod_cr "$tmp21a" "$tmp21b" "apps.example.test" "https://kc.apps.example.test" "ns21" "cr21" >/dev/null 2>&1 || render21_rc=$?
+assert_eq "$render21_rc" "1" "drifted clusterDomain placeholder fails the render"
+sed 's/  namespace: cost-byoi$/  namespace: renamed-ns$/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$tmp21a"
+render21_rc=0
+render_preprod_cr "$tmp21a" "$tmp21b" "apps.example.test" "https://kc.apps.example.test" "ns21" "cr21" >/dev/null 2>&1 || render21_rc=$?
+assert_eq "$render21_rc" "1" "drifted namespace block fails the render"
+rm -f "$tmp21a" "$tmp21b"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
