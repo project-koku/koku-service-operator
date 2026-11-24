@@ -120,7 +120,7 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
 - [x] **Step 3: Implement** the lib functions and wire them: preflight checks `CATALOG_IMG` + all workload images in the rendered CR (render happens before the operator step; keep the rendered file); `build_docker` uses `--platform linux/${NODE_ARCH}`; after the BYOI step, a post-deploy pass reads `oc get pods -o jsonpath` images in the prereq namespaces and runs the same check, reporting image-failing pods with arch context.
 - [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: E2E negative on arm64:** *(fixture baseline complete; real run pending the user-provisioned arm64 cluster)* offline fixture coverage is the required baseline. Additionally, when the user-provisioned arm64 single-node OpenShift cluster is available, run the default registry source with `v0.0.1` there: preflight must fail listing the amd64-only operator/workload images and the #219 explanation. Record the failure output in the commit message.
+- [x] **Step 5: E2E negative on arm64:** *(fixture baseline complete; real run passed on the arm64 cluster betasno, 2026-11-24)* offline fixture coverage is the required baseline. Additionally, when the user-provisioned arm64 single-node OpenShift cluster is available, run the default registry source with `v0.0.1` there: preflight must fail listing the amd64-only operator/workload images and the #219 explanation. Record the failure output in the commit message.
 - [x] **Step 6: Commit** — `feat(demo): architecture autodiscovery and image-arch checks (#4)`
 
 ### Task 6: Unified UI wait and post-install verification (issue #9)
