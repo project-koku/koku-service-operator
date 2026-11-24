@@ -154,6 +154,7 @@ read_apps_domain() {
 registry_list_tags() {
   local repo="${1:?repository path required, e.g. project-koku/koku-service-operator-catalog}"
   if [[ -n "${REGISTRY_TAG_FIXTURE:-}" ]]; then
+    fixtures_allowed REGISTRY_TAG_FIXTURE || return 1
     if [[ ! -f "$REGISTRY_TAG_FIXTURE" ]]; then
       echo "error: REGISTRY_TAG_FIXTURE not found: ${REGISTRY_TAG_FIXTURE}" >&2
       return 1
@@ -362,6 +363,7 @@ cluster_node_arch() {
 image_arches() {
   local ref="${1:?image reference required}"
   if [[ -n "${IMAGE_ARCH_FIXTURE:-}" ]]; then
+    fixtures_allowed IMAGE_ARCH_FIXTURE || return 1
     local f="${IMAGE_ARCH_FIXTURE}/$(printf '%s' "$ref" | tr '/:' '__').txt"
     if [[ -f "$f" ]]; then
       cat "$f"
@@ -741,4 +743,15 @@ wait_for_ui() {
   echo "error: UI Deployment ${cr_name}-ui did not become Available within $((deadline_secs / 60))m" >&2
   "$kubectl" -n "$namespace" get cmsc "$cr_name" -o yaml 2>/dev/null | tail -80 >&2 || true
   return 1
+}
+
+# Fixture test hooks must never activate in a production install: the caller
+# must set DEMO_ALLOW_FIXTURES=1 explicitly (the offline test runner does).
+fixtures_allowed() {
+  if [[ "${DEMO_ALLOW_FIXTURES:-}" != "1" ]]; then
+    echo "error: ${1} is set, but fixture mode is not enabled. Fixture hooks are" >&2
+    echo "  for the offline test suite only (set DEMO_ALLOW_FIXTURES=1 there); in a" >&2
+    echo "  real install they would silently fake version/architecture results." >&2
+    return 1
+  fi
 }

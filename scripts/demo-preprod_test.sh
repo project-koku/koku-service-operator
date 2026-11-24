@@ -6,6 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/demo-preprod.bash"
 
+# Fixture hooks are gated behind DEMO_ALLOW_FIXTURES (issue #18): this runner
+# is the intended user; a production install without the gate fails loudly.
+export DEMO_ALLOW_FIXTURES=1
+
 fail=0
 assert_eq() {
   local got="$1" want="$2" msg="$3"
@@ -821,6 +825,15 @@ chmod +x "${rbin}/oc"
 deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
 assert_eq "$avail_rc" "1" "missing deployment is not ready"
 rm -rf "$rbin"
+
+# --- #18: fixture hooks refuse to run without the explicit gate ---
+gate_fx="$(mktemp)"
+printf 'v0.0.1\n' >"$gate_fx"
+gate_out="$(env -u DEMO_ALLOW_FIXTURES REGISTRY_TAG_FIXTURE="$gate_fx" \
+  bash -c 'source scripts/lib/demo-preprod.bash && registry_list_tags project-koku/koku-service-operator-catalog' 2>&1)" && gate_rc=0 || gate_rc=$?
+assert_eq "$gate_rc" "1" "fixture without the gate fails"
+assert_contains "$gate_out" "fixture mode is not enabled" "ungated fixture names the problem"
+rm -f "$gate_fx"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
