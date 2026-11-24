@@ -102,7 +102,7 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
 - [ ] **Step 3: Implement** `olm_manifests` in the lib and `olm_install` + the registry-source branch in the script. Optional `opm render` exact-bundle check only when `command -v opm`.
 - [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: E2E on an amd64 cluster (clusterbot):** `SOURCE=registry ./scripts/demo-preprod.sh --no-tmux` installs CSV `koku-service-operator.v0.0.1` Succeeded and reaches the UI wait. Record the CSV name and Succeeded phase in the commit message.
+- [ ] **Step 5: E2E on the local CRC cluster (amd64, OpenShift 5.0):** first run the OLM-on-5.0 spike — create the CatalogSource and confirm the package resolves and the CSV installs (the bundle pins `com.redhat.openshift.versions: v4.22`, so 5.0 behavior must be verified, not assumed). Then `SOURCE=registry ./scripts/demo-preprod.sh --no-tmux` installs CSV `koku-service-operator.v0.0.1` Succeeded and reaches the UI wait. Record the CSV name and Succeeded phase in the commit message.
 - [ ] **Step 6: Commit** — `feat(demo): automated OLM install path for the registry source (#3)`
 
 ### Task 5: Architecture autodiscovery and image-arch checks (issue #4)
@@ -267,4 +267,4 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 | 12 | Task 11 | #10 | all functional tasks |
 | 13 | Task 12 | #11 | all functional tasks |
 
-Tasks 6–9 and 13 are mutually independent after their dependencies and can be executed in any order or in parallel; the order above is the recommended sequence (default path and safety first, then UX, then teardown, then consolidation). E2E checkpoints requiring a cluster: end of Task 4 (amd64 registry install), Task 5 (arm64 negative), Task 10 (reset cycle).
+Tasks 6–9 and 13 are mutually independent after their dependencies and can be executed in any order or in parallel; the order above is the recommended sequence (default path and safety first, then UX, then teardown, then consolidation). E2E environments (allowed clusters only): **local CRC** (amd64, OpenShift 5.0 — primary target for all e2e including the registry source, gated on the Task 4 OLM-on-5.0 spike) and the **developer sandbox** (no cluster-admin — usable only for `--prereqs-only`/BYOI namespaced testing; the operator itself cannot be installed there: no `openshift-marketplace` CatalogSource rights and the AllNamespaces-only CSV needs cluster-scoped RBAC). E2e checkpoints: end of Task 4 (CRC registry install), Task 5 (arm64 negative — offline fixture coverage; no arm64 cluster available), Task 10 (reset cycle on CRC).
