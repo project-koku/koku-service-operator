@@ -347,6 +347,20 @@ fi
 require_reachable_cluster "$KUBECTL" || exit 1
 ok "using $($KUBECTL config current-context) — $($KUBECTL whoami --show-server)"
 
+# Customer-friendly early failure: the demo namespaces must exist or be
+# creatable (a developer sandbox or restricted user cannot create them).
+for _ns in "$NAMESPACE" "$INFRA_NAMESPACE" "$KAFKA_NAMESPACE" "$KEYCLOAK_NAMESPACE"; do
+  if ! "$KUBECTL" get ns "$_ns" >/dev/null 2>&1; then
+    if ! "$KUBECTL" auth can-i create namespaces >/dev/null 2>&1; then
+      echo "error: namespace '${_ns}' does not exist and this user cannot create namespaces." >&2
+      echo "  The demo needs four namespaces (${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE})." >&2
+      echo "  Ask your cluster administrator, or point NAMESPACE/INFRA_NAMESPACE/" >&2
+      echo "  KAFKA_NAMESPACE/KEYCLOAK_NAMESPACE at namespaces you can already use." >&2
+      exit 1
+    fi
+  fi
+done
+
 if [[ "$DEMO_CRC" == "1" ]]; then
   NODE_ARCH="$("$KUBECTL" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true)"
   if [[ "$NODE_ARCH" != "arm64" ]]; then
@@ -720,7 +734,88 @@ EOF
   exit 0
 fi
 
-step "Operator image"
+csv_succeeded() {
+  local csv
+  csv="$("$KUBECTL" -n "$NAMESPACE" get csv -o name 2>/dev/null | grep 'koku-service-operator' | head -1 || true)"
+  [[ -n "$csv" ]] && [[ "$("$KUBECTL" -n "$NAMESPACE" get "$csv" -o jsonpath='{.status.phase}' 2>/dev/null || true)" == "Succeeded" ]]
+}
+
+# Best-effort exact-bundle check: only when opm is installed (never a
+# mandatory dependency). Compares the operator image inside the requested
+# catalog with the one the installed CSV deploys.
+verify_bundle_match() {
+  command -v opm >/dev/null 2>&1 || return 0
+  local csv installed expected
+  csv="$("$KUBECTL" -n "$NAMESPACE" get csv -o name 2>/dev/null | grep 'koku-service-operator' | head -1 || true)"
+  [[ -n "$csv" ]] || return 0
+  installed="$("$KUBECTL" -n "$NAMESPACE" get "$csv" -o jsonpath='{.spec.install.spec.deployments[0].spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+  expected="$(opm render "$CATALOG_IMG" 2>/dev/null | grep -E '^[[:space:]]*image: .*koku-service-operator@sha256:' | head -1 | sed 's/^[[:space:]]*image: //')"
+  if [[ -z "$installed" || -z "$expected" ]]; then
+    return 0
+  fi
+  if [[ "$installed" == "$expected" ]]; then
+    ok "installed bundle matches ${CATALOG_IMG}"
+  else
+    echo "  warning: installed operator image (${installed}) differs from the bundle in" >&2
+    echo "  ${CATALOG_IMG} (${expected}); a pre-existing install likely won. See --reset." >&2
+  fi
+}
+
+olm_install() {
+  echo "  applying CatalogSource (openshift-marketplace), OperatorGroup and Subscription (${NAMESPACE})…"
+  olm_manifests "$CATALOG_IMG" "$CHANNEL" "$NAMESPACE" "$CATALOG_NAME" | "$KUBECTL" apply -f - >/dev/null
+
+  echo "  waiting for CatalogSource ${CATALOG_NAME} to be Ready…"
+  local deadline=$((SECONDS + 300))
+  while (( SECONDS < deadline )); do
+    if [[ "$("$KUBECTL" -n openshift-marketplace get catalogsource "$CATALOG_NAME" -o jsonpath='{.status.connectionState.lastObservedState}' 2>/dev/null || true)" == "READY" ]]; then
+      break
+    fi
+    sleep 10
+  done
+  if [[ "$("$KUBECTL" -n openshift-marketplace get catalogsource "$CATALOG_NAME" -o jsonpath='{.status.connectionState.lastObservedState}' 2>/dev/null || true)" != "READY" ]]; then
+    echo "error: CatalogSource ${CATALOG_NAME} did not become Ready within 5m" >&2
+    "$KUBECTL" -n openshift-marketplace get catalogsource,pods >&2 || true
+    exit 1
+  fi
+  ok "CatalogSource Ready"
+
+  echo "  waiting for the CSV to reach Succeeded (channel ${CHANNEL}, Automatic)…"
+  deadline=$((SECONDS + 600))
+  while (( SECONDS < deadline )); do
+    if csv_succeeded; then
+      break
+    fi
+    sleep 10
+  done
+  if ! csv_succeeded; then
+    echo "error: operator CSV did not reach Succeeded within 10m" >&2
+    "$KUBECTL" -n "$NAMESPACE" get csv,subscription,installplan -o wide >&2 || true
+    "$KUBECTL" -n openshift-marketplace get catalogsource >&2 || true
+    exit 1
+  fi
+  local csv
+  csv="$("$KUBECTL" -n "$NAMESPACE" get csv -o name 2>/dev/null | grep 'koku-service-operator' | head -1)"
+  ok "CSV ${csv#*/} Succeeded"
+  verify_bundle_match
+}
+
+if [[ "$SOURCE" == "registry" ]]; then
+  step "Operator install (registry via OLM)"
+  if ! "$KUBECTL" auth can-i create catalogsources -n openshift-marketplace >/dev/null 2>&1; then
+    echo "error: the registry source needs cluster-admin: it creates a CatalogSource" >&2
+    echo "  in openshift-marketplace. Use --source=manual and have your cluster" >&2
+    echo "  administrator install the operator, or run on a cluster where you have" >&2
+    echo "  cluster-admin." >&2
+    exit 1
+  fi
+  if [[ -n "$(olm_existing_csvs "$KUBECTL" "$NAMESPACE")" ]]; then
+    warn_existing_install "$NAMESPACE"
+  fi
+  olm_install
+  ok "operator installed from ${CATALOG_IMG}"
+else
+  step "Operator image"
 BUILT_IMAGE=0
 docker_up() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
@@ -788,6 +883,7 @@ else
   IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 fi
 ok "operator running"
+fi
 
 step "Apply CostManagementServiceConfig"
 CR_TMP="$(mktemp)"

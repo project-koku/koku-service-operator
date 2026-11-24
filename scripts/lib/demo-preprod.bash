@@ -244,3 +244,66 @@ print(max(vs, key=lambda v: tuple(int(x) for x in v.lstrip("v").split("."))) if 
   echo "  Available tags include: $(printf '%s\n' "$tags" | grep -v '^$' | head -5 | tr '\n' ' ')" >&2
   return 1
 }
+
+# Print the OLM objects for the registry source: a CatalogSource in
+# openshift-marketplace plus an AllNamespaces OperatorGroup and an Automatic
+# Subscription in the application namespace. olm_install applies these; the
+# offline tests assert their fields.
+olm_manifests() {
+  local catalog_img="${1:?catalog image required}"
+  local channel="${2:?channel required}"
+  local namespace="${3:?namespace required}"
+  local catalog_name="${4:-koku-service-operator-catalog}"
+  cat <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: ${catalog_name}
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: ${catalog_img}
+  displayName: Cost Management
+  publisher: Red Hat
+  grpcPodConfig:
+    securityContextConfig: restricted
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: koku-service-operator-group
+  namespace: ${namespace}
+# AllNamespaces install mode: no spec target namespaces are set.
+spec: {}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: koku-service-operator
+  namespace: ${namespace}
+spec:
+  channel: ${channel}
+  installPlanApproval: Automatic
+  name: koku-service-operator
+  source: ${catalog_name}
+  sourceNamespace: openshift-marketplace
+EOF
+}
+
+# Print koku-service-operator CSV names in a namespace (empty when none).
+olm_existing_csvs() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  "$kubectl" get csv -n "$namespace" -o name 2>/dev/null | grep 'koku-service-operator' || true
+}
+
+# Loud warning for an existing install: every published bundle currently
+# shares CSV version 0.0.1 (upstream #220), so OLM will not treat a different
+# catalog tag as an upgrade — the installed operator stays as-is.
+warn_existing_install() {
+  local namespace="${1:?namespace required}"
+  echo "  warning: a koku-service-operator CSV already exists in ${namespace}." >&2
+  echo "  Every published bundle currently shares CSV version 0.0.1, so OLM will not" >&2
+  echo "  treat a different catalog tag as an upgrade — the installed operator stays." >&2
+  echo "  Run --reset first when you want a different version." >&2
+}

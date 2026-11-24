@@ -250,6 +250,62 @@ plan_pin="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx" VERSION
 assert_contains "$plan_pin" "catalog:     quay.io/project-koku/koku-service-operator-catalog:v0.0.1" "VERSION pins the catalog image"
 rm -f "$fx"
 
+# --- Task 4 (#3): OLM manifests and install path ---
+mans="$(olm_manifests "quay.io/example/catalog:v0.0.3" "beta" "cost-demo" "koku-service-operator-catalog")"
+assert_contains "$mans" "kind: CatalogSource" "manifests include the CatalogSource"
+assert_contains "$mans" "name: koku-service-operator-catalog" "CatalogSource named"
+assert_contains "$mans" "namespace: openshift-marketplace" "CatalogSource in openshift-marketplace"
+assert_contains "$mans" "sourceType: grpc" "CatalogSource is grpc"
+assert_contains "$mans" "image: quay.io/example/catalog:v0.0.3" "CatalogSource pins the resolved image"
+assert_contains "$mans" "kind: OperatorGroup" "manifests include the OperatorGroup"
+assert_not_contains "$mans" "targetNamespaces" "OperatorGroup is AllNamespaces (no targetNamespaces)"
+assert_contains "$mans" "kind: Subscription" "manifests include the Subscription"
+assert_contains "$mans" "installPlanApproval: Automatic" "Subscription is Automatic"
+assert_contains "$mans" "channel: beta" "Subscription uses the channel"
+assert_contains "$mans" "namespace: cost-demo" "OG and Subscription live in the app namespace"
+assert_contains "$mans" "source: koku-service-operator-catalog" "Subscription points at the CatalogSource"
+
+warn_out="$(warn_existing_install cost-demo 2>&1)"
+assert_contains "$warn_out" "--reset" "existing-install warning names --reset"
+assert_contains "$warn_out" "0.0.1" "existing-install warning explains the equal-version trap"
+
+stub_dir="$(mktemp -d)"
+cat >"${stub_dir}/oc-csv" <<'EOF'
+#!/bin/bash
+if [[ "$1" == "get" && "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/koku-service-operator.v0.0.1"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-csv"
+assert_contains "$(olm_existing_csvs "${stub_dir}/oc-csv" cost-demo)" "koku-service-operator.v0.0.1" "existing koku CSVs are detected"
+
+cat >"${stub_dir}/oc-nocsv" <<'EOF'
+#!/bin/bash
+if [[ "$1" == "get" && "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/something-else.v1.0.0"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-nocsv"
+assert_eq "$(olm_existing_csvs "${stub_dir}/oc-nocsv" cost-demo)" "" "unrelated CSVs are ignored"
+rm -rf "$stub_dir"
+
+grep -Fq 'if [[ "$SOURCE" == "registry" ]]' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: registry source must branch before the build steps" >&2
+  fail=1
+}
+grep -Fq 'olm_install' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: script must call olm_install for the registry source" >&2
+  fail=1
+}
+grep -Fq 'can-i create catalogsources -n openshift-marketplace' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: registry source must pre-check marketplace permissions" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
