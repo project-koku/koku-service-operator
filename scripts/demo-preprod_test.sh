@@ -392,12 +392,94 @@ grep -Fq 'assert_arch_compatible "$NODE_ARCH"' "${ROOT}/scripts/demo-preprod.sh"
   echo "FAIL: preflight must assert image arch compatibility" >&2
   fail=1
 }
-grep -Fq -- '--platform linux/${NODE_ARCH}' "${ROOT}/scripts/demo-preprod.sh" || {
-  echo "FAIL: docker build must target the discovered arch" >&2
+grep -Fq -- '--platform linux/${arch}' "${ROOT}/scripts/lib/demo-preprod.bash" || {
+  echo "FAIL: container build must target the discovered arch" >&2
+  fail=1
+}
+grep -Fq 'build_operator_image "$tool" "$NODE_ARCH"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: build_docker must pass the discovered arch to build_operator_image" >&2
   fail=1
 }
 grep -Fq 'byoi_pod_images' "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: post-deploy pass must check BYOI pod images" >&2
+  fail=1
+}
+
+# --- Task 13 (#12): container tool abstraction (docker/podman) ---
+toolbin="$(mktemp -d)"
+tlog="${toolbin}/log"
+
+mk_docker_stub() {
+  cat >"${toolbin}/docker" <<EOF
+#!/bin/bash
+if [[ "\$1" == "info" ]]; then exit $1; fi
+if [[ "\$1" == "buildx" && "\$2" == "version" ]]; then exit $2; fi
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+  chmod +x "${toolbin}/docker"
+}
+cat >"${toolbin}/podman" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${toolbin}/podman"
+
+SAVE_PATH="$PATH"
+export PATH="${toolbin}:$PATH"
+
+# podman-docker shim emulation: `docker info` works, `docker buildx` does not
+mk_docker_stub 0 1
+docker_up && shim_rc=0 || shim_rc=1
+assert_eq "$shim_rc" "1" "podman-docker shim fails the capability probe"
+out="$(container_tool)"
+assert_eq "$out" "podman" "shim falls through to podman when present"
+
+rm -f "${toolbin}/podman"
+# Isolated PATH: only the stub dir — no real podman from the system PATH.
+out="$(cd "$ROOT" && PATH="${toolbin}" "$BASH" -c 'source scripts/lib/demo-preprod.bash && container_tool')"
+assert_eq "$out" "none" "shim with no podman yields none"
+
+# capable docker (info and buildx both work)
+mk_docker_stub 0 0
+out="$(container_tool)"
+assert_eq "$out" "docker" "capable docker detected"
+
+cat >"${toolbin}/podman" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${toolbin}/podman"
+out="$(CONTAINER_TOOL=podman container_tool)"
+assert_eq "$out" "podman" "CONTAINER_TOOL override wins"
+bad_ct="$(CONTAINER_TOOL=bogus container_tool 2>&1)" && ct_rc=0 || ct_rc=$?
+assert_eq "$ct_rc" "1" "invalid CONTAINER_TOOL fails"
+assert_contains "$bad_ct" "docker or podman" "invalid CONTAINER_TOOL names the valid values"
+
+# command emission
+: >"$tlog"
+build_operator_image docker amd64 quay.example/op:tag /tmp/fake-root >/dev/null
+assert_contains "$(cat "$tlog")" "buildx build --platform linux/amd64 -t quay.example/op:tag --push /tmp/fake-root" "docker emits one buildx --push command"
+
+: >"$tlog"
+build_operator_image podman arm64 quay.example/op:tag /tmp/fake-root >/dev/null
+pod_log="$(cat "$tlog")"
+assert_contains "$pod_log" "build --platform linux/arm64 -t quay.example/op:tag /tmp/fake-root" "podman emits build"
+assert_contains "$pod_log" "push quay.example/op:tag" "podman emits push"
+
+build_operator_image none amd64 img root >/dev/null 2>&1 && none_rc=0 || none_rc=$?
+assert_eq "$none_rc" "1" "no tool fails the build"
+rm -rf "$toolbin"
+export PATH="$SAVE_PATH"
+
+grep -Fq 'container_tool' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: auto mode must pick the container tool via container_tool" >&2
+  fail=1
+}
+grep -Fq 'build_operator_image' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: build_docker must delegate to build_operator_image" >&2
   fail=1
 }
 

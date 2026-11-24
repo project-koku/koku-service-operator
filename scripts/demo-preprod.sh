@@ -873,9 +873,6 @@ if [[ "$SOURCE" == "registry" ]]; then
 else
   step "Operator image"
 BUILT_IMAGE=0
-docker_up() {
-  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
-}
 build_openshift() {
   echo "  OpenShift binary docker build -> ${NAMESPACE}/koku-service-operator:${IMAGE_TAG}"
   if ! "$KUBECTL" -n "$NAMESPACE" get buildconfig koku-service-operator >/dev/null 2>&1; then
@@ -893,8 +890,9 @@ build_openshift() {
   rm -rf "$tmp"
 }
 build_docker() {
-  echo "  docker buildx --platform linux/${NODE_ARCH} -t ${IMG}"
-  docker buildx build --platform "linux/${NODE_ARCH}" -t "$IMG" --push "$ROOT"
+  local tool
+  tool="$(container_tool)" || exit 1
+  build_operator_image "$tool" "$NODE_ARCH" "$IMG" "$ROOT"
 }
 
 if [[ "$DEMO_REBUILD" != "1" ]] && image_present && operator_ready; then
@@ -907,9 +905,12 @@ else
         mode=openshift
         ;;
       *)
-        if docker_up; then
-          mode=docker
-        else
+        # The detected container tool (docker with buildx, else podman);
+        # openshift binary build when neither is available. The buildx
+        # capability probe inside container_tool defeats the podman-docker
+        # shim, which answers `docker info` but has no `docker buildx`.
+        mode="$(container_tool)"
+        if [[ "$mode" == "none" ]]; then
           mode=openshift
         fi
         ;;

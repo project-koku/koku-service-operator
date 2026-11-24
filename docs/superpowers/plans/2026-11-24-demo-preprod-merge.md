@@ -241,11 +241,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Consumes: `NODE_ARCH` from Task 5.
 - Produces (lib): `container_tool` → prints `docker|podman|none` (honors `CONTAINER_TOOL` env override; docker only when `docker buildx version` succeeds; else podman when `command -v podman`; else `none`). `docker_up` becomes the capability probe (buildx check — the podman-docker shim fails it). `build_docker` branches: docker → `docker buildx build --platform linux/${NODE_ARCH} -t "$IMG" --push "$ROOT"`; podman → `podman build --platform linux/${NODE_ARCH} -t "$IMG" "$ROOT"` then `podman push "$IMG"`. Auto-mode preference: openshift when `IMG` is the internal registry, else the detected tool, else openshift.
 
-- [ ] **Step 1: Write the failing tests** — with a stub `bin` dir prepended to `PATH`: (a) stub `docker` whose `info` succeeds but `buildx version` fails (podman-docker shim emulation) → `docker_up` returns false and `container_tool` prints `none` (or `podman` when a stub podman is present); (b) capable docker stub → `container_tool` prints `docker`; (c) build-command emission: docker path emits one `buildx build … --push`; podman path emits `build` followed by `push`; (d) `CONTAINER_TOOL=podman` override wins.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL on the new assertions.
-- [ ] **Step 3: Implement** the lib helper, the capability probe, and the branching build function per the interfaces above; document `CONTAINER_TOOL` and the `oc registry login` note for podman pushes to the internal registry in the env example.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: Commit** — `feat(demo): docker/podman container tool abstraction for local builds (#12)`
+- [x] **Step 1: Write the failing tests** — with a stub `bin` dir prepended to `PATH`: (a) stub `docker` whose `info` succeeds but `buildx version` fails (podman-docker shim emulation) → `docker_up` returns false and `container_tool` prints `none` (or `podman` when a stub podman is present); (b) capable docker stub → `container_tool` prints `docker`; (c) build-command emission: docker path emits one `buildx build … --push`; podman path emits `build` followed by `push`; (d) `CONTAINER_TOOL=podman` override wins.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL on the new assertions.
+- [x] **Step 3: Implement** the lib helper, the capability probe, and the branching build function per the interfaces above; document `CONTAINER_TOOL` and the `oc registry login` note for podman pushes to the internal registry in the env example.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: Commit** — `feat(demo): docker/podman container tool abstraction for local builds (#12)`
 
 ---
 

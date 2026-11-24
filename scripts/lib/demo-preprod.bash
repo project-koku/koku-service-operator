@@ -533,3 +533,64 @@ byoi_pod_images() {
   local namespace="${2:?namespace required}"
   "$kubectl" get pods -n "$namespace" -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null | sort -u | grep -v '^$' || true
 }
+
+# docker counts as available only when buildx actually works. The
+# podman-docker shim (/usr/bin/docker from podman-docker) translates
+# `docker info` but forwards `docker buildx` to `podman buildx`, which does
+# not exist — so the buildx probe is what distinguishes real docker.
+docker_up() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1
+}
+
+# Print the container tool to use for local builds: docker|podman|none.
+# CONTAINER_TOOL overrides detection (docker or podman).
+container_tool() {
+  if [[ -n "${CONTAINER_TOOL:-}" ]]; then
+    case "$CONTAINER_TOOL" in
+      docker|podman)
+        printf '%s\n' "$CONTAINER_TOOL"
+        return 0
+        ;;
+      *)
+        echo "error: CONTAINER_TOOL must be docker or podman (got '${CONTAINER_TOOL}')" >&2
+        return 1
+        ;;
+    esac
+  fi
+  if docker_up; then
+    printf 'docker\n'
+    return 0
+  fi
+  if command -v podman >/dev/null 2>&1; then
+    printf 'podman\n'
+    return 0
+  fi
+  printf 'none\n'
+  return 0
+}
+
+# Build and push the operator image with the given tool. podman has no
+# combined --push, so it builds then pushes (two commands).
+build_operator_image() {
+  local tool="${1:?tool required}"
+  local arch="${2:?architecture required}"
+  local img="${3:?image required}"
+  local root="${4:?repo root required}"
+  case "$tool" in
+    docker)
+      echo "  docker buildx build --platform linux/${arch} -t ${img} --push"
+      docker buildx build --platform "linux/${arch}" -t "$img" --push "$root"
+      ;;
+    podman)
+      echo "  podman build --platform linux/${arch} -t ${img}"
+      podman build --platform "linux/${arch}" -t "$img" "$root"
+      echo "  podman push ${img}"
+      podman push "$img"
+      ;;
+    *)
+      echo "error: BUILD_MODE=docker needs docker (with buildx) or podman; none found." >&2
+      echo "  Install podman, or use BUILD_MODE=openshift for an in-cluster build." >&2
+      return 1
+      ;;
+  esac
+}
