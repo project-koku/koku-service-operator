@@ -151,6 +151,7 @@ CATALOG_NAME="${CATALOG_NAME:-koku-service-operator-catalog}"
 VERSION="${VERSION:-}"
 OPERATOR_VERSION="${OPERATOR_VERSION:-v0.0.1}"
 CHANNEL="${CHANNEL:-beta}"
+ARCH_CHECK="${ARCH_CHECK:-1}"
 CONSOLE_USERNAME="${CONSOLE_USERNAME:-kubeadmin}"
 CONSOLE_PASSWORD="${CONSOLE_PASSWORD:-}"
 CR_FILE="${CR_FILE:-/tmp/koku-demo-preprod-${NAMESPACE}.yaml}"
@@ -443,6 +444,40 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
   exit 0
 fi
 
+# Cluster architecture: gates the image-arch preflight and selects the
+# local-build platform. Unsupported architectures fail here regardless of
+# ARCH_CHECK (they cannot run the stack at all).
+NODE_ARCH="$(cluster_node_arch "$KUBECTL")" || exit 1
+ok "cluster architecture ${NODE_ARCH}"
+
+# Render the CMSC once, early: the arch preflight needs its workload images,
+# and the apply step reuses it.
+CR_RENDER_TMP="$(mktemp)"
+render_preprod_cr \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
+  "$CR_RENDER_TMP" \
+  "$DOMAIN" \
+  "$KEYCLOAK_ISSUER" \
+  "$NAMESPACE" \
+  "$CR_NAME"
+
+# Image-arch preflight: the catalog image (registry/manual sources) plus every
+# workload image of the rendered CR. The operator image inside the CSV is
+# checked after the OLM install (it is not knowable beforehand without opm).
+if [[ "$ARCH_CHECK" == "1" ]]; then
+  arch_images=()
+  if [[ "$SOURCE" != "local" ]]; then
+    arch_images+=("$CATALOG_IMG")
+  fi
+  while IFS= read -r _img; do
+    [[ -n "$_img" ]] && arch_images+=("$_img")
+  done < <(cr_workload_images "$CR_RENDER_TMP")
+  assert_arch_compatible "$NODE_ARCH" "${arch_images[@]}" || exit 1
+  ok "image architectures compatible with ${NODE_ARCH}"
+else
+  echo "warning: ARCH_CHECK=0 — image architecture checks skipped" >&2
+fi
+
 # Helpers used by --reset and later skip-if-ready checks. Defined before reset
 # because deleting the app namespace kills the operator; we must delete the CR
 # first while it can still clear its finalizer.
@@ -700,15 +735,25 @@ else
 fi
 ok "BYOI ready"
 
+# Post-deploy arch pass: BYOI operand images are chosen inside the prereq
+# scripts, not in the CR — verify what actually got scheduled.
+if [[ "$ARCH_CHECK" == "1" ]]; then
+  pod_images=()
+  for _pns in "$KAFKA_NAMESPACE" "$INFRA_NAMESPACE" "$KEYCLOAK_NAMESPACE"; do
+    while IFS= read -r _pimg; do
+      [[ -n "$_pimg" ]] && pod_images+=("$_pimg")
+    done < <(byoi_pod_images "$KUBECTL" "$_pns")
+  done
+  if [[ ${#pod_images[@]} -gt 0 ]]; then
+    assert_arch_compatible "$NODE_ARCH" "${pod_images[@]}" || exit 1
+    ok "BYOI pod images compatible with ${NODE_ARCH}"
+  fi
+fi
+
 if [[ "$SOURCE" == "manual" ]]; then
   step "Operator install (manual)"
-  render_preprod_cr \
-    "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
-    "$CR_FILE" \
-    "$DOMAIN" \
-    "$KEYCLOAK_ISSUER" \
-    "$NAMESPACE" \
-    "$CR_NAME"
+  cp "$CR_RENDER_TMP" "$CR_FILE"
+  rm -f "$CR_RENDER_TMP"
   ok "CMSC rendered to ${CR_FILE}"
   print_console_access
   cat <<EOF
@@ -814,6 +859,17 @@ if [[ "$SOURCE" == "registry" ]]; then
   fi
   olm_install
   ok "operator installed from ${CATALOG_IMG}"
+  if [[ "$ARCH_CHECK" == "1" ]]; then
+    op_img="$(installed_operator_image "$KUBECTL" "$NAMESPACE")" || op_img=""
+    if [[ -n "$op_img" ]]; then
+      assert_arch_compatible "$NODE_ARCH" "$op_img" || {
+        echo "  The CSV is installed but its operator image cannot run on ${NODE_ARCH}." >&2
+        echo "  Remove it with --reset before trying a different version." >&2
+        exit 1
+      }
+      ok "operator image runs on ${NODE_ARCH}"
+    fi
+  fi
 else
   step "Operator image"
 BUILT_IMAGE=0
@@ -837,8 +893,8 @@ build_openshift() {
   rm -rf "$tmp"
 }
 build_docker() {
-  echo "  docker buildx --platform linux/amd64 -t ${IMG}"
-  docker buildx build --platform linux/amd64 -t "$IMG" --push "$ROOT"
+  echo "  docker buildx --platform linux/${NODE_ARCH} -t ${IMG}"
+  docker buildx build --platform "linux/${NODE_ARCH}" -t "$IMG" --push "$ROOT"
 }
 
 if [[ "$DEMO_REBUILD" != "1" ]] && image_present && operator_ready; then
@@ -886,14 +942,8 @@ ok "operator running"
 fi
 
 step "Apply CostManagementServiceConfig"
-CR_TMP="$(mktemp)"
-render_preprod_cr \
-  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" \
-  "$CR_TMP" \
-  "$DOMAIN" \
-  "$KEYCLOAK_ISSUER"
-"$KUBECTL" apply -f "$CR_TMP"
-rm -f "$CR_TMP"
+"$KUBECTL" apply -f "$CR_RENDER_TMP"
+rm -f "$CR_RENDER_TMP"
 ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"

@@ -307,3 +307,229 @@ warn_existing_install() {
   echo "  treat a different catalog tag as an upgrade — the installed operator stays." >&2
   echo "  Run --reset first when you want a different version." >&2
 }
+
+# Print the cluster's node architecture: amd64 or arm64. Mixed-architecture
+# clusters warn and use the first node; anything else is unsupported (exit 1).
+cluster_node_arch() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local archs first
+  archs="$("$kubectl" get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{"\n"}{end}' 2>/dev/null | sort -u | grep -v '^$' || true)"
+  if [[ -z "$archs" ]]; then
+    echo "error: could not read node architectures (no nodes reported)" >&2
+    return 1
+  fi
+  first="$(printf '%s\n' "$archs" | head -1)"
+  if [[ "$(printf '%s\n' "$archs" | grep -c .)" -gt 1 ]]; then
+    echo "warning: mixed-architecture cluster ($(printf '%s' "$archs" | tr '\n' ' ')); using ${first}" >&2
+  fi
+  case "$first" in
+    amd64|arm64)
+      printf '%s\n' "$first"
+      ;;
+    *)
+      echo "error: unsupported cluster architecture '${first}' (supported: amd64, arm64)" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Print the architectures an image reference supports, space separated, or
+# "unknown" when they cannot be determined. IMAGE_ARCH_FIXTURE: when set, arch
+# sets are read from ${IMAGE_ARCH_FIXTURE}/<ref with / and : as _>.txt —
+# offline tests; production leaves it unset. skopeo is used when installed;
+# otherwise a python3 Docker-registry-v2 client (anonymous; public repos).
+image_arches() {
+  local ref="${1:?image reference required}"
+  if [[ -n "${IMAGE_ARCH_FIXTURE:-}" ]]; then
+    local f="${IMAGE_ARCH_FIXTURE}/$(printf '%s' "$ref" | tr '/:' '__').txt"
+    if [[ -f "$f" ]]; then
+      cat "$f"
+    else
+      echo "unknown"
+    fi
+    return 0
+  fi
+  local out=""
+  if command -v skopeo >/dev/null 2>&1; then
+    out="$(skopeo inspect --raw "docker://${ref}" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("SINGLE"); raise SystemExit
+if "manifests" in d:
+    archs = set()
+    for m in d["manifests"]:
+        p = m.get("platform", {})
+        if p.get("os", "linux") == "linux":
+            archs.add(p.get("architecture", "unknown"))
+    print(" ".join(sorted(archs)) if archs else "unknown")
+else:
+    print("SINGLE")
+' 2>/dev/null || true)"
+    if [[ "$out" == "SINGLE" ]]; then
+      out="$(skopeo inspect "docker://${ref}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Architecture","unknown"))' 2>/dev/null || true)"
+    fi
+    if [[ -n "$out" ]]; then
+      printf '%s\n' "$out"
+      return 0
+    fi
+  fi
+  out="$(python3 - "$ref" 2>/dev/null <<'PY'
+import json, re, sys, urllib.request, urllib.error
+
+ref = sys.argv[1]
+if "://" in ref:
+    ref = ref.split("://", 1)[1]
+registry, rest = ref.split("/", 1)
+# docker.io redirects to registry-1.docker.io and urllib drops the auth header
+# across hosts — talk to the real registry directly.
+if registry in ("docker.io", "index.docker.io"):
+    registry = "registry-1.docker.io"
+if "@" in rest:
+    repo, _, reference = rest.rpartition("@")
+    # A pod-spec image may carry both tag and digest (repo:tag@sha256:...).
+    base_repo, _, maybe_tag = repo.rpartition(":")
+    if "/" not in maybe_tag:
+        repo = base_repo
+else:
+    repo, _, tag = rest.rpartition(":")
+    if "/" in tag or not tag:
+        repo, reference = rest, "latest"
+    else:
+        reference = tag
+base = f"https://{registry}"
+
+def get(url, token=None, accept=None):
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    if accept:
+        req.add_header("Accept", accept)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read()
+
+token = ""
+try:
+    get(base + "/v2/")
+except urllib.error.HTTPError as e:
+    www = e.headers.get("WWW-Authenticate", "").replace('",', '" ')
+    opts = dict(re.findall(r'(\w+)="([^"]*)"', www))
+    realm = opts.get("realm")
+    if realm:
+        q = f"?service={opts.get('service', '')}"
+        q += f"&scope=repository:{repo}:pull"
+        try:
+            tok = json.loads(get(realm + q))
+            token = tok.get("token") or tok.get("access_token") or ""
+        except Exception:
+            token = ""
+except Exception:
+    pass
+
+accept = ", ".join([
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+])
+try:
+    m = json.loads(get(f"{base}/v2/{repo}/manifests/{reference}", token, accept))
+except Exception:
+    print("unknown"); raise SystemExit
+if "manifests" in m:
+    archs = set()
+    for man in m["manifests"]:
+        p = man.get("platform", {})
+        if p.get("os", "linux") == "linux":
+            archs.add(p.get("architecture", "unknown"))
+    print(" ".join(sorted(archs)) or "unknown")
+else:
+    cfg = m.get("config", {}).get("digest")
+    if cfg:
+        try:
+            c = json.loads(get(f"{base}/v2/{repo}/blobs/{cfg}", token))
+            print(c.get("architecture", "unknown"))
+        except Exception:
+            print("unknown")
+    else:
+        print("unknown")
+PY
+)" || out="unknown"
+  printf '%s\n' "${out:-unknown}"
+}
+
+# Fail when any listed image cannot run on the given architecture. Images whose
+# arch set could not be determined produce a warning instead of a failure.
+assert_arch_compatible() {
+  local arch="${1:?architecture required}"
+  shift
+  local bad=() unverifiable=() img arches
+  for img in "$@"; do
+    arches="$(image_arches "$img")"
+    if [[ " $arches " == *" $arch "* ]]; then
+      continue
+    fi
+    if [[ "$arches" == "unknown" || -z "$arches" ]]; then
+      unverifiable+=("$img")
+    else
+      bad+=("$img (${arches// /, })")
+    fi
+  done
+  if [[ ${#unverifiable[@]} -gt 0 ]]; then
+    echo "warning: could not verify architecture for: ${unverifiable[*]}" >&2
+  fi
+  if [[ ${#bad[@]} -eq 0 ]]; then
+    return 0
+  fi
+  echo "error: cluster architecture is ${arch}, but these images cannot run on it:" >&2
+  printf '  - %s\n' "${bad[@]}" >&2
+  if [[ "$arch" == "arm64" ]]; then
+    echo "  The published v0.0.1 operator and workload images are amd64-only; multi-arch" >&2
+    echo "  builds are pending in project-koku/koku-service-operator#219. Pin arm64" >&2
+    echo "  rebuilds via the DEMO_*_IMAGE overrides, or set ARCH_CHECK=0 to skip this check." >&2
+  else
+    echo "  Pin images built for ${arch}, or set ARCH_CHECK=0 to skip this check." >&2
+  fi
+  return 1
+}
+
+# Print the workload image references (repository:tag pairs) of a rendered
+# CostManagementServiceConfig.
+cr_workload_images() {
+  local file="${1:?CR file required}"
+  python3 - "$file" <<'PY'
+import re, sys
+
+text = open(sys.argv[1]).read()
+images, repo = [], None
+for line in text.splitlines():
+    m = re.match(r"\s*repository:\s*(\S+)\s*$", line)
+    if m:
+        repo = m.group(1)
+        continue
+    m = re.match(r'\s*tag:\s*"?([^"\s]+)"?\s*$', line)
+    if m and repo:
+        images.append(f"{repo}:{m.group(1)}")
+        repo = None
+print("\n".join(images))
+PY
+}
+
+# Print the operator image the installed CSV deploys (empty when no CSV).
+installed_operator_image() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local csv
+  csv="$("$kubectl" get csv -n "$namespace" -o name 2>/dev/null | grep 'koku-service-operator' | head -1 || true)"
+  [[ -n "$csv" ]] || return 1
+  "$kubectl" get "$csv" -n "$namespace" -o jsonpath='{.spec.install.spec.deployments[0].spec.template.spec.containers[0].image}' 2>/dev/null
+}
+
+# Print the unique container images of running pods in a namespace — the
+# post-deploy arch pass checks what actually got scheduled.
+byoi_pod_images() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  "$kubectl" get pods -n "$namespace" -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null | sort -u | grep -v '^$' || true
+}

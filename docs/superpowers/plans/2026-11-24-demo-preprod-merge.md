@@ -46,11 +46,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 **Interfaces:**
 - Produces: env/flag `SOURCE` ∈ `registry|local|manual` (default `registry`); `--source` flag; plan line `source: ${SOURCE}` in `--dry-run` output. Later tasks branch on `$SOURCE`.
 
-- [ ] **Step 1: Write the failing tests** — in `scripts/demo-preprod_test.sh`: (a) `--help` output contains `--source=registry|local|manual`; (b) `./scripts/demo-preprod.sh --dry-run` prints `source: registry` by default and `source: local` with `SOURCE=local` in the environment; (c) dry-run no longer mentions `clusterbot` as a default.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect the new assertions FAIL, existing ones PASS.
-- [ ] **Step 3: Implement** — add `--source)` flag parsing, `SOURCE="${SOURCE:-registry}"` default, `print_plan` line, and change `KUBE_CONTEXT` default from `clusterbot` to empty (= current context, printed in preflight). Comment out `KUBE_CONTEXT=clusterbot` in the env example, leaving a hint comment.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS (exit 0).
-- [ ] **Step 5: Commit** — `feat(demo): add --source selector and current-context default (#1)`
+- [x] **Step 1: Write the failing tests** — in `scripts/demo-preprod_test.sh`: (a) `--help` output contains `--source=registry|local|manual`; (b) `./scripts/demo-preprod.sh --dry-run` prints `source: registry` by default and `source: local` with `SOURCE=local` in the environment; (c) dry-run no longer mentions `clusterbot` as a default.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect the new assertions FAIL, existing ones PASS.
+- [x] **Step 3: Implement** — add `--source)` flag parsing, `SOURCE="${SOURCE:-registry}"` default, `print_plan` line, and change `KUBE_CONTEXT` default from `clusterbot` to empty (= current context, printed in preflight). Comment out `KUBE_CONTEXT=clusterbot` in the env example, leaving a hint comment.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS (exit 0).
+- [x] **Step 5: Commit** — `feat(demo): add --source selector and current-context default (#1)`
 
 ### Task 2: Absorb `demo-preprod-olm.sh` entry points; delete the script (issue #1)
 
@@ -64,11 +64,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Consumes: `$SOURCE` from Task 1.
 - Produces: `--watch` mode (requires the CMSC to exist, tmux layout, unbounded→deadline-bounded wait via Task 6); `--console` info mode (prints console URL/username); `manual` source renders the CR to `CR_FILE` (default `/tmp/koku-demo-preprod-${NAMESPACE}.yaml`) and prints instructions, then exits 0.
 
-- [ ] **Step 1: Write the failing tests** — `--help` contains `--watch` and `--console`; dry-run with `SOURCE=manual` prints `CR_FILE:` and the words `Install the operator through the OpenShift console`; `scripts/demo-preprod-olm.sh` no longer exists (test asserts `[[ ! -x ... ]]`).
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL on new assertions.
-- [ ] **Step 3: Implement** — port the `load_env_file`/`print_console_access`/instruction-printing logic from `demo-preprod-olm.sh` into the merged script keyed on `$SOURCE == manual`; add `--watch`/`--console` flags; delete `demo-preprod-olm.sh` and its test file after porting every assertion.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: Commit** — `feat(demo): absorb demo-preprod-olm.sh; add manual source, --watch, --console (#1)`
+- [x] **Step 1: Write the failing tests** — `--help` contains `--watch` and `--console`; dry-run with `SOURCE=manual` prints `CR_FILE:` and the words `Install the operator through the OpenShift console`; `scripts/demo-preprod-olm.sh` no longer exists (test asserts `[[ ! -x ... ]]`).
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL on new assertions.
+- [x] **Step 3: Implement** — port the `load_env_file`/`print_console_access`/instruction-printing logic from `demo-preprod-olm.sh` into the merged script keyed on `$SOURCE == manual`; add `--watch`/`--console` flags; delete `demo-preprod-olm.sh` and its test file after porting every assertion.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: Commit** — `feat(demo): absorb demo-preprod-olm.sh; add manual source, --watch, --console (#1)`
 
 ### Task 3: Version discovery and selection (issue #2)
 
@@ -82,11 +82,11 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Produces (lib): `registry_list_tags <image-repo>` → newline-separated tags (HTTP via curl+python3 against `https://quay.io/api/v1/repository/<repo>/tag/?limit=100&page=N`; reads `$REGISTRY_TAG_FIXTURE` file instead when set); `resolve_catalog_version <repo> <version-hint>` → prints resolved tag, and sets `RESOLVE_WARN` when falling back (hint empty → highest `^v?\d+\.\d+\.\d+$`; `latest|main` passthrough; `[0-9a-f]{7,40}` normalized against the tag list; `@sha256:` suffix preserved).
 - Produces (script): `CATALOG_REPO` (default `quay.io/project-koku`), `VERSION` (default: resolved), `CHANNEL` (default `beta`), `CATALOG_IMG="${CATALOG_REPO}/koku-service-operator-catalog:${VERSION}"`.
 
-- [ ] **Step 1: Write the failing tests** — with fixture files: (a) tags `[main, latest, 474d937, v0.0.1, v0.0.3, v0.0.2]` → resolves `v0.0.3`; (b) empty hint + tags `[main, latest, 474d937]` → `latest` and `RESOLVE_WARN` non-empty containing `no semver`; (c) hint `474d937` → passthrough; (d) hint `v0.0.1@sha256:abc` → preserved; (e) dry-run prints `catalog: quay.io/project-koku/koku-service-operator-catalog:v0.0.3` (fixture-driven).
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** the two lib functions (quay API pagination loop; python3 for JSON→lines) and the script-side flags/preflight resolution that prints the loud warning when `RESOLVE_WARN` is set.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS. Also run once without fixtures against the real quay API (`--dry-run`) and record the resolved tag (`v0.0.1` today) in the commit message.
-- [ ] **Step 5: Commit** — `feat(demo): version discovery and selection via catalog tags (#2)`
+- [x] **Step 1: Write the failing tests** — with fixture files: (a) tags `[main, latest, 474d937, v0.0.1, v0.0.3, v0.0.2]` → resolves `v0.0.3`; (b) empty hint + tags `[main, latest, 474d937]` → `latest` and `RESOLVE_WARN` non-empty containing `no semver`; (c) hint `474d937` → passthrough; (d) hint `v0.0.1@sha256:abc` → preserved; (e) dry-run prints `catalog: quay.io/project-koku/koku-service-operator-catalog:v0.0.3` (fixture-driven).
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** the two lib functions (quay API pagination loop; python3 for JSON→lines) and the script-side flags/preflight resolution that prints the loud warning when `RESOLVE_WARN` is set.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS. Also run once without fixtures against the real quay API (`--dry-run`) and record the resolved tag (`v0.0.1` today) in the commit message.
+- [x] **Step 5: Commit** — `feat(demo): version discovery and selection via catalog tags (#2)`
 
 ### Task 4: Automated OLM install path (issue #3)
 
@@ -98,12 +98,12 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Consumes: `CATALOG_IMG`, `CHANNEL`, `NAMESPACE`, `CR_NAME` from Tasks 1/3.
 - Produces: function `olm_install` (in the main script): applies CatalogSource `koku-service-operator-catalog` (grpc, `openshift-marketplace`, image `"$CATALOG_IMG"`), OperatorGroup (AllNamespaces) + Subscription (name `koku-service-operator`, channel `"$CHANNEL"`, Automatic) in `$NAMESPACE`; waits for CSV `Succeeded` (timeout 600s, 10s poll); before applying, if a CSV matching `koku-service-operator.*` exists it prints the pre-existing-install warning naming `--reset`.
 
-- [ ] **Step 1: Write the failing tests** — unit-test what is offline-testable: a lib-level `olm_manifests` helper that *prints* the three YAMLs (CatalogSource/OperatorGroup/Subscription) given `CATALOG_IMG`/`CHANNEL`/`NAMESPACE`; assert the YAML fields (image, channel, installPlanApproval: Automatic, targetNamespaces absent). Test the warning predicate: given "csv exists" (stub `oc` via `KUBECTL=echo`-style fixture), the warning text with `--reset` is produced.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** `olm_manifests` in the lib and `olm_install` + the registry-source branch in the script. Optional `opm render` exact-bundle check only when `command -v opm`.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: E2E on the local CRC cluster (amd64, OpenShift 4.22.14):** `SOURCE=registry ./scripts/demo-preprod.sh --no-tmux` installs CSV `koku-service-operator.v0.0.1` Succeeded and reaches the UI wait. Also run once against the developer sandbox (`KUBE_CONTEXT=openshiftsanbox`) and confirm preflight fails with clear, actionable messages for the missing permissions (no namespace creation, no cluster-admin). Record the CSV name and Succeeded phase in the commit message.
-- [ ] **Step 6: Commit** — `feat(demo): automated OLM install path for the registry source (#3)`
+- [x] **Step 1: Write the failing tests** — unit-test what is offline-testable: a lib-level `olm_manifests` helper that *prints* the three YAMLs (CatalogSource/OperatorGroup/Subscription) given `CATALOG_IMG`/`CHANNEL`/`NAMESPACE`; assert the YAML fields (image, channel, installPlanApproval: Automatic, targetNamespaces absent). Test the warning predicate: given "csv exists" (stub `oc` via `KUBECTL=echo`-style fixture), the warning text with `--reset` is produced.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** `olm_manifests` in the lib and `olm_install` + the registry-source branch in the script. Optional `opm render` exact-bundle check only when `command -v opm`.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: E2E on the local CRC cluster (amd64, OpenShift 4.22.14):** `SOURCE=registry ./scripts/demo-preprod.sh --no-tmux` installs CSV `koku-service-operator.v0.0.1` Succeeded and reaches the UI wait. Also run once against the developer sandbox (`KUBE_CONTEXT=openshiftsanbox`) and confirm preflight fails with clear, actionable messages for the missing permissions (no namespace creation, no cluster-admin). Record the CSV name and Succeeded phase in the commit message.
+- [x] **Step 6: Commit** — `feat(demo): automated OLM install path for the registry source (#3)`
 
 ### Task 5: Architecture autodiscovery and image-arch checks (issue #4)
 
@@ -116,12 +116,12 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Produces (lib): `cluster_node_arch` → prints `amd64|arm64` (worker `nodeInfo.architecture`; mixed → warn, first worker; other values → `unsupported`); `image_arches <image-ref>` → space-separated arch set (`skopeo inspect --raw` when available, else python3 docker-registry-v2 anonymous flow; reads `$IMAGE_ARCH_FIXTURE/<ref>.txt` when the env var is set; prints `unknown` on failure); `assert_arch_compatible <arch> <image...>` → exit-nonzero with a per-image list, or warns `could not verify` for `unknown`.
 - Produces (script): `NODE_ARCH` (set in preflight from `cluster_node_arch`; `amd64|arm64`), used by `build_docker` as `--platform linux/${NODE_ARCH}`; `ARCH_CHECK` env (default `1`; `0` skips with a warning).
 
-- [ ] **Step 1: Write the failing tests** — fixtures: (a) `image_arches` multi-arch fixture → `amd64 arm64`; single-arch fixture → `amd64`; missing fixture → `unknown` (warning path, not failure). (b) `assert_arch_compatible arm64 <single-arch-img>` fails with the image name and the `#219` upstream reference in the message. (c) `ARCH_CHECK=0` converts the failure into a warning. (d) render-side: the list of workload images extracted from a rendered CR is checked (fixture CR text).
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** the lib functions and wire them: preflight checks `CATALOG_IMG` + all workload images in the rendered CR (render happens before the operator step; keep the rendered file); `build_docker` uses `--platform linux/${NODE_ARCH}`; after the BYOI step, a post-deploy pass reads `oc get pods -o jsonpath` images in the prereq namespaces and runs the same check, reporting image-failing pods with arch context.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: E2E negative on arm64:** offline fixture coverage is the required baseline. Additionally, when the user-provisioned arm64 single-node OpenShift cluster is available, run the default registry source with `v0.0.1` there: preflight must fail listing the amd64-only operator/workload images and the #219 explanation. Record the failure output in the commit message.
-- [ ] **Step 6: Commit** — `feat(demo): architecture autodiscovery and image-arch checks (#4)`
+- [x] **Step 1: Write the failing tests** — fixtures: (a) `image_arches` multi-arch fixture → `amd64 arm64`; single-arch fixture → `amd64`; missing fixture → `unknown` (warning path, not failure). (b) `assert_arch_compatible arm64 <single-arch-img>` fails with the image name and the `#219` upstream reference in the message. (c) `ARCH_CHECK=0` converts the failure into a warning. (d) render-side: the list of workload images extracted from a rendered CR is checked (fixture CR text).
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** the lib functions and wire them: preflight checks `CATALOG_IMG` + all workload images in the rendered CR (render happens before the operator step; keep the rendered file); `build_docker` uses `--platform linux/${NODE_ARCH}`; after the BYOI step, a post-deploy pass reads `oc get pods -o jsonpath` images in the prereq namespaces and runs the same check, reporting image-failing pods with arch context.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [ ] **Step 5: E2E negative on arm64:** *(fixture baseline complete; real run pending the user-provisioned arm64 cluster)* offline fixture coverage is the required baseline. Additionally, when the user-provisioned arm64 single-node OpenShift cluster is available, run the default registry source with `v0.0.1` there: preflight must fail listing the amd64-only operator/workload images and the #219 explanation. Record the failure output in the commit message.
+- [x] **Step 6: Commit** — `feat(demo): architecture autodiscovery and image-arch checks (#4)`
 
 ### Task 6: Unified UI wait and post-install verification (issue #9)
 

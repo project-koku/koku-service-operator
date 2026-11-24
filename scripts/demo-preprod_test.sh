@@ -306,6 +306,101 @@ grep -Fq 'can-i create catalogsources -n openshift-marketplace' "${ROOT}/scripts
   fail=1
 }
 
+# --- Task 5 (#4): architecture discovery and image-arch checks ---
+archfx="$(mktemp -d)"
+printf 'amd64 arm64\n' >"${archfx}/quay.io_example_multi_v1.txt"
+printf 'amd64\n' >"${archfx}/quay.io_example_single_v1.txt"
+
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/multi:v1)"
+assert_eq "$out" "amd64 arm64" "multi-arch image detected"
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/single:v1)"
+assert_eq "$out" "amd64" "single-arch image detected"
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/missing:v1)"
+assert_eq "$out" "unknown" "missing fixture degrades to unknown"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible arm64 quay.io/example/single:v1 2>&1)" && arch_rc=0 || arch_rc=$?
+assert_eq "$arch_rc" "1" "arch mismatch fails"
+assert_contains "$arch_out" "quay.io/example/single:v1" "mismatch names the image"
+assert_contains "$arch_out" "#219" "mismatch references upstream #219"
+assert_contains "$arch_out" "ARCH_CHECK=0" "mismatch names the escape hatch"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible arm64 quay.io/example/missing:v1 2>&1)" && unverify_rc=0 || unverify_rc=$?
+assert_eq "$unverify_rc" "0" "unverifiable image does not fail"
+assert_contains "$arch_out" "could not verify" "unverifiable image warns"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible amd64 quay.io/example/multi:v1 2>&1)" && ok_rc=0 || ok_rc=$?
+assert_eq "$ok_rc" "0" "compatible image passes"
+assert_not_contains "$arch_out" "warning" "compatible image passes silently"
+
+stub_dir="$(mktemp -d)"
+mk_oc_arch() {
+  cat >"$1" <<EOF
+#!/bin/bash
+if [[ "\$1" == "get" && "\$2" == "nodes" ]]; then
+  printf '%b\n' '$2'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$1"
+}
+mk_oc_arch "${stub_dir}/oc-amd64" 'amd64'
+mk_oc_arch "${stub_dir}/oc-mixed" 'amd64\narm64'
+mk_oc_arch "${stub_dir}/oc-s390x" 's390x'
+
+out="$(cluster_node_arch "${stub_dir}/oc-amd64")"
+assert_eq "$out" "amd64" "cluster arch detected"
+mixed_out="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>/dev/null)" || true
+assert_eq "$mixed_out" "amd64" "mixed arch uses the first node"
+mixed_warn="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>&1 >/dev/null)"
+assert_contains "$mixed_warn" "mixed-architecture" "mixed arch warns"
+
+s390x_out="$(cluster_node_arch "${stub_dir}/oc-s390x" 2>&1)" && s390x_rc=0 || s390x_rc=$?
+assert_eq "$s390x_rc" "1" "unsupported arch fails"
+assert_contains "$s390x_out" "unsupported" "unsupported arch message"
+
+# CR workload image extraction
+tmp_cr="$(mktemp)"
+render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp_cr" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+cr_imgs="$(cr_workload_images "$tmp_cr")"
+assert_contains "$cr_imgs" "quay.io/project-koku/koku:422f758" "CR images include koku"
+assert_contains "$cr_imgs" "quay.io/project-koku/insights-rbac:34e25ed" "CR images include insights-rbac"
+assert_contains "$cr_imgs" "registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0" "CR images include oauth2-proxy"
+assert_eq "$(printf '%s\n' "$cr_imgs" | grep -c .)" "7" "CR yields seven workload image slots (koku api + masu)"
+rm -f "$tmp_cr"
+
+# installed operator image from the CSV (stub oc)
+cat >"${stub_dir}/oc-opimg" <<'EOF'
+#!/bin/bash
+if [[ "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/koku-service-operator.v0.0.1"
+  exit 0
+fi
+if [[ "$1" == "get" ]]; then
+  echo "quay.io/project-koku/koku-service-operator@sha256:deadbeef"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-opimg"
+out="$(installed_operator_image "${stub_dir}/oc-opimg" cost-demo)"
+assert_eq "$out" "quay.io/project-koku/koku-service-operator@sha256:deadbeef" "operator image read from the CSV"
+rm -rf "$stub_dir" "$archfx"
+
+grep -Fq 'assert_arch_compatible "$NODE_ARCH"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: preflight must assert image arch compatibility" >&2
+  fail=1
+}
+grep -Fq -- '--platform linux/${NODE_ARCH}' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: docker build must target the discovered arch" >&2
+  fail=1
+}
+grep -Fq 'byoi_pod_images' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: post-deploy pass must check BYOI pod images" >&2
+  fail=1
+}
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
