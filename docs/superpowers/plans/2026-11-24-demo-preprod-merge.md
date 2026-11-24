@@ -199,12 +199,12 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Consumes: reset sequence from the existing script; OLM object names from Task 4.
 - Produces: after CMSC deletion and before namespace deletion: delete Subscription `koku-service-operator`, CSVs by label `operators.coreos.com/koku-service-operator.${NAMESPACE}`, OperatorGroup in `$NAMESPACE`, and CatalogSource `koku-service-operator-catalog` in `openshift-marketplace` (all `--ignore-not-found`).
 
-- [ ] **Step 1: Write the failing tests** — the reset block's command list (extracted via a `KUBECTL` echo-stub) contains all four deletions with the right namespaces, in order after the CMSC deletion.
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
-- [ ] **Step 3: Implement** the four deletions in the documented order.
-- [ ] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
-- [ ] **Step 5: E2E:** after a registry install (Task 4), `--reset` leaves none of: CatalogSource, CSV, Subscription, OperatorGroup, CMSC; namespaces are gone. Record `oc get` outputs in the commit message.
-- [ ] **Step 6: Commit** — `feat(demo): reset removes OLM objects (#7)`
+- [x] **Step 1: Write the failing tests** — the reset block's command list (extracted via a `KUBECTL` echo-stub) contains all four deletions with the right namespaces, in order after the CMSC deletion.
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` — expect FAIL.
+- [x] **Step 3: Implement** the four deletions in the documented order.
+- [x] **Step 4: Run** `bash scripts/demo-preprod_test.sh` — expect PASS.
+- [x] **Step 5: E2E:** after a registry install (Task 4), `--reset` leaves none of: CatalogSource, CSV, Subscription, OperatorGroup, CMSC; namespaces are gone. Record `oc get` outputs in the commit message.
+- [x] **Step 6: Commit** — `feat(demo): reset removes OLM objects (#7)`
 
 ### Task 11: Test consolidation (issue #10)
 
@@ -212,9 +212,9 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 - Modify: `scripts/demo-preprod_test.sh` (final pass)
 - Test: `scripts/demo-preprod_test.sh` (self)
 
-- [ ] **Step 1: Audit** every issue #1–#9 acceptance criterion against the test file; add any missing case (this is the consolidation the earlier tasks may have left partial: e.g. `KUBE_CONTEXT` default, `--cr-file` passthrough, `ARCH_CHECK=0`).
-- [ ] **Step 2: Run** `bash scripts/demo-preprod_test.sh` and the repo's full script-test set (`bash scripts/deploy-rhbk_test.sh`, `bash scripts/deploy-test-operator_test.sh`) — expect PASS everywhere.
-- [ ] **Step 3: Commit** — `test(demo): consolidate merged-script coverage (#10)`
+- [x] **Step 1: Audit** every issue #1–#9 acceptance criterion against the test file; add any missing case (this is the consolidation the earlier tasks may have left partial: e.g. `KUBE_CONTEXT` default, `--cr-file` passthrough, `ARCH_CHECK=0`).
+- [x] **Step 2: Run** `bash scripts/demo-preprod_test.sh` and the repo's full script-test set (`bash scripts/deploy-rhbk_test.sh`, `bash scripts/deploy-test-operator_test.sh`) — expect PASS everywhere.
+- [x] **Step 3: Commit** — `test(demo): consolidate merged-script coverage (#10)`
 
 ### Task 12: Documentation rewrite (issue #11)
 

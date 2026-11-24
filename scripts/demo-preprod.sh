@@ -7,12 +7,14 @@
 #   ./scripts/demo-preprod.sh --reset          # delete app/infra/kafka/keycloak NS first
 #   ./scripts/demo-preprod.sh --no-tmux
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
-#   ./scripts/demo-preprod.sh --crc            # target local CRC (arm64, single node)
+#   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
 #
 # Operator install source (--source=registry|local|manual; default: registry):
 #   registry  install the published operator (quay.io/project-koku) via OLM
 #   local     build the operator from this checkout, deploy in-cluster
 #   manual    prepare prereqs + CR; you install the operator via the console
+#   Version selection: --version <vX.Y.Z|commit-sha|latest>, --catalog-repo
+#   <quay namespace>, --channel <olm channel>; default: latest stable (discovered).
 #
 #   ./scripts/demo-preprod.sh --watch         # observe an existing install until the UI is ready
 #   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username
@@ -49,7 +51,7 @@ SKIP_PREREQS="${SKIP_PREREQS:-0}"
 USER_CR_FILE="${USER_CR_FILE:-}"
 
 usage() {
-  sed -n '2,26p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+  sed -n '2,27p' "$SCRIPT" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
