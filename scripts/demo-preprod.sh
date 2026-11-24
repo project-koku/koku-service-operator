@@ -25,10 +25,11 @@
 # Settings: env vars, then scripts/demo-preprod.local.env, then
 # scripts/demo-preprod.env.example.
 #
-# tmux (default): left pane = numbered steps; top-right = kubectl klock pods
-# in NAMESPACE; bottom-right = kubectl klock pods in KAFKA_NAMESPACE.
-# When the UI Deployment is Ready, `open` the UI Route (macOS).
+# tmux (default, when installed): left pane = numbered steps; top-right =
+# kubectl klock pods in NAMESPACE; bottom-right = kubectl klock pods in
+# KAFKA_NAMESPACE. Disable with --no-tmux; detach with Ctrl-b d.
 #
+# HELP-END — usage output ends at this marker.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,7 +56,7 @@ SKIP_PREREQS="${SKIP_PREREQS:-0}"
 USER_CR_FILE="${USER_CR_FILE:-}"
 
 usage() {
-  sed -n '2,27p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^# HELP-END/p' "$SCRIPT" | sed 's/^# \{0,1\}//' | sed '/^HELP-END/d'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -199,8 +200,13 @@ CONSOLE_PASSWORD="${CONSOLE_PASSWORD:-}"
 CR_FILE="${CR_FILE:-/tmp/koku-demo-preprod-${NAMESPACE}.yaml}"
 
 # Resolve the catalog image before printing the plan so --dry-run shows the
-# real image. CATALOG_IMG set explicitly skips discovery entirely.
-if [[ -z "${CATALOG_IMG:-}" ]]; then
+# real image. CATALOG_IMG set explicitly skips discovery entirely, and
+# --watch/--console skip it too (they never use the catalog — no network I/O
+# before the mode dispatch; review note).
+if [[ -z "${CATALOG_IMG:-}" && ( "$DEMO_WATCH" == "1" || "$DEMO_CONSOLE" == "1" ) ]]; then
+  CATALOG_IMG=""
+  CATALOG_VERSION="(not resolved)"
+elif [[ -z "${CATALOG_IMG:-}" ]]; then
   REPO_PATH="${CATALOG_REPO#quay.io/}"
   REPO_PATH="${REPO_PATH%/}"
   if RESOLVED_VERSION="$(resolve_catalog_version "${REPO_PATH}/koku-service-operator-catalog" "${VERSION:-}")"; then
@@ -283,7 +289,7 @@ print_plan() {
 Pre-prod demo plan
   context:     ${KUBE_CONTEXT:-<current>}
   source:      ${SOURCE}
-  catalog:     ${CATALOG_IMG}
+  catalog:     ${CATALOG_IMG:-<not resolved>}
   version:     ${CATALOG_VERSION}
   app NS:      ${NAMESPACE}  (CR ${CR_NAME})
   infra NS:    ${INFRA_NAMESPACE}
@@ -519,6 +525,7 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
     # function (review critical #15) and report success after a failed rollout.
     wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$OPEN_BROWSER"
     echo "UI login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
+    echo "Retrieve later: ${KUBECTL} -n ${NAMESPACE} extract secret/${CR_NAME}-realm-admin --to=-"
     verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
       echo "error: CMSC verification failed — see the table above" >&2
       exit 1
@@ -563,7 +570,7 @@ if [[ "$ARCH_CHECK" == "1" ]]; then
   while IFS= read -r _img; do
     [[ -n "$_img" ]] && arch_images+=("$_img")
   done < <(cr_workload_images "$CR_TO_APPLY")
-  assert_arch_compatible "$NODE_ARCH" "${arch_images[@]}" || exit 1
+  assert_arch_compatible "$NODE_ARCH" ${arch_images[@]+"${arch_images[@]}"} || exit 1
   ok "image architectures compatible with ${NODE_ARCH}"
 else
   echo "warning: ARCH_CHECK=0 — image architecture checks skipped" >&2
@@ -786,7 +793,7 @@ EOF
 # rolls a pod with the fixed config. Exits on its own; a no-op if the value is
 # already a URL. arm64 clusters only (they need the stable-v26 channel).
 fix_keycloak_hostname_v2() {
-  local ns="$1" end=$((SECONDS + 600)) h
+  local ns="$1" end=$((SECONDS + 1200)) h
   while (( SECONDS < end )); do
     h="$("$KUBECTL" -n "$ns" get keycloak keycloak -o jsonpath='{.spec.hostname.hostname}' 2>/dev/null || true)"
     if [[ -n "$h" ]]; then
@@ -861,7 +868,7 @@ if [[ "$ARCH_CHECK" == "1" ]]; then
     done < <(byoi_pod_images "$KUBECTL" "$_pns")
   done
   if [[ ${#pod_images[@]} -gt 0 ]]; then
-    assert_arch_compatible "$NODE_ARCH" "${pod_images[@]}" || exit 1
+    assert_arch_compatible "$NODE_ARCH" ${pod_images[@]+"${pod_images[@]}"} || exit 1
     ok "BYOI pod images compatible with ${NODE_ARCH}"
   fi
 fi
@@ -871,7 +878,19 @@ fi # end SKIP_PREREQS gate
 # read it back for the summary (also with --skip-prereqs: the Secret lives in
 # the app namespace and is ours to read).
 if [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
-  REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if "$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" >/dev/null 2>&1; then
+    # The Secret exists: a failed read is an error, never a silent admin guess.
+    REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}')" || {
+      echo "error: cannot read Secret ${NAMESPACE}/${CR_NAME}-realm-admin" >&2
+      exit 1
+    }
+    REALM_ADMIN_PASSWORD="$(printf '%s' "$REALM_ADMIN_PASSWORD" | base64 -d 2>/dev/null)" || true
+    if [[ -z "$REALM_ADMIN_PASSWORD" ]]; then
+      echo "error: Secret ${NAMESPACE}/${CR_NAME}-realm-admin has an empty password" >&2
+      exit 1
+    fi
+  fi
+  # No Secret: legacy pre-hardening install — the summary notes the legacy default.
 fi
 
 if [[ "$PREREQS_ONLY" == "1" ]]; then
@@ -1023,6 +1042,10 @@ else
   step "Operator image"
 BUILT_IMAGE=0
 build_openshift() {
+  if [[ "$(basename "$KUBECTL")" != "oc" ]]; then
+    echo "error: BUILD_MODE=openshift requires oc (new-build/start-build are oc-only; KUBECTL=${KUBECTL})" >&2
+    return 1
+  fi
   echo "  OpenShift binary docker build -> ${NAMESPACE}/koku-service-operator:${IMAGE_TAG}"
   if ! "$KUBECTL" -n "$NAMESPACE" get buildconfig koku-service-operator >/dev/null 2>&1; then
     oc -n "$NAMESPACE" new-build --name=koku-service-operator --binary --strategy=docker \
@@ -1113,6 +1136,7 @@ verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
 step "Open the UI"
 echo "  ${UI_URL}"
 echo "  Keycloak realm user: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
+echo "  (retrieve later: ${KUBECTL} -n ${NAMESPACE} extract secret/${CR_NAME}-realm-admin --to=-)"
 if [[ "$DEMO_NO_OPEN" == "1" || "$OPEN_BROWSER" == "0" ]]; then
   skip "browser launch disabled"
 elif command -v open >/dev/null 2>&1; then
@@ -1127,3 +1151,4 @@ demo_profile_banner
 echo ""
 echo "${C_BOLD}${C_GREEN}Demo complete.${C_RESET} UI: ${UI_URL}"
 echo "Login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
+echo "Retrieve later: ${KUBECTL} -n ${NAMESPACE} extract secret/${CR_NAME}-realm-admin --to=-"

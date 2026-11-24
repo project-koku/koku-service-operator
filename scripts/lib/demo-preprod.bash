@@ -132,7 +132,9 @@ require_reachable_cluster() {
   local kubectl="${1:?kubectl/oc binary}"
   local err
   err="$(mktemp)"
-  if ! "$kubectl" whoami >/dev/null 2>"$err"; then
+  # whoami is oc-only; kubectl users get a portable authenticated probe.
+  if ! "$kubectl" whoami >/dev/null 2>"$err" \
+     && ! "$kubectl" get --raw /apis >/dev/null 2>>"$err"; then
     echo "error: kube API is not reachable (context may point at an expired Cluster Bot)" >&2
     sed 's/^/  /' "$err" >&2
     rm -f "$err"
@@ -186,7 +188,10 @@ while True:
     with urllib.request.urlopen(url, timeout=30) as r:
         d = json.load(r)
     tags += [t["name"] for t in d.get("tags", [])]
-    if not d.get("has_additional") or page >= 20:
+    if not d.get("has_additional"):
+        break
+    if page >= 20:
+        print("warning: stopped listing tags after 20 pages; very old tags may be missing", file=sys.stderr)
         break
     page += 1
 print("\n".join(tags))
@@ -348,7 +353,9 @@ warn_existing_install() {
 }
 
 # Print the cluster's node architecture: amd64 or arm64. Mixed-architecture
-# clusters warn and use the first node; anything else is unsupported (exit 1).
+# clusters fail: the demo cannot guarantee pod placement, and proceeding would
+# schedule amd64-only images onto arm64 nodes (review note — a green-lit
+# broken install is worse than a clear refusal). Anything else is unsupported.
 cluster_node_arch() {
   local kubectl="${1:?kubectl/oc binary}"
   local archs first
@@ -359,7 +366,10 @@ cluster_node_arch() {
   fi
   first="$(printf '%s\n' "$archs" | head -1)"
   if [[ "$(printf '%s\n' "$archs" | grep -c .)" -gt 1 ]]; then
-    echo "warning: mixed-architecture cluster ($(printf '%s' "$archs" | tr '\n' ' ')); using ${first}" >&2
+    echo "error: mixed-architecture cluster ($(printf '%s' "$archs" | tr '\n' ' ')). The demo" >&2
+    echo "  cannot guarantee pod placement across architectures; use a homogeneous" >&2
+    echo "  worker pool." >&2
+    return 1
   fi
   case "$first" in
     amd64|arm64)

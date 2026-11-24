@@ -9,6 +9,11 @@ source "${ROOT}/scripts/lib/demo-preprod.bash"
 # Fixture hooks are gated behind DEMO_ALLOW_FIXTURES (issue #18): this runner
 # is the intended user; a production install without the gate fails loudly.
 export DEMO_ALLOW_FIXTURES=1
+# Default registry fixture so the whole suite stays offline (issue #23);
+# tests that exercise fallback/pinning set their own fixture, which wins.
+DEFAULT_TAG_FIXTURE="$(mktemp)"
+printf 'main\nlatest\nv0.0.1 sha256:%s\n' "$(printf 'e%.0s' {1..64})" >"$DEFAULT_TAG_FIXTURE"
+export REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE"
 
 fail=0
 assert_eq() {
@@ -158,6 +163,9 @@ help_out="$(cd "${ROOT}/scripts" && ./demo-preprod.sh --help 2>&1)" || {
 }
 assert_contains "$help_out" "./scripts/demo-preprod.sh --dry-run" "--help from scripts/ prints usage"
 assert_not_contains "$help_out" "No such file or directory" "--help from scripts/ must not sed a relative \$0"
+assert_contains "$help_out" "tmux (default, when installed)" "--help documents the tmux default"
+assert_contains "$help_out" "Ctrl-b d" "--help says how to detach from tmux"
+assert_not_contains "$help_out" "HELP-END" "--help output ends at the marker"
 
 # --- Task 1 (#1): --source selector and current-context default ---
 help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
@@ -356,10 +364,10 @@ mk_oc_arch "${stub_dir}/oc-s390x" 's390x'
 
 out="$(cluster_node_arch "${stub_dir}/oc-amd64")"
 assert_eq "$out" "amd64" "cluster arch detected"
-mixed_out="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>/dev/null)" || true
-assert_eq "$mixed_out" "amd64" "mixed arch uses the first node"
-mixed_warn="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>&1 >/dev/null)"
-assert_contains "$mixed_warn" "mixed-architecture" "mixed arch warns"
+mixed_out="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>&1)" && mixed_rc=0 || mixed_rc=$?
+assert_eq "$mixed_rc" "1" "mixed-architecture clusters are refused"
+assert_contains "$mixed_out" "mixed-architecture" "mixed-arch error names the problem"
+assert_contains "$mixed_out" "homogeneous" "mixed-arch error suggests the fix"
 
 s390x_out="$(cluster_node_arch "${stub_dir}/oc-s390x" 2>&1)" && s390x_rc=0 || s390x_rc=$?
 assert_eq "$s390x_rc" "1" "unsupported arch fails"
