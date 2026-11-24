@@ -9,6 +9,11 @@
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --crc            # target local CRC (arm64, single node)
 #
+# Operator install source (--source=registry|local|manual; default: registry):
+#   registry  install the published operator (quay.io/project-koku) via OLM
+#   local     build the operator from this checkout, deploy in-cluster
+#   manual    prepare prereqs + CR; you install the operator via the console
+#
 # Settings: env vars, then scripts/demo-preprod.local.env, then
 # scripts/demo-preprod.env.example (and scripts/demo-preprod.crc.env with --crc).
 #
@@ -33,7 +38,7 @@ DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
 DEMO_CRC="${DEMO_CRC:-0}"
 
 usage() {
-  sed -n '2,18p' "$SCRIPT" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$SCRIPT" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -44,6 +49,11 @@ while [[ $# -gt 0 ]]; do
     --rebuild) DEMO_REBUILD=1 ;;
     --no-open) DEMO_NO_OPEN=1 ;;
     --crc) DEMO_CRC=1 ;;
+    --source)
+      [[ $# -ge 2 ]] || { echo "error: --source requires a value (registry|local|manual)" >&2; exit 2; }
+      SOURCE="$2"
+      shift
+      ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown flag $1" >&2
@@ -95,8 +105,19 @@ fi
 if [[ "$DEMO_CRC" == "1" ]]; then
   KUBE_CONTEXT="${KUBE_CONTEXT:-crc}"
 else
-  KUBE_CONTEXT="${KUBE_CONTEXT:-clusterbot}"
+  # Default: the current kube context. Pin one with KUBE_CONTEXT=... when
+  # juggling several clusters.
+  KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 fi
+SOURCE="${SOURCE:-registry}"
+case "$SOURCE" in
+  registry|local|manual) ;;
+  *)
+    echo "error: SOURCE must be registry, local or manual (got '${SOURCE}')" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
 NAMESPACE="${NAMESPACE:-cost-byoi}"
 CR_NAME="${CR_NAME:-cost-management}"
 INFRA_NAMESPACE="${INFRA_NAMESPACE:-cost-byoi-infra}"
@@ -112,7 +133,7 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 KUBECTL="${KUBECTL:-oc}"
 
 RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"
-export RHBK_SCRIPT NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPACE LOG_LEVEL
+export RHBK_SCRIPT NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPACE LOG_LEVEL SOURCE
 
 IMG="${IMG:-image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/koku-service-operator:${IMAGE_TAG}}"
 export IMG
@@ -164,7 +185,8 @@ klock_cmd() {
 print_plan() {
   cat <<EOF
 Pre-prod demo plan
-  context:     ${KUBE_CONTEXT}
+  context:     ${KUBE_CONTEXT:-<current>}
+  source:      ${SOURCE}
   app NS:      ${NAMESPACE}  (CR ${CR_NAME})
   infra NS:    ${INFRA_NAMESPACE}
   kafka NS:    ${KAFKA_NAMESPACE}
@@ -257,13 +279,17 @@ need_cmd python3
 need_cmd openssl
 
 step "Preflight"
-echo "Cluster context: ${KUBE_CONTEXT}"
-if ! "$KUBECTL" config get-contexts "$KUBE_CONTEXT" >/dev/null 2>&1; then
-  echo "error: kube context '${KUBE_CONTEXT}' not found" >&2
-  "$KUBECTL" config get-contexts >&2 || true
-  exit 1
+if [[ -n "${KUBE_CONTEXT}" ]]; then
+  echo "Cluster context: ${KUBE_CONTEXT}"
+  if ! "$KUBECTL" config get-contexts "$KUBE_CONTEXT" >/dev/null 2>&1; then
+    echo "error: kube context '${KUBE_CONTEXT}' not found" >&2
+    "$KUBECTL" config get-contexts >&2 || true
+    exit 1
+  fi
+  "$KUBECTL" config use-context "$KUBE_CONTEXT" >/dev/null
+else
+  echo "Cluster context: <current>"
 fi
-"$KUBECTL" config use-context "$KUBE_CONTEXT" >/dev/null
 require_reachable_cluster "$KUBECTL" || exit 1
 ok "using $($KUBECTL config current-context) — $($KUBECTL whoami --show-server)"
 

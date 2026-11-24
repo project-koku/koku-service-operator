@@ -150,6 +150,21 @@ help_out="$(cd "${ROOT}/scripts" && ./demo-preprod.sh --help 2>&1)" || {
 assert_contains "$help_out" "./scripts/demo-preprod.sh --dry-run" "--help from scripts/ prints usage"
 assert_not_contains "$help_out" "No such file or directory" "--help from scripts/ must not sed a relative \$0"
 
+# --- Task 1 (#1): --source selector and current-context default ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--source=registry|local|manual" "help documents --source"
+
+plan="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan" "source:      registry" "dry run defaults to the registry source"
+assert_not_contains "$plan" "clusterbot" "dry run must not default KUBE_CONTEXT to clusterbot"
+
+plan_local="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=local ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_local" "source:      local" "SOURCE=local selects the local source"
+
+bad_src="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=bogus ./scripts/demo-preprod.sh --dry-run 2>&1)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "2" "invalid SOURCE exits 2"
+assert_contains "$bad_src" "registry, local or manual" "invalid SOURCE names the valid values"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
