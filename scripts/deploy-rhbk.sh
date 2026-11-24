@@ -193,7 +193,7 @@ safe_curl() {
     fi
     while [ $# -gt 0 ]; do
         case "$1" in
-            -H)
+            -H|--header)
                 case "$2" in
                     Authorization:*)
                         if [ -z "$hdr_file" ]; then
@@ -208,7 +208,7 @@ safe_curl() {
                 esac
                 shift 2
                 ;;
-            -d|--data|--data-raw)
+            -d|--data|--data-raw|--data-binary)
                 if [ -z "$body_file" ]; then
                     body_file="$(mktemp "${TMPDIR:-/tmp}/rhbk-body-XXXXXX")"
                     sanitized+=(--data "@$body_file")
@@ -224,15 +224,17 @@ safe_curl() {
                 ;;
         esac
     done
-    local _rhbk_secret_files=""
-    [ -n "$hdr_file" ] && _rhbk_secret_files="$hdr_file"
-    [ -n "$body_file" ] && _rhbk_secret_files="$_rhbk_secret_files $body_file"
+    # A signal during a hung curl must not leave the secret-bearing files in
+    # $TMPDIR (re-review note); normal paths clear the trap below.
+    # shellcheck disable=SC2317
+    trap 'rm -f "$hdr_file" "$body_file" 2>/dev/null' INT TERM HUP
 
     while [ "$attempt" -le "$retries" ]; do
         body="$(curl "${sanitized[@]}" 2>"$err")" && status=0 || status=$?
         if [ "$status" -eq 0 ]; then
             printf '%s' "$body"
-            rm -f $_rhbk_secret_files
+            trap - INT TERM HUP
+            rm -f "$hdr_file" "$body_file"
             rm -f "$err"
             return 0
         fi
@@ -247,7 +249,8 @@ safe_curl() {
             *)
                 echo_warning "curl failed (exit ${status})" >&2
                 printf '%s' "$body"
-                rm -f $_rhbk_secret_files
+                trap - INT TERM HUP
+                rm -f "$hdr_file" "$body_file"
                 rm -f "$err"
                 return 0
                 ;;
@@ -256,7 +259,8 @@ safe_curl() {
 
     echo_warning "curl exhausted retries (last exit ${status})" >&2
     printf '%s' "$body"
-    rm -f $_rhbk_secret_files
+    trap - INT TERM HUP
+    rm -f "$hdr_file" "$body_file"
     rm -f "$err"
     return 0
 }

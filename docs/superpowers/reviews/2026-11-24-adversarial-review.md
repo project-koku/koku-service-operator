@@ -115,3 +115,34 @@ asked while printing that they did the right thing. Three of the four
 criticals are pre-existing on `main`; this branch built its headline features
 on top of them, and the branch's own e2e runs never caught them because they
 used `--no-tmux` and healthy clusters.
+
+---
+
+## Re-review of the fixes (2026-11-25)
+
+A fresh hostile reviewer verified all twelve fix claims against the code (all
+hold; both offline suites pass) and hunted for regressions. Verdict:
+**REGRESSION** — three warnings, all fixed immediately after:
+
+1. **`--no-open` broken by the #15 parameterization** — the lib `wait_for_ui`
+   lost the `DEMO_NO_OPEN` gate; macOS hosts opened the browser at UI-ready.
+   Fixed: `should_open_browser` folds both flags; both call sites and the
+   watch-tmux forwarding use it / forward `DEMO_NO_OPEN`.
+2. **`--watch` printed the legacy-default password** — the read-back ran after
+   the watch block exited; and `start_watch_tmux` dropped combined flags (the
+   #13 bug class). Fixed: the read-back moved before the watch dispatch
+   (verified live: `--watch` now prints the Secret's password); the watch tmux
+   pane forwards the raw invocation and the flag-backed env forms.
+3. **Env forms lost in tmux** — `PREREQS_ONLY=1 ./script` inherits the tmux
+   server's environment, not the caller's. Fixed: the inner command forwards
+   the flag-backed variables (`PREREQS_ONLY`, `SKIP_PREREQS`, `USER_CR_FILE`,
+   `VERSION`, `CHANNEL`, `CATALOG_REPO`, `ARCH_CHECK`,
+   `REALM_ADMIN_PASSWORD`, `CONTAINER_TOOL`, `KUBE_CONTEXT`, …).
+
+Also addressed from the notes: signal exits no longer leak `safe_curl`'s
+secret-bearing files (INT/TERM/HUP trap); an ungated fixture variable aborts
+the install instead of degrading to `:latest`; `CATALOG_IMG` gets the same
+charset validation as `--version` and its derived version shows the tag, not a
+digest fragment; dead `ui_deploy_ready` removed; `safe_curl` handles the
+`--header`/`--data-binary` long forms and quotes its removals. Accepted: OCI
+charset false positives (`+` in tags) — loud and rare.

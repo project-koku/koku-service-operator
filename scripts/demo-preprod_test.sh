@@ -897,6 +897,41 @@ render_preprod_cr "$tmp21a" "$tmp21b" "apps.example.test" "https://kc.apps.examp
 assert_eq "$render21_rc" "1" "drifted namespace block fails the render"
 rm -f "$tmp21a" "$tmp21b"
 
+# --- re-review regressions: --no-open folding, env-form forwarding, watch password ---
+out="$(DEMO_NO_OPEN=1 OPEN_BROWSER=1 should_open_browser)"
+assert_eq "$out" "0" "--no-open suppresses the browser"
+out="$(DEMO_NO_OPEN=0 OPEN_BROWSER=1 should_open_browser)"
+assert_eq "$out" "1" "default opens the browser"
+out="$(DEMO_NO_OPEN=0 OPEN_BROWSER=0 should_open_browser)"
+assert_eq "$out" "0" "OPEN_BROWSER=0 suppresses the browser"
+
+# env forms survive the tmux wrapper (behavior test with the tmux stub)
+tbin2="$(mktemp -d)"
+tlog2="${tbin2}/tmux.log"
+cat >"${tbin2}/tmux" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog2}"
+exit 0
+EOF
+chmod +x "${tbin2}/tmux"
+env -u KUBE_CONTEXT PATH="${tbin2}:$PATH" REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
+  PREREQS_ONLY=1 ./scripts/demo-preprod.sh >/dev/null 2>&1 || true
+env2_cmd="$(grep 'send-keys' "$tlog2" | grep demo-preprod.sh | tail -1)"
+assert_contains "$env2_cmd" "PREREQS_ONLY=1" "tmux inner run receives the PREREQS_ONLY env form"
+rm -rf "$tbin2"
+
+# ungated fixture aborts the install outright
+ungated="$(env -u KUBE_CONTEXT -u DEMO_ALLOW_FIXTURES REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
+  ./scripts/demo-preprod.sh --dry-run 2>&1)" && ungated_rc=0 || ungated_rc=$?
+assert_eq "$ungated_rc" "1" "ungated fixture aborts"
+assert_contains "$ungated" "aborting" "ungated fixture names the abort"
+
+# CATALOG_IMG validation + truthful CATALOG_VERSION for explicit overrides
+bad_img="$(env -u KUBE_CONTEXT CATALOG_IMG='bad"img' ./scripts/demo-preprod.sh --dry-run 2>&1)" && bi_rc=0 || bi_rc=$?
+assert_eq "$bi_rc" "2" "CATALOG_IMG with a quote is rejected"
+img_plan="$(env -u KUBE_CONTEXT CATALOG_IMG=quay.io/example/catalog:v9.9.9 ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$img_plan" "version:     v9.9.9" "explicit CATALOG_IMG version shows the tag, not a digest fragment"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

@@ -158,6 +158,12 @@ case "$SOURCE" in
     exit 2
     ;;
 esac
+if [[ ( -n "${REGISTRY_TAG_FIXTURE:-}" || -n "${IMAGE_ARCH_FIXTURE:-}" ) && "${DEMO_ALLOW_FIXTURES:-}" != "1" ]]; then
+  echo "error: a fixture variable (REGISTRY_TAG_FIXTURE/IMAGE_ARCH_FIXTURE) is set but fixture" >&2
+  echo "  mode is not enabled. Fixture hooks are for the offline test suite only; aborting" >&2
+  echo "  rather than installing from faked version/architecture data." >&2
+  exit 1
+fi
 if [[ "$PREREQS_ONLY" == "1" && "$SKIP_PREREQS" == "1" ]]; then
   echo "error: --prereqs-only and --skip-prereqs are mutually exclusive" >&2
   exit 2
@@ -167,6 +173,10 @@ if [[ -n "$USER_CR_FILE" && ! -f "$USER_CR_FILE" ]]; then
   exit 2
 fi
 validate_version_hint "${VERSION:-}" || exit 2
+if [[ -n "${CATALOG_IMG:-}" && ! "${CATALOG_IMG:-}" =~ ^[A-Za-z0-9._/:@-]+$ ]]; then
+  echo "error: CATALOG_IMG has invalid characters (allowed: A-Za-z0-9._/:@-): ${CATALOG_IMG}" >&2
+  exit 2
+fi
 case "$PROFILE" in
   ""|single-node) ;;
   *)
@@ -216,7 +226,8 @@ elif [[ -z "${CATALOG_IMG:-}" ]]; then
     exit 1
   fi
 else
-  CATALOG_VERSION="${CATALOG_IMG##*:}"
+  CATALOG_VERSION="${CATALOG_IMG##*/}"
+  CATALOG_VERSION="${CATALOG_VERSION#*:}"
 fi
 export CATALOG_IMG
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
@@ -399,14 +410,21 @@ start_tmux() {
   tmux send-keys -t "${TMUX_SESSION}:demo.1" "until ${watch1}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
   tmux send-keys -t "${TMUX_SESSION}:demo.2" "until ${watch2}; do echo 'watcher retry in 3s…'; sleep 3; done" C-m
 
-  # Forward the raw invocation: every flag must reach the inner run. Env-file
-  # variables survive via export; flag-parsed shell variables do not, so the
-  # flags themselves are re-parsed by the inner process (review critical #13).
+  # Forward the raw invocation AND the flag-backed env forms: every flag must
+  # reach the inner run (review critical #13), and env forms like
+  # PREREQS_ONLY=1 must survive too — a tmux pane inherits the SERVER's
+  # environment, not the caller's, so plain exports do not carry over.
   local fwd=""
   if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
     fwd="$(printf ' %q' "${ORIGINAL_ARGS[@]}")"
   fi
-  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT") DEMO_RESET=$(printf %q "$DEMO_RESET") DEMO_REBUILD=$(printf %q "$DEMO_REBUILD") DEMO_NO_OPEN=$(printf %q "$DEMO_NO_OPEN") PROFILE=$(printf %q "$PROFILE") $(printf %q "$ROOT/scripts/demo-preprod.sh")${fwd}"
+  local _v _env_fwd=""
+  for _v in DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN PROFILE PREREQS_ONLY SKIP_PREREQS \
+            USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK REALM_ADMIN_PASSWORD \
+            CONTAINER_TOOL KUBE_CONTEXT OPEN_BROWSER; do
+    _env_fwd+=" ${_v}=$(printf %q "${!_v:-}")"
+  done
+  inner="cd $(printf %q "$ROOT") && DEMO_INNER=1 RHBK_SCRIPT=$(printf %q "$RHBK_SCRIPT")${_env_fwd} $(printf %q "$ROOT/scripts/demo-preprod.sh")${fwd}"
   tmux send-keys -t "${TMUX_SESSION}:demo.0" "$inner" C-m
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
 
@@ -477,10 +495,6 @@ KEYCLOAK_ISSUER="https://keycloak-${KEYCLOAK_NAMESPACE}.${DOMAIN}"
 UI_URL="https://${CR_NAME}-ui-${NAMESPACE}.${DOMAIN}"
 CONSOLE_URL="https://console-openshift-console.${DOMAIN}"
 
-ui_deploy_ready() {
-  deploy_available "$KUBECTL" "$NAMESPACE" "${CR_NAME}-ui"
-}
-
 print_console_access() {
   echo "OpenShift Console: ${CONSOLE_URL}"
   echo "Console username: ${CONSOLE_USERNAME}"
@@ -503,11 +517,40 @@ start_watch_tmux() {
     "$KUBECTL -n $(printf %q "$NAMESPACE") get cmsc $(printf %q "$CR_NAME") -w" C-m
   tmux split-window -h -t "${TMUX_SESSION}:demo" \
     "$KUBECTL -n $(printf %q "$NAMESPACE") get pods -w"
+  local _wfwd=""
+  if [[ ${#ORIGINAL_ARGS[@]} -gt 0 ]]; then
+    _wfwd="$(printf ' %q' "${ORIGINAL_ARGS[@]}")"
+  fi
+  local _v _wenv=""
+  for _v in DEMO_NO_OPEN OPEN_BROWSER PROFILE ARCH_CHECK REALM_ADMIN_PASSWORD KUBE_CONTEXT; do
+    _wenv+=" ${_v}=$(printf %q "${!_v:-}")"
+  done
   tmux split-window -v -t "${TMUX_SESSION}:demo.1" \
-    "cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_NO_TMUX=1 OPEN_BROWSER=$(printf %q "$OPEN_BROWSER") $(printf %q "$SCRIPT") --watch"
+    "cd $(printf %q "$ROOT") && DEMO_INNER=1 DEMO_NO_TMUX=1${_wenv} $(printf %q "$SCRIPT")${_wfwd}"
   tmux select-pane -t "${TMUX_SESSION}:demo.0"
   tmux attach-session -t "$TMUX_SESSION"
 }
+
+# Realm-user password read-back for the summary: runs BEFORE the watch
+# dispatch so --watch prints the real password (a fresh install's Secret
+# exists by then); on a first run the Secret does not exist yet and the
+# BYOI step generates and stores one. An existing Secret that cannot be
+# read (or reads empty) is an error, never a silent admin guess.
+if [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
+  if "$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" >/dev/null 2>&1; then
+    # The Secret exists: a failed read is an error, never a silent admin guess.
+    REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}')" || {
+      echo "error: cannot read Secret ${NAMESPACE}/${CR_NAME}-realm-admin" >&2
+      exit 1
+    }
+    REALM_ADMIN_PASSWORD="$(printf '%s' "$REALM_ADMIN_PASSWORD" | base64 -d 2>/dev/null)" || true
+    if [[ -z "$REALM_ADMIN_PASSWORD" ]]; then
+      echo "error: Secret ${NAMESPACE}/${CR_NAME}-realm-admin has an empty password" >&2
+      exit 1
+    fi
+  fi
+  # No Secret: legacy pre-hardening install — the summary notes the legacy default.
+fi
 
 if [[ "$DEMO_CONSOLE" == "1" ]]; then
   print_console_access
@@ -523,7 +566,7 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
   if [[ "$DEMO_NO_TMUX" == "1" ]]; then
     # Plain call: `wait_for_ui || exit 1` would disable errexit inside the
     # function (review critical #15) and report success after a failed rollout.
-    wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$OPEN_BROWSER"
+    wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$(should_open_browser)"
     echo "UI login: admin / ${REALM_ADMIN_PASSWORD:-admin (legacy default)}"
     echo "Retrieve later: ${KUBECTL} -n ${NAMESPACE} extract secret/${CR_NAME}-realm-admin --to=-"
     verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
@@ -727,7 +770,6 @@ oauth_secret_ready() {
 image_present() {
   "$KUBECTL" -n "$NAMESPACE" get imagestreamtag "koku-service-operator:${IMAGE_TAG}" >/dev/null 2>&1
 }
-# ui_deploy_ready is defined early (before --watch) alongside the wait helpers.
 
 # RHBK / Keycloak operator: the channel deploy-rhbk.sh pins (stable-v22) ships
 # amd64-only operator images. On arm64 clusters we pre-create the
@@ -877,22 +919,6 @@ fi # end SKIP_PREREQS gate
 # A pre-existing Keycloak keeps whatever password it was provisioned with —
 # read it back for the summary (also with --skip-prereqs: the Secret lives in
 # the app namespace and is ours to read).
-if [[ -z "${REALM_ADMIN_PASSWORD:-}" ]]; then
-  if "$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" >/dev/null 2>&1; then
-    # The Secret exists: a failed read is an error, never a silent admin guess.
-    REALM_ADMIN_PASSWORD="$("$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-realm-admin" -o jsonpath='{.data.password}')" || {
-      echo "error: cannot read Secret ${NAMESPACE}/${CR_NAME}-realm-admin" >&2
-      exit 1
-    }
-    REALM_ADMIN_PASSWORD="$(printf '%s' "$REALM_ADMIN_PASSWORD" | base64 -d 2>/dev/null)" || true
-    if [[ -z "$REALM_ADMIN_PASSWORD" ]]; then
-      echo "error: Secret ${NAMESPACE}/${CR_NAME}-realm-admin has an empty password" >&2
-      exit 1
-    fi
-  fi
-  # No Secret: legacy pre-hardening install — the summary notes the legacy default.
-fi
-
 if [[ "$PREREQS_ONLY" == "1" ]]; then
   step "Prerequisites only"
   cat <<EOF
@@ -1126,7 +1152,7 @@ ok "CR ${NAMESPACE}/${CR_NAME} applied (issuer ${KEYCLOAK_ISSUER})"
 
 step "Wait for UI Deployment"
 echo "  watching ${NAMESPACE}/${CR_NAME} (UIReady includes the UI rollout)…"
-wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$OPEN_BROWSER"
+wait_for_ui "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$UI_URL" "$(should_open_browser)"
 ok "UI Deployment Ready"
 verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
   echo "error: CMSC verification failed — see the table above" >&2

@@ -858,3 +858,14 @@ pin_tag_digest() {
     printf '%s\n' "$tag"
   fi
 }
+
+# Echo 1 when the browser should open at UI-ready: both the documented
+# --no-open flag (DEMO_NO_OPEN) and the OPEN_BROWSER env must allow it
+# (re-review regression: the parameterized wait_for_ui had lost DEMO_NO_OPEN).
+should_open_browser() {
+  if [[ "${DEMO_NO_OPEN:-0}" != "1" && "${OPEN_BROWSER:-1}" == "1" ]]; then
+    echo 1
+  else
+    echo 0
+  fi
+}
