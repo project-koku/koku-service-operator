@@ -193,6 +193,85 @@ assert_eq "$rhbk_default" \
   'RHBK_SCRIPT="${RHBK_SCRIPT:-${ROOT}/scripts/deploy-rhbk.sh}"' \
   "deploy-byoi.sh defaults RHBK_SCRIPT to this repo"
 
+# --- review #24: credentials never appear in curl's argv (behavior test) ---
+arglog="${stub_dir}/argv.log"
+filelog="${stub_dir}/files.log"
+cat >"${stub_dir}/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${arglog}"
+# Show what the @file indirection actually delivers:
+for a in "\$@"; do
+  if [[ "\$a" == @* && -f "\${a#@}" ]]; then
+    printf 'FILE %s: ' "\$a" >> "${filelog}"
+    cat "\${a#@}" >> "${filelog}"
+    printf '\n' >> "${filelog}"
+  fi
+done
+printf '{"ok":true}'
+exit 0
+EOF
+chmod +x "${stub_dir}/curl"
+: >"$arglog"
+: >"$filelog"
+
+out="$(safe_curl -X POST https://keycloak.example/token \
+  -H "Authorization: Bearer super-secret-token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin" -d "password=super-secret-password" -d "grant_type=password")"
+assert_eq "$out" '{"ok":true}' "hardened safe_curl still returns the body"
+argv_dump="$(cat "$arglog")"
+files_dump="$(cat "$filelog")"
+assert_not_contains() {
+  local hay="$1" needle="$2" msg="$3"
+  if [[ "$hay" == *"$needle"* ]]; then
+    echo "FAIL: ${msg} (found '${needle}')" >&2
+    fail=1
+  fi
+}
+assert_not_contains "$argv_dump" "super-secret-token" "bearer token not in argv"
+assert_not_contains "$argv_dump" "super-secret-password" "password not in argv"
+assert_not_contains "$argv_dump" "Bearer" "no Authorization value in argv at all"
+case "$argv_dump" in
+  *"--header @/"*) : ;;
+  *) echo "FAIL: Authorization header passed via @file (got: $argv_dump)" >&2; fail=1 ;;
+esac
+case "$argv_dump" in
+  *"--data @/"*) : ;;
+  *) echo "FAIL: body passed via @file (got: $argv_dump)" >&2; fail=1 ;;
+esac
+# The @files must carry the real values (still sent, just not in argv):
+case "$files_dump" in
+  *"Authorization: Bearer super-secret-token"*) : ;;
+  *) echo "FAIL: header file carries the Authorization value" >&2; fail=1 ;;
+esac
+case "$files_dump" in
+  *"username=admin&password=super-secret-password&grant_type=password"*) : ;;
+  *) echo "FAIL: body file joins repeated --data with &" >&2; fail=1 ;;
+esac
+case "$argv_dump" in
+  *"Content-Type: application/x-www-form-urlencoded"*) : ;;
+  *) echo "FAIL: non-secret headers pass through" >&2; fail=1 ;;
+esac
+
+# TLS: --cacert when the CA is set; -k otherwise
+: >"$arglog"
+ca_file="${stub_dir}/ca.pem"
+printf 'CERT\n' >"$ca_file"
+RHBK_CURL_CA="$ca_file" safe_curl https://keycloak.example/realms/master >/dev/null
+case "$(cat "$arglog")" in
+  *"--cacert ${ca_file}"*) : ;;
+  *) echo "FAIL: router CA is used for TLS verification" >&2; fail=1 ;;
+esac
+case "$(cat "$arglog")" in
+  *" -k "*) echo "FAIL: -k must not combine with --cacert" >&2; fail=1 ;;
+esac
+: >"$arglog"
+RHBK_CURL_CA="" safe_curl https://keycloak.example/realms/master >/dev/null
+case "$(cat "$arglog")" in
+  *" -k "*) : ;;
+  *) echo "FAIL: without a CA the call falls back to -k" >&2; fail=1 ;;
+esac
+
 if [[ "$fail" -ne 0 ]]; then
   echo "deploy-rhbk_test: FAILED" >&2
   exit 1

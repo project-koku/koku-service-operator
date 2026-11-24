@@ -146,6 +146,29 @@ echo_header() { log_header "$1"; }
 # Under `set -e`, `VAR=$(curl ...)` aborts with curl's exit code. Curl 6 is
 # "Could not resolve host" (Prow pod → Hive apps Route). Retry 6/7/28 and
 # always return 0 so the caller can inspect an empty body (same idea as safe_jq).
+# Extract the cluster's router CA so TLS to the *.apps routes can be verified
+# instead of blindly trusted (review #24). RHBK_INSECURE_TLS=1 forces the old
+# behavior for labs that cannot extract the CA. The file holds a public CA
+# certificate (not a credential), so it is not worth an EXIT trap that could
+# clobber the script's existing traps.
+setup_rhbk_curl_ca() {
+    if [ "${RHBK_INSECURE_TLS:-0}" = "1" ]; then
+        echo_warning "RHBK_INSECURE_TLS=1: TLS verification disabled for Keycloak API calls"
+        return 0
+    fi
+    local ca
+    ca="$(mktemp "${TMPDIR:-/tmp}/rhbk-ca-XXXXXX")"
+    if kubectl get secret router-ca -n openshift-ingress-operator \
+        -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$ca" 2>/dev/null \
+        && [ -s "$ca" ]; then
+        RHBK_CURL_CA="$ca"
+        echo_success "✓ TLS verification enabled (router CA from openshift-ingress-operator/router-ca)"
+    else
+        rm -f "$ca"
+        echo_warning "Could not extract the cluster router CA; falling back to insecure TLS (-k) for Keycloak API calls. Set RHBK_INSECURE_TLS=1 to acknowledge this explicitly."
+    fi
+}
+
 safe_curl() {
     local retries="${SAFE_CURL_RETRIES:-5}"
     local delay="${SAFE_CURL_RETRY_DELAY:-2}"
@@ -155,10 +178,61 @@ safe_curl() {
     local err
     err="$(mktemp "${TMPDIR:-/tmp}/safe-curl-XXXXXX")"
 
+    # Credential hygiene (review #24): Authorization headers and request bodies
+    # never appear in curl's argv (visible in `ps` on multi-user hosts) — they
+    # are moved into temporary files and passed with --header @file /
+    # --data @file. Repeated --data values join with &, matching curl's own
+    # behavior. TLS: --cacert with the router CA when setup_rhbk_curl_ca found
+    # one; -k otherwise (warned there).
+    local hdr_file="" body_file=""
+    local -a sanitized=(-s --max-time 30)
+    if [ -n "${RHBK_CURL_CA:-}" ] && [ -f "${RHBK_CURL_CA:-}" ]; then
+        sanitized+=(--cacert "$RHBK_CURL_CA")
+    else
+        sanitized+=(-k)
+    fi
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -H)
+                case "$2" in
+                    Authorization:*)
+                        if [ -z "$hdr_file" ]; then
+                            hdr_file="$(mktemp "${TMPDIR:-/tmp}/rhbk-hdr-XXXXXX")"
+                            sanitized+=(--header "@$hdr_file")
+                        fi
+                        printf '%s\n' "$2" >>"$hdr_file"
+                        ;;
+                    *)
+                        sanitized+=("$1" "$2")
+                        ;;
+                esac
+                shift 2
+                ;;
+            -d|--data|--data-raw)
+                if [ -z "$body_file" ]; then
+                    body_file="$(mktemp "${TMPDIR:-/tmp}/rhbk-body-XXXXXX")"
+                    sanitized+=(--data "@$body_file")
+                else
+                    printf '&' >>"$body_file"
+                fi
+                printf '%s' "$2" >>"$body_file"
+                shift 2
+                ;;
+            *)
+                sanitized+=("$1")
+                shift
+                ;;
+        esac
+    done
+    local _rhbk_secret_files=""
+    [ -n "$hdr_file" ] && _rhbk_secret_files="$hdr_file"
+    [ -n "$body_file" ] && _rhbk_secret_files="$_rhbk_secret_files $body_file"
+
     while [ "$attempt" -le "$retries" ]; do
-        body="$(curl -sk --max-time 30 "$@" 2>"$err")" && status=0 || status=$?
+        body="$(curl "${sanitized[@]}" 2>"$err")" && status=0 || status=$?
         if [ "$status" -eq 0 ]; then
             printf '%s' "$body"
+            rm -f $_rhbk_secret_files
             rm -f "$err"
             return 0
         fi
@@ -173,6 +247,7 @@ safe_curl() {
             *)
                 echo_warning "curl failed (exit ${status})" >&2
                 printf '%s' "$body"
+                rm -f $_rhbk_secret_files
                 rm -f "$err"
                 return 0
                 ;;
@@ -181,6 +256,7 @@ safe_curl() {
 
     echo_warning "curl exhausted retries (last exit ${status})" >&2
     printf '%s' "$body"
+    rm -f $_rhbk_secret_files
     rm -f "$err"
     return 0
 }
@@ -326,6 +402,10 @@ check_prerequisites() {
         exit 1
     fi
     echo_success "✓ Cluster admin permissions verified"
+
+    # Verify TLS to the Keycloak Route against the cluster router CA (review
+    # #24) — falls back to a warned -k when the CA cannot be extracted.
+    setup_rhbk_curl_ca
 
     # Auto-detect cluster domain
     CLUSTER_DOMAIN=$(kubectl get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}' 2>/dev/null || echo "")
