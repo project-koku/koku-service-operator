@@ -61,6 +61,21 @@ while [[ $# -gt 0 ]]; do
       SOURCE="$2"
       shift
       ;;
+    --version)
+      [[ $# -ge 2 ]] || { echo "error: --version requires a value (vX.Y.Z, commit SHA, latest)" >&2; exit 2; }
+      VERSION="$2"
+      shift
+      ;;
+    --catalog-repo)
+      [[ $# -ge 2 ]] || { echo "error: --catalog-repo requires a value (quay namespace)" >&2; exit 2; }
+      CATALOG_REPO="$2"
+      shift
+      ;;
+    --channel)
+      [[ $# -ge 2 ]] || { echo "error: --channel requires a value" >&2; exit 2; }
+      CHANNEL="$2"
+      shift
+      ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown flag $1" >&2
@@ -131,13 +146,27 @@ INFRA_NAMESPACE="${INFRA_NAMESPACE:-cost-byoi-infra}"
 KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-keycloak}"
 KAFKA_CLUSTER_NAME="${KAFKA_CLUSTER_NAME:-cost-onprem-kafka}"
+CATALOG_REPO="${CATALOG_REPO:-quay.io/project-koku}"
 CATALOG_NAME="${CATALOG_NAME:-koku-service-operator-catalog}"
-CATALOG_IMG="${CATALOG_IMG:-quay.io/project-koku/koku-service-operator-catalog:latest}"
+VERSION="${VERSION:-}"
 OPERATOR_VERSION="${OPERATOR_VERSION:-v0.0.1}"
 CHANNEL="${CHANNEL:-beta}"
 CONSOLE_USERNAME="${CONSOLE_USERNAME:-kubeadmin}"
 CONSOLE_PASSWORD="${CONSOLE_PASSWORD:-}"
 CR_FILE="${CR_FILE:-/tmp/koku-demo-preprod-${NAMESPACE}.yaml}"
+
+# Resolve the catalog image before printing the plan so --dry-run shows the
+# real image. CATALOG_IMG set explicitly skips discovery entirely.
+if [[ -z "${CATALOG_IMG:-}" ]]; then
+  REPO_PATH="${CATALOG_REPO#quay.io/}"
+  REPO_PATH="${REPO_PATH%/}"
+  if RESOLVED_VERSION="$(resolve_catalog_version "${REPO_PATH}/koku-service-operator-catalog" "${VERSION:-}")"; then
+    CATALOG_IMG="${CATALOG_REPO}/koku-service-operator-catalog:${RESOLVED_VERSION}"
+  else
+    exit 1
+  fi
+fi
+export CATALOG_IMG
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
 BUILD_MODE="${BUILD_MODE:-auto}"
 IMAGE_TAG="${IMAGE_TAG:-preprod}"
@@ -201,6 +230,8 @@ print_plan() {
 Pre-prod demo plan
   context:     ${KUBE_CONTEXT:-<current>}
   source:      ${SOURCE}
+  catalog:     ${CATALOG_IMG}
+  operator:    ${OPERATOR_VERSION}
   app NS:      ${NAMESPACE}  (CR ${CR_NAME})
   infra NS:    ${INFRA_NAMESPACE}
   kafka NS:    ${KAFKA_NAMESPACE}
@@ -226,8 +257,6 @@ Pre-prod demo plan
 EOF
   if [[ "$SOURCE" == "manual" ]]; then
     cat <<EOF
-  catalog:     ${CATALOG_IMG}
-  operator:    ${OPERATOR_VERSION}
   CR file:     ${CR_FILE}
 
   Manual source: after the prerequisites, the CMSC is rendered to the CR file.

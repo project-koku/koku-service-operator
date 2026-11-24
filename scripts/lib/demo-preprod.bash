@@ -126,3 +126,121 @@ read_apps_domain() {
   fi
   printf '%s\n' "$out"
 }
+
+# List the tags of a public quay repository, one per line (paginated).
+# REGISTRY_TAG_FIXTURE: when set, read tags from that file instead of HTTP —
+# offline tests; production leaves it unset.
+registry_list_tags() {
+  local repo="${1:?repository path required, e.g. project-koku/koku-service-operator-catalog}"
+  if [[ -n "${REGISTRY_TAG_FIXTURE:-}" ]]; then
+    if [[ ! -f "$REGISTRY_TAG_FIXTURE" ]]; then
+      echo "error: REGISTRY_TAG_FIXTURE not found: ${REGISTRY_TAG_FIXTURE}" >&2
+      return 1
+    fi
+    cat "$REGISTRY_TAG_FIXTURE"
+    return 0
+  fi
+  local out
+  if ! out="$(python3 - "$repo" 2>/dev/null <<'PY'
+import json, sys, urllib.request
+
+repo = sys.argv[1]
+tags, page = [], 1
+while True:
+    url = f"https://quay.io/api/v1/repository/{repo}/tag/?limit=100&page={page}&onlyActiveTags=true"
+    with urllib.request.urlopen(url, timeout=30) as r:
+        d = json.load(r)
+    tags += [t["name"] for t in d.get("tags", [])]
+    if not d.get("has_additional") or page >= 20:
+        break
+    page += 1
+print("\n".join(tags))
+PY
+)"; then
+    echo "error: failed to list tags of quay.io/${repo} (registry unreachable or API error)" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# Resolve the catalog tag to install. Prints the resolved tag on stdout; an
+# optional "@sha256:<digest>" suffix on the hint is preserved verbatim. Fallback
+# and passthrough situations print a loud warning on stderr.
+#
+#   hint empty          -> highest ^v?X.Y.Z tag; none found -> "latest" + warn
+#   latest | main       -> passthrough
+#   vX.Y.Z | X.Y.Z      -> normalized against the tag list ("v" added if needed)
+#   commit SHA (7-40)   -> normalized to the matching short tag
+#   anything else       -> must match a tag exactly
+#
+# An explicit hint that matches nothing is an error (exit 1) listing a few
+# available tags; an unreachable registry passes an explicit hint through with
+# a warning instead of failing.
+resolve_catalog_version() {
+  local repo="${1:?repository path required}"
+  local hint="${2:-}"
+  local tag="${hint%%@*}" digest=""
+  if [[ "$hint" == *"@sha256:"* ]]; then
+    digest="@${hint#*@}"
+  fi
+
+  local tags="" tags_ok=1
+  if ! tags="$(registry_list_tags "$repo")"; then
+    tags="" tags_ok=0
+  fi
+
+  if [[ -z "$tag" ]]; then
+    if [[ "$tags_ok" != "1" ]]; then
+      warn="could not list tags of quay.io/${repo}; falling back to :latest (a moving target — pin --version for reproducibility)"
+    echo "warning: ${warn}" >&2
+      printf 'latest\n'
+      return 0
+    fi
+    local best
+    best="$(printf '%s\n' "$tags" | python3 -c '
+import re, sys
+vs = [l.strip() for l in sys.stdin if re.fullmatch(r"v?\d+\.\d+\.\d+", l.strip())]
+print(max(vs, key=lambda v: tuple(int(x) for x in v.lstrip("v").split("."))) if vs else "")
+')"
+    if [[ -n "$best" ]]; then
+      printf '%s\n' "$best"
+      return 0
+    fi
+    warn="no semver tag found in quay.io/${repo}; falling back to :latest (a moving target — pin --version for reproducibility)"
+    echo "warning: ${warn}" >&2
+    printf 'latest\n'
+    return 0
+  fi
+
+  if [[ "$tag" == "latest" || "$tag" == "main" ]]; then
+    printf '%s\n' "$tag"
+    return 0
+  fi
+
+  if [[ "$tags_ok" != "1" ]]; then
+    warn="could not verify '${tag}' against quay.io/${repo} (registry unreachable); using it as-is"
+    echo "warning: ${warn}" >&2
+    printf '%s%s\n' "$tag" "$digest"
+    return 0
+  fi
+
+  if printf '%s\n' "$tags" | grep -Fxq "$tag"; then
+    printf '%s%s\n' "$tag" "$digest"
+    return 0
+  fi
+  if printf '%s\n' "$tags" | grep -Fxq "v${tag}"; then
+    printf 'v%s%s\n' "$tag" "$digest"
+    return 0
+  fi
+  if [[ "$tag" =~ ^[0-9a-f]{7,40}$ ]]; then
+    local m
+    m="$(printf '%s\n' "$tags" | awk -v h="$tag" 'index(h, $0) == 1 || index($0, h) == 1' | head -1)"
+    if [[ -n "$m" ]]; then
+      printf '%s%s\n' "$m" "$digest"
+      return 0
+    fi
+  fi
+  echo "error: version '${tag}' not found in quay.io/${repo}." >&2
+  echo "  Available tags include: $(printf '%s\n' "$tags" | grep -v '^$' | head -5 | tr '\n' ' ')" >&2
+  return 1
+}

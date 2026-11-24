@@ -175,10 +175,13 @@ if [[ -e "${ROOT}/scripts/demo-preprod-olm.sh" ]]; then
   fail=1
 fi
 
-plan_manual="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=manual ./scripts/demo-preprod.sh --dry-run 2>&1)"
+fx_manual="$(mktemp)"
+printf 'main\nlatest\n474d937\n' >"$fx_manual"
+plan_manual="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx_manual" SOURCE=manual ./scripts/demo-preprod.sh --dry-run 2>&1)"
+rm -f "$fx_manual"
 assert_contains "$plan_manual" "CR file:     " "manual plan shows the CR file"
 assert_contains "$plan_manual" "Install the operator through the OpenShift console" "manual plan previews the console step"
-assert_contains "$plan_manual" "quay.io/project-koku/koku-service-operator-catalog:latest" "manual plan keeps the published catalog default"
+assert_contains "$plan_manual" "quay.io/project-koku/koku-service-operator-catalog:latest" "manual plan falls back to latest when no semver tag exists"
 assert_contains "$plan_manual" "operator:    v0.0.1" "manual plan names the operator version"
 assert_contains "$plan_manual" "--watch" "manual plan points at --watch"
 
@@ -199,6 +202,53 @@ grep -Fq "crc console --credentials" "${ROOT}/scripts/demo-preprod.sh" || {
   echo "FAIL: helper must explain where the kubeadmin password comes from" >&2
   fail=1
 }
+
+# --- Task 3 (#2): version discovery and selection ---
+fx="$(mktemp)"
+printf 'main\nlatest\n474d937\nv0.0.1\nv0.0.3\nv0.0.2\n' >"$fx"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 2>&1 >/dev/null)"
+assert_eq "$out" "" "no warning when a semver tag exists"
+
+printf 'main\nlatest\n474d937\n' >"$fx"
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog "")"
+assert_eq "$out" "latest" "no semver falls back to latest"
+warn="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 2>&1 >/dev/null)"
+assert_contains "$warn" "no semver" "fallback sets a loud warning"
+assert_contains "$warn" "moving target" "warning explains the consequence"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 474d937)"
+assert_eq "$out" "474d937" "commit SHA passthrough"
+
+printf 'v0.0.1\nmain\n474d937\n' >"$fx"
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1@sha256:abc123)"
+assert_eq "$out" "v0.0.1@sha256:abc123" "digest suffix preserved"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 474d9370123456789abcdef0123456789abcdef0)"
+assert_eq "$out" "474d937" "full SHA normalized to the short tag"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 0.0.1)"
+assert_eq "$out" "v0.0.1" "semver without v normalized"
+
+bad_ver="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog v9.9.9 2>&1)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "1" "unknown version fails"
+assert_contains "$bad_ver" "not found" "unknown version error names the problem"
+assert_contains "$bad_ver" "v0.0.1" "unknown version error lists available tags"
+rm -f "$fx"
+
+out="$(REGISTRY_TAG_FIXTURE="/nonexistent-tag-fixture-$$" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>/dev/null)" && unreach_rc=0 || unreach_rc=$?
+assert_eq "$unreach_rc" "0" "unreachable registry passes an explicit hint through"
+assert_eq "$out" "v0.0.1" "unreachable registry uses the hint as-is"
+warn="$(REGISTRY_TAG_FIXTURE="/nonexistent-tag-fixture-$$" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>&1 >/dev/null)"
+assert_contains "$warn" "could not verify" "unreachable registry warns"
+
+fx="$(mktemp)"
+printf 'main\nlatest\n474d937\nv0.0.1\nv0.0.3\n' >"$fx"
+plan_v="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx" ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_v" "catalog:     quay.io/project-koku/koku-service-operator-catalog:v0.0.3" "dry run prints the resolved catalog image"
+plan_pin="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx" VERSION=v0.0.1 ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_pin" "catalog:     quay.io/project-koku/koku-service-operator-catalog:v0.0.1" "VERSION pins the catalog image"
+rm -f "$fx"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
