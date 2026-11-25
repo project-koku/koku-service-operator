@@ -71,6 +71,49 @@ Token URL (replace host and realm):
 Use the same issuer host that matches `spec.auth.keycloak.issuerURL` (or `url`
 when issuer is derived from it).
 
+## RBAC for the CMMO service account
+
+CMMO must be able to **create an OpenShift source** (`create_source: true`) and
+**upload** metrics. Those need different grants:
+
+| Capability | What is required |
+|------------|------------------|
+| Ingress upload (`202 Accepted`) | Valid JWT + identity (`org_id`, `account_number`, matching `aud`). **No** RBAC role. |
+| Source create | RBAC **Sources administrator** (`sources:*:*`) on the principal the gateway sees |
+
+**Supported path (replaces the beta Keycloak `org-admin` workaround):**
+
+1. Create the Keycloak CMMO client and claim mappers as in
+   [keycloak.md](keycloak.md#cmmo-client_credentials).
+2. **Do not** assign the Keycloak **`org-admin`** realm role to the CMMO
+   service-account user. **Do not** grant Cost Administrator or User Access
+   administrator to that principal. CMMO does not need those roles.
+3. Decode a client-credentials access token and note the username Envoy uses
+   (`preferred_username`, else `sub`). Lab Keycloak often maps this to
+   `cost-mgmt-operator`. Keycloak’s internal user is typically
+   `service-account-<client-id>` — that is **not** the name to bind unless it
+   is what appears in the JWT.
+4. As a human **org-admin** (User Access UI or RBAC API), ensure a real
+   principal exists for that gateway username, then bind it to a group that
+   has **only** **Sources administrator**.
+5. `keycloakSync` skips usernames starting with `service-account-`. Relying
+   on sync alone does not materialize the mapped gateway principal.
+
+Beta installs that assigned `org-admin` to the CMMO SA should remove that
+realm role and switch to Sources administrator only.
+
+**Lab / Mini (`spec.rbac.backend: go`):** after a Mini build that includes
+Sources-only bootstrap, you can materialize the principal with:
+
+```bash
+# Inside the rbac-api container (rbac-mini). Bind the gateway username.
+rbac-mini bootstrap --org <org_id> --account <account_number> \
+  --users cost-mgmt-operator
+```
+
+That binds **Sources administrator** only (not Cost Administrator). Customer
+GA path remains User Access UI / API as an org-admin human — not this CLI.
+
 ## CostManagementMetricsConfig
 
 Install CMMO from OperatorHub on the reporting cluster (OpenShift documentation
@@ -128,6 +171,9 @@ certificates instead.
 - Do not leave `api_url` unset — CMMO then talks to hosted console.redhat.com.
 - Do not enable ROS collection against a Cost-only (`ros.enabled: false`)
   instance.
+- Do not assign Keycloak `org-admin` (or Cost Administrator) to the CMMO
+  service account — use **Sources administrator** only (see
+  [RBAC](#rbac-for-the-cmmo-service-account)).
 
 ## Upload timing
 

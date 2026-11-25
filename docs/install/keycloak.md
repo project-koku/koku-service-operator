@@ -92,6 +92,18 @@ scope and **same** `org_id` / `account_number` mappers as the UI client.
 Service-account tokens must carry those claims (set them on the
 service-account user, or as hardcoded mapper values).
 
+**Do not** assign the Keycloak **`org-admin`** realm role to the CMMO
+service-account user. That beta workaround is deprecated. Source create needs
+the RBAC role **Sources administrator** on the principal the gateway sees —
+not full admin via `is_org_admin`. Ingress upload needs a valid JWT/identity
+only. Full steps (including the gateway username vs Keycloak
+`service-account-*` mismatch): [cmmo.md](cmmo.md#rbac-for-the-cmmo-service-account).
+
+Optional but recommended: a Hardcoded claim mapper so
+`preferred_username` is a stable gateway identity (labs often use
+`cost-mgmt-operator`). Without it, Envoy falls back to `sub` (see optional
+claims below). Bind RBAC to whatever username appears in the access token.
+
 On each reporting cluster, store `client_id` / `client_secret` (underscore
 keys) as described in [cmmo.md](cmmo.md).
 
@@ -246,9 +258,12 @@ plus the `org-admin` realm role is the supported first-admin path.
    **Attributes** → **Role mapping** → **Assign role** → `org-admin`.
 3. User logs in through the UI (oauth2-proxy → Keycloak).
 
-Service-account users (CMMO) follow the same steps if they need org-admin
-claims; most reporting clusters only need the attribute mappers, not
-`org-admin`.
+**CMMO service accounts are not first administrators.** Do **not** assign
+`org-admin` to the CMMO client service-account user. That path grants
+Cost Administrator, User Access administrator, and Sources administrator via
+`admin_default` — far more than metrics upload needs. Use **Sources
+administrator** only, as documented in
+[cmmo.md](cmmo.md#rbac-for-the-cmmo-service-account).
 
 ### Not the same as the `org-admin` Keycloak subgroup
 
