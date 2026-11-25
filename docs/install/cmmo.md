@@ -73,49 +73,26 @@ when issuer is derived from it).
 
 ## RBAC for the CMMO service account
 
-CMMO must be able to **create an OpenShift source** (`create_source: true`) and
-**upload** metrics. Those need different grants:
-
 | Capability | What is required |
 |------------|------------------|
-| Ingress upload (`202 Accepted`) | Valid JWT + identity (`org_id`, `account_number`, matching `aud`). **No** RBAC role. |
-| Source create | RBAC **Sources administrator** (`sources:*:*`) on the principal the gateway sees |
-
-**Supported path (replaces the beta Keycloak `org-admin` workaround):**
+| Ingress upload (`202 Accepted`) | Valid JWT + identity (`org_id`, `account_number`, matching `aud`). No RBAC role. |
+| Source create (`create_source: true`) | RBAC **Sources administrator** (`sources:*:*`) on the principal the gateway sees |
 
 1. Create the Keycloak CMMO client and claim mappers as in
    [keycloak.md](keycloak.md#cmmo-client_credentials).
-2. **Do not** assign the Keycloak **`org-admin`** realm role to the CMMO
-   service-account user. **Do not** grant Cost Administrator or User Access
-   administrator to that principal. CMMO does not need those roles.
-3. Decode a client-credentials access token and note the username Envoy uses
-   (`preferred_username`, else `sub`). Lab Keycloak often maps this to
+2. Decode a client-credentials access token and note the username Envoy uses
+   (`preferred_username`, else `sub`). Labs often map this to
    `cost-mgmt-operator`. Keycloak’s internal user is typically
-   `service-account-<client-id>` — that is **not** the name to bind unless it
-   is what appears in the JWT.
-4. As a human **org-admin** (User Access UI or RBAC API), ensure a real
-   principal exists for that gateway username, then bind it to a group that
-   has **only** **Sources administrator**.
-5. `keycloakSync` does **not** replace that manual bind. Sync skips Keycloak
-   usernames starting with `service-account-`, so it will not create the
-   mapped gateway principal for you. If sync is enabled with
-   `spec.rbac.keycloakSync.pruneOrphans` left at its default (`true`), a
-   later sync can **delete** a manually created gateway principal (and its
-   group membership) when that username is not present as a usable Keycloak
-   user — source create then fails until you recreate and rebind it. For
-   CMMO with a mapped username such as `cost-mgmt-operator`, set
-   `pruneOrphans: false` (or otherwise keep that principal excluded from
-   prune) so sync cannot undo the Sources administrator bind.
-
-Beta installs that assigned `org-admin` to the CMMO SA should remove that
-realm role and switch to Sources administrator only.
-
-This RBAC bind is the same whether the stack runs insights-rbac or
-rbac-mini (`spec.rbac.backend`). The operator does not create or bind the
-CMMO principal for you — a human org-admin does that in User Access (or the
-RBAC API). Lab IQE/pytest may still over-grant Cost Administrator to a
-service-account principal for unrelated smoke; that is not the supported
-CMMO path ([COST-8648](https://redhat.atlassian.net/browse/COST-8648)).
+   `service-account-<client-id>` — bind the JWT username, not that internal
+   name, unless they match.
+3. As a human org-admin (User Access UI or RBAC API), create a principal for
+   that gateway username and bind it to a group with **Sources administrator**
+   only. The operator does not create this principal for you.
+4. If `spec.rbac.keycloakSync` is enabled, set
+   `spec.rbac.keycloakSync.pruneOrphans: false` when the gateway username is
+   not a Keycloak user (common with a `preferred_username` mapper). Sync skips
+   `service-account-*` usernames and, with prune left at the default `true`,
+   can delete a manually created gateway principal and its group membership.
 
 ## CostManagementMetricsConfig
 
@@ -174,9 +151,6 @@ certificates instead.
 - Do not leave `api_url` unset — CMMO then talks to hosted console.redhat.com.
 - Do not enable ROS collection against a Cost-only (`ros.enabled: false`)
   instance.
-- Do not assign Keycloak `org-admin` (or Cost Administrator) to the CMMO
-  service account — use **Sources administrator** only (see
-  [RBAC](#rbac-for-the-cmmo-service-account)).
 
 ## Upload timing
 
