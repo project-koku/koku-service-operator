@@ -219,7 +219,7 @@ Inputs/failure modes the design implies but no single task obviously covers; eac
 ### Task 12: Documentation rewrite (issue #11)
 
 **Files:**
-- Create: `docs/development/pre-prod-demo.md` (merged runbook)
+- Create: `docs/development/demo-preprod.sh.md` (merged runbook)
 - Delete: `docs/development/pre-prod-install.md`, `docs/development/pre-prod-olm-demo-runbook.md`
 - Modify: `docs/development/crc-testing.md`, `scripts/README.md`, `scripts/demo-preprod.env.example`
 

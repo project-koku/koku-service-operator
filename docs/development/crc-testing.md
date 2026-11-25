@@ -52,7 +52,7 @@ oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 ## Full BYOI demo on CRC
 
 `./scripts/demo-preprod.sh --crc` (alias of `--profile=single-node`) runs the
-[pre-prod demo](pre-prod-demo.md) against local CRC. The profile is **sizing
+[pre-prod demo](demo-preprod.sh.md) against local CRC. The profile is **sizing
 only** — 1+1 Kafka (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
 10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC
 disk. It does **not** set `KUBE_CONTEXT`, does not force a build mode, does not
@@ -285,7 +285,7 @@ costManagement:
 When building locally: `docker build --platform linux/arm64 …`
 
 For **clusterbot / typical OpenShift** (amd64 nodes), build with
-`--platform linux/amd64`. See [pre-prod-demo.md](pre-prod-demo.md).
+`--platform linux/amd64`. See [demo-preprod.sh.md](demo-preprod.sh.md).
 
 ## Storage class
 

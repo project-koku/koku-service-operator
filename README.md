@@ -14,7 +14,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Branch/PR naming with Jira (`COST-####`) |
 | [docs/install/](docs/install/) | **Install and configure** (prerequisites, quickstart, production, CMMO) |
 | [docs/development/clusterbot.md](docs/development/clusterbot.md) | Cluster Bot day-one: Redpanda BYOI → in-cluster operator |
-| [docs/development/pre-prod-demo.md](docs/development/pre-prod-demo.md) | Pre-prod demo runbook: one script, three operator install sources (registry/local/manual), version and architecture discovery |
+| [docs/development/demo-preprod.sh.md](docs/development/demo-preprod.sh.md) | Pre-prod demo runbook: one script, three operator install sources (registry/local/manual), version and architecture discovery |
 | [docs/development/allnamespaces.md](docs/development/allnamespaces.md) | AllNamespaces install/watch model and RBAC shape |
 | [docs/development/crc-testing.md](docs/development/crc-testing.md) | Local development and CRC testing guide |
 | [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
@@ -41,7 +41,7 @@ NAMESPACE=<cr-ns> IMG=<operator-image> make run # local (pins cache; requires IM
 
 See [docs/development/clusterbot.md](docs/development/clusterbot.md) for Cluster Bot,
 [docs/development/crc-testing.md](docs/development/crc-testing.md) for CRC, or
-[docs/development/pre-prod-demo.md](docs/development/pre-prod-demo.md)
+[docs/development/demo-preprod.sh.md](docs/development/demo-preprod.sh.md)
 for a full in-cluster BYOI + UI smoke.
 
 **CRD:** `service.costmanagement.openshift.io/v1alpha1` — Kind `CostManagementServiceConfig` (short name `cmsc`).
