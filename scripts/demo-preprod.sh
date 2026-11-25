@@ -52,6 +52,19 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/demo-preprod.bash"
 
+# Normalize GNU-style --flag=value into --flag value before parsing, so both
+# forms work for every value-taking flag (the help shows the = form; the
+# parser previously accepted only the space-separated form).
+NORMALIZED_ARGS=()
+for _arg in "$@"; do
+  case "$_arg" in
+    --*=*) NORMALIZED_ARGS+=("${_arg%%=*}" "${_arg#*=}") ;;
+    *) NORMALIZED_ARGS+=("$_arg") ;;
+  esac
+done
+set -- "${NORMALIZED_ARGS[@]}"
+unset NORMALIZED_ARGS _arg
+
 # Raw invocation, captured before flag parsing: the tmux wrapper re-invokes
 # the script with these so every flag reaches the inner run (criticals #13).
 ORIGINAL_ARGS=("$@")

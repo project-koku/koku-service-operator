@@ -1090,6 +1090,15 @@ help_out2="$(./scripts/demo-preprod.sh --help 2>&1)"
 assert_contains "$help_out2" "--context <name>" "help documents --context"
 assert_contains "$help_out2" "oc config get-contexts lists them" "help says how to discover context names"
 
+# --- --flag=value form works for every value-taking flag ---
+eq_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=local --context=ctx9 --channel=stable 2>&1)"
+assert_contains "$eq_plan" "source:      local" "--source=local (equals form) parses"
+assert_contains "$eq_plan" "context:     ctx9" "--context=ctx9 (equals form) parses"
+eq_ver="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=registry --version=v0.0.1 --context=ctx9 2>&1)"
+assert_contains "$eq_ver" "version:     v0.0.1" "--version=v0.0.1 (equals form) parses"
+eq_sp="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local --context ctx9 2>&1)"
+assert_eq "$eq_sp" "$eq_plan" "equals and space forms are equivalent"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
