@@ -325,7 +325,7 @@ rm -rf "$stub_dir"
 
 # Behavior: the registry plan shows the OLM install step (not the build steps).
 plan_reg="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
-assert_contains "$plan_reg" "[4/7] Operator install (registry via OLM" "registry plan shows the OLM step"
+assert_contains "$plan_reg" "[4/8] Operator install (registry via OLM" "registry plan shows the OLM step"
 assert_not_contains "$plan_reg" "Operator image (" "registry plan promises no image build"
 # Wiring (cluster-only path): the marketplace permission pre-check.
 grep -Fq 'can-i create catalogsources -n openshift-marketplace' "${ROOT}/scripts/demo-preprod.sh" || {
@@ -1098,6 +1098,100 @@ eq_ver="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=regis
 assert_contains "$eq_ver" "version:     v0.0.1" "--version=v0.0.1 (equals form) parses"
 eq_sp="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local --context ctx9 2>&1)"
 assert_eq "$eq_sp" "$eq_plan" "equals and space forms are equivalent"
+
+# --- tenant bootstrap + API smoke check (Settings is broken until the demo
+# tenant exists: data-retention 503s, currency dropdown empty) ---
+tb="$(mktemp -d)"
+cat >"${tb}/oc" <<EOF
+#!/bin/bash
+# Record the invocation; stdin (the bootstrap snippet) is saved to a file so
+# the assertions can inspect exactly what was piped into manage.py shell.
+echo "ARGS: \$*" >"${tb}/args.txt"
+cat >"${tb}/stdin.txt"
+echo "BOOTSTRAP OK schema=org1234567 currencies=23"
+EOF
+chmod +x "${tb}/oc"
+bt_out="$(bootstrap_tenant "${tb}/oc" cost-byoi cost-management 1234567 7890123)" && bt_rc=0 || bt_rc=$?
+assert_eq "$bt_rc" "0" "bootstrap_tenant succeeds when the pod reports BOOTSTRAP OK"
+assert_contains "$bt_out" "BOOTSTRAP OK schema=org1234567 currencies=23" "bootstrap_tenant surfaces the summary line"
+bt_args="$(cat "${tb}/args.txt")"
+bt_stdin="$(cat "${tb}/stdin.txt")"
+assert_contains "$bt_args" "exec -i -n cost-byoi deploy/cost-management-koku-api" "bootstrap_tenant execs into the koku-api deployment with stdin"
+assert_contains "$bt_args" "cd /opt/koku/koku && python manage.py shell" "bootstrap_tenant runs manage.py shell in the pod"
+# The snippet piped on stdin must be the idempotent provisioning.
+assert_contains "$bt_stdin" 'IdentityHeaderMiddleware.create_customer(ACCOUNT, ORG_ID, "POST")' "snippet provisions the Customer row"
+assert_contains "$bt_stdin" 'Tenant.objects.get_or_create(schema_name=schema)' "snippet is idempotent (get_or_create Tenant)"
+assert_contains "$bt_stdin" "tenant.create_schema()" "snippet creates the schema when missing"
+assert_contains "$bt_stdin" 'ORG_ID = "1234567"' "snippet carries the configured org_id"
+assert_contains "$bt_stdin" 'ACCOUNT = "7890123"' "snippet carries the configured account number"
+
+# Non-alphanumeric identity values are rejected before reaching the pod.
+bt_bad="$(bootstrap_tenant "${tb}/oc" cost-byoi cost-management '12"; DROP' 7890123 2>&1)" && bb_rc=0 || bb_rc=$?
+assert_eq "$bb_rc" "1" "bootstrap_tenant rejects non-alphanumeric org_id"
+assert_contains "$bt_bad" "alphanumeric" "rejection message names the constraint"
+
+# A failing pod (no BOOTSTRAP OK marker) fails the bootstrap with the log.
+cat >"${tb}/oc-fail" <<'EOF'
+#!/bin/bash
+cat >/dev/null
+echo "Traceback (most recent call last):" >&2
+echo "psycopg2.errors.UndefinedTable" >&2
+exit 1
+EOF
+chmod +x "${tb}/oc-fail"
+bt_fail="$(bootstrap_tenant "${tb}/oc-fail" cost-byoi cost-management 1234567 7890123 2>&1)" && bf_rc=0 || bf_rc=$?
+assert_eq "$bf_rc" "1" "bootstrap_tenant fails when the pod command fails"
+assert_contains "$bt_fail" "UndefinedTable" "bootstrap_tenant surfaces the pod log on failure"
+assert_contains "$bt_fail" "tenant bootstrap failed" "bootstrap failure names the step"
+
+# Smoke check: two stubbed curl responses decide pass/fail. Bodies live in
+# files so the stub heredoc never has to quote JSON.
+smoke_oc() {
+  printf '%s' "$1" >"${tb}/retention.json"
+  printf '%s' "$2" >"${tb}/currency.json"
+  cat >"${tb}/oc-smoke" <<EOF
+#!/bin/bash
+if [[ "\$*" == *data-retention* ]]; then
+  cat "${tb}/retention.json"
+else
+  cat "${tb}/currency.json"
+fi
+EOF
+  chmod +x "${tb}/oc-smoke"
+}
+smoke_oc '{"data_retention_months":4,"env_override":false}' '{"meta":{"count":23},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "0" "smoke_tenant_api passes on healthy tenant endpoints"
+assert_contains "$sm_out" "data-retention     PASS" "data-retention row passes"
+assert_contains "$sm_out" "currency list      PASS" "currency row passes"
+assert_contains "$sm_out" "23 enabled" "currency row shows the enabled count"
+
+smoke_oc '{"detail": "Service Unavailable"}' '{"meta":{"count":23},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123 2>&1)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "1" "smoke_tenant_api fails on data-retention error body"
+assert_contains "$sm_out" "data-retention     FAIL" "data-retention row fails"
+
+smoke_oc '{"data_retention_months":4}' '{"meta":{"count":0},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123 2>&1)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "1" "smoke_tenant_api fails on empty currency list"
+assert_contains "$sm_out" "currency list      FAIL" "currency row fails on count 0"
+
+rm -rf "$tb"
+
+# Wiring (cluster-only path, documented source grep per test policy): the
+# install flow must call the bootstrap and the smoke check after CMSC
+# verification, and the plan must announce the step.
+demo_src="$(cat "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$demo_src" 'bootstrap_tenant "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls bootstrap_tenant"
+assert_contains "$demo_src" 'smoke_tenant_api "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls smoke_tenant_api"
+assert_contains "$demo_src" 'Bootstrap demo tenant' "step header present"
+plan_out="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_out" "Bootstrap demo tenant" "dry-run plan lists the tenant step"
+local_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local 2>&1)"
+assert_contains "$local_plan" "[9/9] open the UI Route" "local plan renumbers to 9 steps"
+env_help="$(./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help" "DEMO_ORG_ID" "--help-env documents DEMO_ORG_ID"
+assert_contains "$env_help" "DEMO_ACCOUNT_NUMBER" "--help-env documents DEMO_ACCOUNT_NUMBER"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2

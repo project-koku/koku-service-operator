@@ -608,6 +608,130 @@ sys.exit(1 if fails else 0)
 '
 }
 
+# Python snippet executed inside the koku-api pod to provision the demo
+# tenant. Kept as a generator so the offline test suite can assert its
+# content without a cluster. Mirrors the provisioning a first source add
+# triggers in production code (IdentityHeaderMiddleware.create_customer +
+# ProviderBuilder._tenant_for_schema): Customer row, Tenant row, and the
+# org schema cloned from the tenant template.
+tenant_bootstrap_python() {
+  local org_id="${1:?org_id required}"
+  local account="${2:?account number required}"
+  cat <<PYEOF
+from django.db import connection
+from django_tenants.utils import schema_exists
+
+from api.iam.models import Tenant
+from api.iam.serializers import create_schema_name
+from koku.middleware import IdentityHeaderMiddleware
+
+ORG_ID = "${org_id}"
+ACCOUNT = "${account}"
+
+schema = create_schema_name(ORG_ID)
+customer = IdentityHeaderMiddleware.create_customer(ACCOUNT, ORG_ID, "POST")
+tenant, _ = Tenant.objects.get_or_create(schema_name=schema)
+if not schema_exists(schema):
+    # First run builds the tenant template schema first (several minutes of
+    # migrations); re-runs skip straight past this.
+    tenant.create_schema()
+assert schema_exists(schema), "tenant schema %s was not created" % schema
+with connection.cursor() as cur:
+    cur.execute("SELECT count(*) FROM {}.enabled_currency".format(schema))
+    seeded = cur.fetchone()[0]
+    assert seeded > 0, "enabled_currency seed missing in %s" % schema
+connection.set_schema_to_public()
+print("BOOTSTRAP OK schema=%s currencies=%d" % (schema, seeded))
+PYEOF
+}
+
+# Provision the demo tenant (Customer row + org schema) in the koku-api pod.
+# A fresh on-prem install has NO tenant until the first source is added, so
+# every request falls back to the public schema and tenant-scoped features
+# are broken out of the box: Settings > Display shows "temporarily
+# unavailable" for data retention (503) and an empty currency dropdown.
+# Idempotent: an existing schema is left untouched.
+bootstrap_tenant() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local cr_name="${3:?CR name required}"
+  local org_id="${4:?org_id required}"
+  local account="${5:?account number required}"
+  local deploy="${cr_name}-koku-api"
+  local var
+  for var in "$org_id" "$account"; do
+    if [[ ! "$var" =~ ^[A-Za-z0-9_-]+$ ]]; then
+      echo "error: DEMO_ORG_ID/DEMO_ACCOUNT_NUMBER must be alphanumeric (got: ${var})" >&2
+      return 1
+    fi
+  done
+  local out=""
+  if ! out="$(tenant_bootstrap_python "$org_id" "$account" \
+      | "$kubectl" exec -i -n "$namespace" "deploy/${deploy}" \
+        -- sh -c 'cd /opt/koku/koku && python manage.py shell' 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    echo "error: tenant bootstrap failed (${namespace}/deploy/${deploy}) — log above" >&2
+    return 1
+  fi
+  if ! grep -q "BOOTSTRAP OK" <<<"$out"; then
+    printf '%s\n' "$out" >&2
+    echo "error: tenant bootstrap did not complete (no BOOTSTRAP OK marker) — log above" >&2
+    return 1
+  fi
+  grep "BOOTSTRAP OK" <<<"$out" | tail -1
+}
+
+# Post-install API smoke check through the koku-api pod: the two endpoints
+# that require a provisioned tenant. Catches a missing or broken tenant at
+# install time instead of hours later as an empty Settings page.
+smoke_tenant_api() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local cr_name="${3:?CR name required}"
+  local org_id="${4:?org_id required}"
+  local account="${5:?account number required}"
+  local deploy="${cr_name}-koku-api"
+  local identity
+  identity="$(printf '{"identity":{"account_number":"%s","org_id":"%s","type":"User","user":{"username":"admin","email":"admin@demo.io","is_org_admin":true}},"entitlements":{"cost_management":{"is_entitled":true}}}' \
+    "$account" "$org_id" | base64 -w0)"
+  local api="http://localhost:8000/api/cost-management/v1"
+  local body err_file fails=0
+  # oc exec chatter ("Defaulted container …") goes to stderr and would break
+  # JSON parsing if merged into the body; keep it for the failure message.
+  err_file="$(mktemp)"
+
+  echo "API smoke check (tenant ${org_id}):"
+  body="$("$kubectl" exec -n "$namespace" "deploy/${deploy}" -- curl -s \
+    -H "x-rh-identity: ${identity}" "${api}/account-settings/data-retention/" 2>"$err_file")" || true
+  if printf '%s' "$body" | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(d.get("data_retention_months"), int) else 1)' 2>/dev/null; then
+    echo "  data-retention     PASS  $(printf '%s' "$body" | tr -d '\n' | head -c 120)"
+  else
+    echo "  data-retention     FAIL  ${body:-$(tr -d '\n' <"$err_file" | head -c 120)}" >&2
+    fails=1
+  fi
+
+  body="$("$kubectl" exec -n "$namespace" "deploy/${deploy}" -- curl -s \
+    -H "x-rh-identity: ${identity}" "${api}/settings/currency/?filter%5Benabled%5D=true" 2>"$err_file")" || true
+  if printf '%s' "$body" | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if d.get("meta", {}).get("count", 0) > 0 else 1)' 2>/dev/null; then
+    echo "  currency list      PASS  $(printf '%s' "$body" | python3 -c 'import json,sys; print("%d enabled" % json.load(sys.stdin)["meta"]["count"])' 2>/dev/null)"
+  else
+    echo "  currency list      FAIL  ${body:-$(tr -d '\n' <"$err_file" | head -c 120)}" >&2
+    fails=1
+  fi
+  rm -f "$err_file"
+  return "$fails"
+}
+
 # Demo/evaluation profile banner: this installer is not for production, and the
 # summary lists the insecure settings the demo profile uses.
 demo_profile_banner() {

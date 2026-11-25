@@ -74,6 +74,8 @@ DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
+DEMO_ORG_ID="${DEMO_ORG_ID:-1234567}"
+DEMO_ACCOUNT_NUMBER="${DEMO_ACCOUNT_NUMBER:-7890123}"
 SINGLE_NODE="${SINGLE_NODE:-0}"
 DEMO_WATCH="${DEMO_WATCH:-0}"
 DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
@@ -351,10 +353,10 @@ export DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN SINGLE_NODE PREREQS_ONLY SKIP_PREREQ
        USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK CONTAINER_TOOL \
        KUBE_CONTEXT OPEN_BROWSER CONSOLE_USERNAME CONSOLE_PASSWORD CR_FILE \
        BUILD_MODE IMAGE_TAG IMG WATCHER STORAGE_CLASS DEMO_SMOKE DEMO_RHBK_CHANNEL \
-       SINGLE_NODE
+       SINGLE_NODE DEMO_ORG_ID DEMO_ACCOUNT_NUMBER
 case "$SOURCE" in
-  registry) STEP_TOTAL=7 ;;
-  local) STEP_TOTAL=8 ;;
+  registry) STEP_TOTAL=8 ;;
+  local) STEP_TOTAL=9 ;;
   manual) STEP_TOTAL=4 ;;
 esac
 
@@ -435,7 +437,8 @@ EOF
   [4/${STEP_TOTAL}] Operator install (registry via OLM: CatalogSource, OperatorGroup, Subscription)
   [5/${STEP_TOTAL}] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
   [6/${STEP_TOTAL}] Wait for UI Deployment + CMSC verification table
-  [7/${STEP_TOTAL}] open the UI Route
+  [7/${STEP_TOTAL}] Bootstrap demo tenant (Customer + org schema) + API smoke check
+  [8/${STEP_TOTAL}] open the UI Route
 EOF
       ;;
     local)
@@ -444,7 +447,8 @@ EOF
   [5/${STEP_TOTAL}] In-cluster operator (./scripts/deploy-incluster.sh)
   [6/${STEP_TOTAL}] Apply CR (clusterDomain + Keycloak issuerURL + insecureSkipVerify, ROS off)
   [7/${STEP_TOTAL}] Wait for UI Deployment + CMSC verification table
-  [8/${STEP_TOTAL}] open the UI Route
+  [8/${STEP_TOTAL}] Bootstrap demo tenant (Customer + org schema) + API smoke check
+  [9/${STEP_TOTAL}] open the UI Route
 EOF
       ;;
     manual)
@@ -1345,6 +1349,19 @@ verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
   echo "error: CMSC verification failed — see the table above" >&2
   exit 1
 }
+
+step "Bootstrap demo tenant"
+echo "  provisioning Customer + org${DEMO_ORG_ID} schema in ${NAMESPACE}"
+echo "  (idempotent; the first run builds the tenant template, a few minutes)"
+if ! bootstrap_tenant "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"; then
+  echo "error: tenant bootstrap failed — see the log above" >&2
+  exit 1
+fi
+smoke_tenant_api "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER" || {
+  echo "error: API smoke check failed — see the table above" >&2
+  exit 1
+}
+ok "tenant org${DEMO_ORG_ID} provisioned and serving"
 
 step "Open the UI"
 echo "  ${UI_URL}"

@@ -137,6 +137,19 @@ later reports `Unauthorized`.
   (`Available`, `UIReady`, `DatabaseReady`, …) with pass/fail and reasons —
   the same conditions the Red Hat Beta article lists. A failed install reports
   exactly which conditions are false and why.
+- A **bootstrapped demo tenant**: the Customer row and `org<org_id>` schema
+  are provisioned in the koku-api pod after the CMSC is Ready, followed by an
+  **API smoke check** of the two tenant-scoped endpoints (`data-retention`,
+  currency list). Without this, a fresh on-prem install has no tenant until
+  the first source is added: every request falls back to the `public` schema,
+  Settings > Display shows "temporarily unavailable" for the data retention
+  period and an empty currency dropdown, and report data stays empty. The
+  bootstrap runs the same provisioning a first source would trigger
+  (Customer + Tenant + schema cloned from the tenant template) and is
+  idempotent. The org identity comes from `DEMO_ORG_ID` /
+  `DEMO_ACCOUNT_NUMBER` (defaults `1234567` / `7890123`, matching the default
+  RHBK realm); set them to the first `orgAdmin` user's values when a custom
+  RHBK values file is used.
 - The UI Route and login: the realm user `admin` with a **random password**
   (generated at provisioning, stored in the Secret
   `{CR_NAME}-realm-admin` in the app namespace, printed once at the end;
