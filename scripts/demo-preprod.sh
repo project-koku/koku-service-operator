@@ -1258,7 +1258,17 @@ build_openshift() {
     build_name="$(oc -n "$NAMESPACE" get builds -l buildconfig=koku-service-operator \
       -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || true)"
   fi
-  phase="$(oc -n "$NAMESPACE" get build "${build_name:-unknown}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  # --follow returns when the log stream closes, which can precede the Build
+  # status update — poll briefly for a terminal phase.
+  local phase="" _tries=0
+  while (( _tries < 30 )); do
+    phase="$(oc -n "$NAMESPACE" get build "${build_name:-unknown}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    case "$phase" in
+      Complete|Failed|Error|Cancelled) break ;;
+    esac
+    sleep 5
+    _tries=$((_tries + 1))
+  done
   if [[ "$phase" != "Complete" ]]; then
     echo "error: build ${build_name:-?} finished in phase ${phase:-unknown} — see the build log above" >&2
     return 1
