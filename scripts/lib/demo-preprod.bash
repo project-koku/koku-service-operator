@@ -28,8 +28,7 @@ patch_operator_dockerfile() {
 #   DEMO_RBAC_IMAGE / DEMO_RBAC_TAG              insights-rbac
 #   DEMO_INGRESS_IMAGE / DEMO_INGRESS_TAG        ingress
 #   DEMO_UI_IMAGE / DEMO_UI_TAG                  koku-ui-onprem
-#   DEMO_ENVOY_IMAGE / DEMO_ENVOY_TAG            envoy / proxyv2
-#   DEMO_OAUTHPROXY_IMAGE / DEMO_OAUTHPROXY_TAG  oauth2-proxy sidecar
+
 render_preprod_cr() {
   local src="${1:?sample CR path}"
   local dest="${2:?output path}"
@@ -80,10 +79,6 @@ _overrides = [
     ("DEMO_INGRESS_TAG",      'tag: "sha-6dde23d"'),
     ("DEMO_UI_IMAGE",         "repository: quay.io/insights-onprem/koku-ui-onprem"),
     ("DEMO_UI_TAG",           'tag: "d64d393ede6ab625e53c63202a6bcdb6fa48e718"'),
-    ("DEMO_ENVOY_IMAGE",      "repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9"),
-    ("DEMO_ENVOY_TAG",        'tag: "2.6"'),
-    ("DEMO_OAUTHPROXY_IMAGE", "repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9"),
-    ("DEMO_OAUTHPROXY_TAG",   'tag: "v7.6.0"'),
 ]
 for env_key, needle in _overrides:
     val = os.environ.get(env_key, "").strip()

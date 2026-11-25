@@ -108,8 +108,9 @@ usage_env() {
     }
   ' "$_envf"
   echo ""
-  echo "Every command-line flag has an environment-variable equivalent of the"
-  echo "same name (--source → SOURCE). Full annotated list with formats:"
+  echo "Most command-line flags have an environment-variable equivalent of the"
+  echo "same name (--source → SOURCE); --context and --single-node map to"
+  echo "KUBE_CONTEXT and SINGLE_NODE. Full annotated list with formats:"
   echo "scripts/demo-preprod.env.example"
 }
 
