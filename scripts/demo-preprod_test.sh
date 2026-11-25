@@ -1042,6 +1042,50 @@ oauth_mirror_needed "${obin}/oc-nosecret" ns cr 0 && om=0 || om=$?
 assert_eq "$om" "0" "absent secret with fresh Keycloak: mirror"
 rm -rf "$obin"
 
+# --- #25: registry client parsing against recorded API responses ---
+RC_TD="${ROOT}/scripts/testdata/registry"
+rc_py() {
+  python3 - "$@" <<'PYRC'
+import sys
+sys.path.insert(0, sys.argv[1])
+import registry_client as rc
+print(eval(sys.argv[2]))
+PYRC
+}
+# quay tag pages: names + pagination flag
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-page-1.json').read())")"
+assert_contains "$rc_out" "'main'" "recorded quay page 1 parses tag names"
+assert_contains "$rc_out" "True" "recorded quay page 1 reports has_additional (pagination continues)"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-page-2.json').read())")"
+assert_contains "$rc_out" "True" "recorded quay page 2 continues pagination"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read())")"
+assert_contains "$rc_out" "False" "recorded filtered query ends pagination"
+# quay digest query
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_digest(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read(), 'v0.0.1')")"
+assert_contains "$rc_out" "sha256:439e1d9d18c58496a2e85d56a3892657b2347b947e15643acc885dcd7cf3efb9" "recorded digest query parses manifest_digest"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_digest(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read(), 'no-such-tag')")"
+assert_eq "$rc_out" "" "unknown tag yields an empty digest"
+# image ref splitting: docker.io redirect, tag+digest refs, bare repos
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('docker.io/library/postgres:16')")"
+assert_contains "$rc_out" "'registry-1.docker.io', 'library/postgres', '16'" "docker.io refs address registry-1"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('docker.io/pgsty/silo:latest@sha256:abc')")"
+assert_contains "$rc_out" "'registry-1.docker.io', 'pgsty/silo', 'sha256:abc'" "tag+digest refs split to the digest"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('quay.io/project-koku/koku')")"
+assert_contains "$rc_out" "'quay.io', 'project-koku/koku', 'latest'" "bare refs default to latest"
+# token URL from the docker.io challenge (no scope in the header -> constructed)
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.token_url_from_challenge(open('${RC_TD}/docker-io-challenge.txt').read().strip(), 'library/postgres')")"
+assert_contains "$rc_out" "https://auth.docker.io/token?service=registry.docker.io" "challenge realm and service parsed"
+assert_contains "$rc_out" "scope=repository:library/postgres:pull" "pull scope constructed when the challenge omits it"
+# manifest list architectures (real postgres:16 index)
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architectures_from_manifests(__import__('json').load(open('${RC_TD}/docker-io-manifest-list-postgres16.json'))['manifests'])")"
+assert_contains "$rc_out" "'amd64'" "postgres:16 manifest list yields amd64"
+assert_contains "$rc_out" "'arm64'" "postgres:16 manifest list yields arm64"
+assert_not_contains "$rc_out" "'unknown'" "no unknown architectures from the recorded index"
+# config blob architecture
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architecture_from_config(open('${RC_TD}/docker-io-config-postgres16-amd64.json').read())")"
+assert_eq "$rc_out" "amd64" "config blob yields the architecture"
+unset RC_TD
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

@@ -163,6 +163,11 @@ read_apps_domain() {
   printf '%s\n' "$out"
 }
 
+# Invoke the registry client module (same directory as this file).
+_registry_client() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/registry_client.py" "$@"
+}
+
 # List the tags of a public quay repository, one per line (paginated).
 # REGISTRY_TAG_FIXTURE: when set, read tags from that file instead of HTTP —
 # offline tests; production leaves it unset.
@@ -179,25 +184,7 @@ registry_list_tags() {
   fi
   local out _tagerr
   _tagerr="$(mktemp)"
-  if ! out="$(python3 - "$repo" 2>"$_tagerr" <<'PY'
-import json, sys, urllib.request
-
-repo = sys.argv[1]
-tags, page = [], 1
-while True:
-    url = f"https://quay.io/api/v1/repository/{repo}/tag/?limit=100&page={page}&onlyActiveTags=true"
-    with urllib.request.urlopen(url, timeout=30) as r:
-        d = json.load(r)
-    tags += [t["name"] for t in d.get("tags", [])]
-    if not d.get("has_additional"):
-        break
-    if page >= 20:
-        print("warning: stopped listing tags after 20 pages; very old tags may be missing", file=sys.stderr)
-        break
-    page += 1
-print("\n".join(tags))
-PY
-)"; then
+  if ! out="$(_registry_client list-tags "$repo" 2>"$_tagerr")"; then
     echo "error: failed to list tags of quay.io/${repo} (registry unreachable or API error)" >&2
     rm -f "$_tagerr"
     return 1
@@ -430,87 +417,7 @@ else:
       return 0
     fi
   fi
-  out="$(python3 - "$ref" 2>/dev/null <<'PY'
-import json, re, sys, urllib.request, urllib.error
-
-ref = sys.argv[1]
-if "://" in ref:
-    ref = ref.split("://", 1)[1]
-registry, rest = ref.split("/", 1)
-# docker.io redirects to registry-1.docker.io and urllib drops the auth header
-# across hosts — talk to the real registry directly.
-if registry in ("docker.io", "index.docker.io"):
-    registry = "registry-1.docker.io"
-if "@" in rest:
-    repo, _, reference = rest.rpartition("@")
-    # A pod-spec image may carry both tag and digest (repo:tag@sha256:...).
-    base_repo, _, maybe_tag = repo.rpartition(":")
-    if "/" not in maybe_tag:
-        repo = base_repo
-else:
-    repo, _, tag = rest.rpartition(":")
-    if "/" in tag or not tag:
-        repo, reference = rest, "latest"
-    else:
-        reference = tag
-base = f"https://{registry}"
-
-def get(url, token=None, accept=None):
-    req = urllib.request.Request(url)
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    if accept:
-        req.add_header("Accept", accept)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
-
-token = ""
-try:
-    get(base + "/v2/")
-except urllib.error.HTTPError as e:
-    www = e.headers.get("WWW-Authenticate", "").replace('",', '" ')
-    opts = dict(re.findall(r'(\w+)="([^"]*)"', www))
-    realm = opts.get("realm")
-    if realm:
-        q = f"?service={opts.get('service', '')}"
-        q += f"&scope=repository:{repo}:pull"
-        try:
-            tok = json.loads(get(realm + q))
-            token = tok.get("token") or tok.get("access_token") or ""
-        except Exception:
-            token = ""
-except Exception:
-    pass
-
-accept = ", ".join([
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-    "application/vnd.oci.image.manifest.v1+json",
-])
-try:
-    m = json.loads(get(f"{base}/v2/{repo}/manifests/{reference}", token, accept))
-except Exception:
-    print("unknown"); raise SystemExit
-if "manifests" in m:
-    archs = set()
-    for man in m["manifests"]:
-        p = man.get("platform", {})
-        if p.get("os", "linux") == "linux":
-            archs.add(p.get("architecture", "unknown"))
-    print(" ".join(sorted(archs)) or "unknown")
-else:
-    cfg = m.get("config", {}).get("digest")
-    if cfg:
-        try:
-            c = json.loads(get(f"{base}/v2/{repo}/blobs/{cfg}", token))
-            print(c.get("architecture", "unknown"))
-        except Exception:
-            print("unknown")
-    else:
-        print("unknown")
-PY
-)" || out="unknown"
+  out="$(_registry_client image-arches "$ref" 2>/dev/null)" || out="unknown"
   printf '%s\n' "${out:-unknown}"
 }
 
@@ -826,25 +733,7 @@ registry_manifest_digest() {
     return 0
   fi
   local out
-  out="$(python3 - "$repo" "$tag" 2>/dev/null <<'PY'
-import json, sys, urllib.request
-
-repo, tag = sys.argv[1], sys.argv[2]
-page = 1
-while True:
-    url = (f"https://quay.io/api/v1/repository/{repo}/tag/"
-           f"?limit=100&page={page}&filter_tag_name=like:{tag}&onlyActiveTags=true")
-    with urllib.request.urlopen(url, timeout=30) as r:
-        d = json.load(r)
-    for t in d.get("tags", []):
-        if t.get("name") == tag:
-            print(t.get("manifest_digest") or "")
-            raise SystemExit
-    if not d.get("has_additional"):
-        raise SystemExit
-    page += 1
-PY
-)" || return 0
+  out="$(_registry_client manifest-digest "$repo" "$tag" 2>/dev/null)" || return 0
   printf '%s\n' "$out"
 }
 
