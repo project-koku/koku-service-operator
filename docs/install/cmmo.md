@@ -96,8 +96,16 @@ CMMO must be able to **create an OpenShift source** (`create_source: true`) and
 4. As a human **org-admin** (User Access UI or RBAC API), ensure a real
    principal exists for that gateway username, then bind it to a group that
    has **only** **Sources administrator**.
-5. `keycloakSync` skips usernames starting with `service-account-`. Relying
-   on sync alone does not materialize the mapped gateway principal.
+5. `keycloakSync` does **not** replace that manual bind. Sync skips Keycloak
+   usernames starting with `service-account-`, so it will not create the
+   mapped gateway principal for you. If sync is enabled with
+   `spec.rbac.keycloakSync.pruneOrphans` left at its default (`true`), a
+   later sync can **delete** a manually created gateway principal (and its
+   group membership) when that username is not present as a usable Keycloak
+   user — source create then fails until you recreate and rebind it. For
+   CMMO with a mapped username such as `cost-mgmt-operator`, set
+   `pruneOrphans: false` (or otherwise keep that principal excluded from
+   prune) so sync cannot undo the Sources administrator bind.
 
 Beta installs that assigned `org-admin` to the CMMO SA should remove that
 realm role and switch to Sources administrator only.

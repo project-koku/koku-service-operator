@@ -12,7 +12,7 @@ beta path.
 
 | Source | How data arrives | What you see first |
 |--------|------------------|-------------------|
-| OpenShift cluster metrics | [CMMO](cmmo.md) upload from a reporting cluster (CMMO SA needs **Sources administrator**, not Keycloak `org-admin`) | Usage and inventory after Listener ingest |
+| OpenShift cluster metrics | [CMMO](cmmo.md) upload from a reporting cluster (upload needs JWT only; **Sources administrator** is required for source create when `create_source: true` — not Keycloak `org-admin`) | Usage and inventory after Listener ingest |
 | Lab / test payloads | Your own upload tooling (not covered here) | Depends on payload type |
 
 Ingest alone can show **usage** (CPU, memory, node counts) before any **cost
