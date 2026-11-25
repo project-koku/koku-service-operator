@@ -51,7 +51,7 @@ oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 
 ## Full BYOI demo on CRC
 
-`./scripts/demo-preprod.sh --crc` (alias of `--profile=single-node`) runs the
+`./scripts/demo-preprod.sh --crc` (alias of `--single-node`) runs the
 [pre-prod demo](demo-preprod.sh.md) against local CRC. The profile is **sizing
 only** — 1+1 Kafka (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
 10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC

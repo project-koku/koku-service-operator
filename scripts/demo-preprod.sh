@@ -26,7 +26,7 @@
 #   ./scripts/demo-preprod.sh --console        # print the OpenShift console URL and username
 #   ./scripts/demo-preprod.sh --prereqs-only   # install prerequisites only, then stop
 #   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
-#   ./scripts/demo-preprod.sh --profile=single-node   # small-cluster Kafka sizing (alias: --crc)
+#   ./scripts/demo-preprod.sh --single-node   # small-cluster Kafka sizing (alias: --crc)
 #
 # Operator install source (--source=registry|local|manual; default: registry):
 #   registry  install the published operator (quay.io/project-koku) via OLM
@@ -61,7 +61,7 @@ DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
-PROFILE="${PROFILE:-}"
+SINGLE_NODE="${SINGLE_NODE:-0}"
 DEMO_WATCH="${DEMO_WATCH:-0}"
 DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
 PREREQS_ONLY="${PREREQS_ONLY:-0}"
@@ -125,15 +125,7 @@ while [[ $# -gt 0 ]]; do
       KUBE_CONTEXT="$2"
       shift
       ;;
-    --crc) PROFILE="single-node" ;;
-    --profile)
-      [[ $# -ge 2 ]] || { echo "error: --profile requires a value (single-node)" >&2; exit 2; }
-      PROFILE="$2"
-      shift
-      ;;
-    --profile=*)
-      PROFILE="${1#--profile=}"
-      ;;
+    --crc|--single-node) SINGLE_NODE=1 ;;
     --watch) DEMO_WATCH=1 ;;
     --console) DEMO_CONSOLE=1 ;;
     --prereqs-only) PREREQS_ONLY=1 ;;
@@ -268,14 +260,7 @@ for _nsvar in NAMESPACE CR_NAME INFRA_NAMESPACE KAFKA_NAMESPACE KEYCLOAK_NAMESPA
     exit 2
   fi
 done
-case "$PROFILE" in
-  ""|single-node) ;;
-  *)
-    echo "error: PROFILE must be single-node (got '${PROFILE}')" >&2
-    exit 2
-    ;;
-esac
-if [[ "$PROFILE" == "single-node" ]]; then
+if [[ "$SINGLE_NODE" == "1" ]]; then
   # Single-node / small-cluster sizing — nothing else. Architecture is
   # autodiscovered; KUBE_CONTEXT and BUILD_MODE are never forced; arm64 image
   # overrides are the opt-in demo-preprod.arm64.env template.
@@ -348,10 +333,11 @@ STEP_N=0
 # Flag-parsed values must be exported: the tmux wrapper serializes the
 # exported environment into the inner run (a pane inherits the tmux SERVER's
 # environment, not the caller's, so shell variables would be lost).
-export DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN PROFILE PREREQS_ONLY SKIP_PREREQS \
+export DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN SINGLE_NODE PREREQS_ONLY SKIP_PREREQS \
        USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK CONTAINER_TOOL \
        KUBE_CONTEXT OPEN_BROWSER CONSOLE_USERNAME CONSOLE_PASSWORD CR_FILE \
-       BUILD_MODE IMAGE_TAG IMG WATCHER STORAGE_CLASS DEMO_SMOKE DEMO_RHBK_CHANNEL
+       BUILD_MODE IMAGE_TAG IMG WATCHER STORAGE_CLASS DEMO_SMOKE DEMO_RHBK_CHANNEL \
+       SINGLE_NODE
 case "$SOURCE" in
   registry) STEP_TOTAL=7 ;;
   local) STEP_TOTAL=8 ;;
@@ -422,7 +408,7 @@ Pre-prod demo plan
   tmux:        ${TMUX_SESSION}  (NO_TMUX=${DEMO_NO_TMUX})
   reset:       ${DEMO_RESET}
   rebuild:     ${DEMO_REBUILD}
-  profile:     ${PROFILE:-default}$([[ "$PROFILE" == "single-node" ]] && echo "  (Kafka 1 broker + 1 controller, 10Gi/5Gi)")
+  profile:     $([[ "$SINGLE_NODE" == "1" ]] && echo "single-node (Kafka 1 broker + 1 controller, 10Gi/5Gi)" || echo default)
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
   [1/${STEP_TOTAL}] Preflight (context, oc, RHBK script, StorageClass)

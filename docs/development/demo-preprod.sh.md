@@ -99,7 +99,7 @@ production CR needs.
 
 ## Small clusters: the single-node profile
 
-`--profile=single-node` (alias `--crc`) shrinks Kafka to 1 broker + 1
+`--single-node` (alias `--crc`) shrinks Kafka to 1 broker + 1
 controller with 10Gi/5Gi volumes — **sizing only**. It never sets
 `KUBE_CONTEXT`, never forces a build mode, never selects an architecture, and
 never loads image overrides. All CRC specifics — host prerequisites, starting
@@ -123,7 +123,7 @@ oc config set-context crc --cluster=api-crc-testing:6443 \
 Then run the demo against it:
 
 ```bash
-./scripts/demo-preprod.sh --context crc --profile=single-node
+./scripts/demo-preprod.sh --context crc --single-node
 ```
 
 `oc login` refreshes the token; re-run it (not `set-context`) if the context

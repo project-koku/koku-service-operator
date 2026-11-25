@@ -692,14 +692,14 @@ grep -Fq 'USER_CR_FILE' "${ROOT}/scripts/demo-preprod.env.example" || {
 }
 
 # --- Task 9 (#8): single-node profile and crc.env split ---
-plan_sn="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --profile=single-node 2>&1)"
-assert_contains "$plan_sn" "profile:     single-node" "profile shows in the plan"
+plan_sn="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --single-node 2>&1)"
+assert_contains "$plan_sn" "profile:     single-node" "single-node shows in the plan"
 assert_contains "$plan_sn" "Kafka 1 broker + 1 controller" "plan shows the Kafka sizing"
 assert_contains "$plan_sn" "context:     <current>" "profile does not pin KUBE_CONTEXT"
 assert_not_contains "$plan_sn" "martin_povolny" "plan has no arm64 image overrides"
 
 plan_crc_alias="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --crc 2>&1)"
-assert_eq "$plan_crc_alias" "$plan_sn" "--crc is an alias for --profile=single-node"
+assert_eq "$plan_crc_alias" "$plan_sn" "--crc is an alias for --single-node"
 
 if [[ -e "${ROOT}/scripts/demo-preprod.crc.env" ]]; then
   echo "FAIL: demo-preprod.crc.env must be replaced by the opt-in arm64 template" >&2
@@ -713,9 +713,6 @@ if grep -qE "load_env_file.*arm64" "${ROOT}/scripts/demo-preprod.sh"; then
   echo "FAIL: no flag may auto-load the arm64 template" >&2
   fail=1
 fi
-bad_prof="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --profile=bogus 2>&1)" && prof_rc=0 || prof_rc=$?
-assert_eq "$prof_rc" "2" "unknown profile rejected"
-
 # --- Task 10 (#7): reset removes OLM objects ---
 stub_dir="$(mktemp -d)"
 cat >"${stub_dir}/oc-reset" <<EOF
