@@ -102,7 +102,10 @@ production CR needs.
 `--profile=single-node` (alias `--crc`) shrinks Kafka to 1 broker + 1
 controller with 10Gi/5Gi volumes — **sizing only**. It never sets
 `KUBE_CONTEXT`, never forces a build mode, never selects an architecture, and
-never loads image overrides. CRC walkthrough: [crc-testing.md](crc-testing.md).
+never loads image overrides. All CRC specifics — host prerequisites, starting
+and logging into the cluster, the minimal koku-only developer loop, arm64
+image rebuilds, and troubleshooting — are in
+[crc-testing.md](crc-testing.md).
 
 ### Local CRC (OpenShift Local): one-time setup
 
@@ -195,5 +198,6 @@ overrides).
 
 - [docs/install/production.md](../install/production.md) — production installs
 - [keycloak.md](keycloak.md) — Keycloak/RHBK details
-- [crc-testing.md](crc-testing.md) — CRC walkthrough (profile, arm64 template)
+- [crc-testing.md](crc-testing.md) — everything CRC: host setup, the demo
+  flow, the minimal koku-only developer loop, arm64 rebuilds, troubleshooting
 - `./scripts/demo-preprod.sh --help` — the full flag reference
