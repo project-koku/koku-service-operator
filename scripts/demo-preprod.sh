@@ -1010,7 +1010,14 @@ SKIP_KAFKA=0 SKIP_INFRA=0 SKIP_KEYCLOAK=0 SKIP_OAUTH_MIRROR=0
 kafka_ready && SKIP_KAFKA=1 && skip "Kafka ${KAFKA_CLUSTER_NAME} already Ready"
 infra_ready && SKIP_INFRA=1 && skip "infra in ${INFRA_NAMESPACE} already rolled out"
 keycloak_ready && SKIP_KEYCLOAK=1 && skip "Keycloak already Ready"
-oauth_secret_ready && SKIP_OAUTH_MIRROR=1 && skip "OAuth client Secret already present"
+# The OAuth mirror must re-run when Keycloak is being (re)provisioned even if
+# the Secret exists: a fresh Keycloak issues a new client secret (#25).
+if ! oauth_mirror_needed "$KUBECTL" "$NAMESPACE" "$CR_NAME" "${SKIP_KEYCLOAK:-0}"; then
+  SKIP_OAUTH_MIRROR=1
+  skip "OAuth client Secret already present"
+elif "$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-ui-oauth-client" >/dev/null 2>&1; then
+  skip "OAuth client Secret present but Keycloak is being (re)provisioned — re-mirroring (old secret is stale)"
+fi
 # Demo hardening: a fresh Keycloak provisioning gets a random realm-user
 # password (stored in a Secret afterwards). IQE/CI set REALM_ADMIN_PASSWORD
 # themselves or use DEMO_SMOKE; deploy-rhbk.sh's own default stays admin/admin.

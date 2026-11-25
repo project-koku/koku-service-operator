@@ -877,3 +877,19 @@ should_open_browser() {
     echo 0
   fi
 }
+
+# True when the UI OAuth client Secret must be (re-)mirrored from Keycloak:
+# absent, or present but stale because Keycloak is being (re)provisioned this
+# run — a fresh Keycloak issues a new client secret, so the previously
+# mirrored one cannot authenticate (cross-model review follow-up #25).
+oauth_mirror_needed() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local namespace="${2:?namespace required}"
+  local cr_name="${3:?CR name required}"
+  local keycloak_skipped="${4:?0 or 1}"
+  if ! "$kubectl" -n "$namespace" get secret "${cr_name}-ui-oauth-client" >/dev/null 2>&1; then
+    return 0
+  fi
+  # Secret exists: still needed when Keycloak is being (re)provisioned.
+  [[ "$keycloak_skipped" != "1" ]]
+}

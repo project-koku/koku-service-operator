@@ -1016,6 +1016,32 @@ assert_eq "$wk_rc" "0" "missing RBACWorkerReady does not fail the verification (
 assert_not_contains "$wk_out" "FAIL" "no failures with RBACWorkerReady absent"
 rm -rf "$vdir2"
 
+# --- #25: OAuth mirror is required when the secret is absent OR stale ---
+obin="$(mktemp -d)"
+cat >"${obin}/oc-secret" <<'EOF'
+#!/bin/bash
+if [[ "$3" == "get" && "$4" == "secret" ]]; then exit 0; fi
+exit 1
+EOF
+cat >"${obin}/oc-nosecret" <<'EOF'
+#!/bin/bash
+if [[ "$3" == "get" && "$4" == "secret" ]]; then echo "Error from server (NotFound)" >&2; exit 1; fi
+exit 1
+EOF
+chmod +x "${obin}/oc-secret" "${obin}/oc-nosecret"
+# Return 0 = mirror required. Secret exists + Keycloak skipped -> NOT required.
+oauth_mirror_needed "${obin}/oc-secret" ns cr 1 && om=0 || om=$?
+assert_eq "$om" "1" "existing secret with skipped Keycloak: no re-mirror"
+# Secret exists + Keycloak being (re)provisioned -> required (stale client secret)
+oauth_mirror_needed "${obin}/oc-secret" ns cr 0 && om=0 || om=$?
+assert_eq "$om" "0" "existing secret with fresh Keycloak: re-mirror (stale client secret)"
+# Secret absent -> always required
+oauth_mirror_needed "${obin}/oc-nosecret" ns cr 1 && om=0 || om=$?
+assert_eq "$om" "0" "absent secret with skipped Keycloak: mirror"
+oauth_mirror_needed "${obin}/oc-nosecret" ns cr 0 && om=0 || om=$?
+assert_eq "$om" "0" "absent secret with fresh Keycloak: mirror"
+rm -rf "$obin"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
