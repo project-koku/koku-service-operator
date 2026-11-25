@@ -161,6 +161,9 @@ overrides).
   Set `RHBK_INSECURE_TLS=1` for such labs.
 - **Build failures with podman** — `BUILD_MODE=docker` auto-detects docker
   (with buildx) or podman; the podman-docker shim is detected and avoided.
+  Note that `BUILD_MODE=auto` prefers the in-cluster OpenShift build whenever
+  `IMG` is the internal registry — set `BUILD_MODE=docker` explicitly (with
+  `CONTAINER_TOOL` if you want to force the tool) to build locally.
 
 ## Related docs
 
