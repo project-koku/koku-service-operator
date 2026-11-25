@@ -166,6 +166,14 @@ assert_not_contains "$help_out" "No such file or directory" "--help from scripts
 assert_contains "$help_out" "tmux (default, when installed)" "--help documents the tmux default"
 assert_contains "$help_out" "Ctrl-b d" "--help says how to detach from tmux"
 assert_not_contains "$help_out" "HELP-END" "--help output ends at the marker"
+# The settings reference is generated from demo-preprod.env.example
+assert_contains "$help_out" "NAMESPACE              default: cost-byoi" "--help lists NAMESPACE with its default"
+assert_contains "$help_out" "CATALOG_REPO           quay namespace" "--help lists CATALOG_REPO with its description"
+assert_contains "$help_out" "REALM_ADMIN_PASSWORD" "--help lists REALM_ADMIN_PASSWORD"
+assert_contains "$help_out" "same name (--source → SOURCE)" "--help states the flag-to-env-var convention"
+case "$help_out" in
+  *"  KEY  "*) echo "FAIL: format-doc lines must not render as entries" >&2; fail=1 ;;
+esac
 
 # --- Task 1 (#1): --source selector and current-context default ---
 help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"

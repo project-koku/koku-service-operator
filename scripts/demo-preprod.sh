@@ -31,9 +31,6 @@
 #   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
 #   ./scripts/demo-preprod.sh --profile=single-node   # small-cluster Kafka sizing (alias: --crc)
 #
-# Settings: env vars, then scripts/demo-preprod.local.env, then
-# scripts/demo-preprod.env.example.
-#
 # tmux (default, when installed): left pane = numbered steps; top-right =
 # kubectl klock pods in NAMESPACE; bottom-right = kubectl klock pods in
 # KAFKA_NAMESPACE. Disable with --no-tmux; detach with Ctrl-b d.
@@ -66,6 +63,39 @@ USER_CR_FILE="${USER_CR_FILE:-}"
 
 usage() {
   sed -n '2,/^# HELP-END/p' "$SCRIPT" | sed 's/^# \{0,1\}//' | sed '/^HELP-END/d'
+  # The settings reference is GENERATED from demo-preprod.env.example so it
+  # cannot drift: uncommented KEY=value lines are shipped defaults, commented
+  # "# KEY=... # description" lines are optional overrides.
+  local _envf="${SCRIPT_DIR}/demo-preprod.env.example"
+  if [[ -f "$_envf" ]]; then
+    echo ""
+    echo "Settings (environment variables; precedence: real environment >"
+    echo "scripts/demo-preprod.local.env > scripts/demo-preprod.env.example):"
+    awk '
+      /^[A-Za-z_][A-Za-z0-9_]*=/ {
+        key = $0; sub(/=.*/, "", key)
+        val = $0; sub(/^[^=]*=/, "", val)
+        sub(/[[:space:]]#.*$/, "", val)
+        printf "  %-22s default: %s\n", key, val
+        next
+      }
+      /^#[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/ {
+        line = $0; sub(/^#[[:space:]]*/, "", line)
+        key = line; sub(/=.*/, "", key)
+        desc = ""
+        if (match(line, /#[[:space:]][^#]/)) {
+          desc = substr(line, RSTART + 1); sub(/^[[:space:]]*/, "", desc)
+        }
+        if (desc != "") printf "  %-22s %s\n", key, desc
+        else printf "  %-22s\n", key
+        next
+      }
+    ' "$_envf"
+    echo ""
+    echo "Every command-line flag has an environment-variable equivalent of the"
+    echo "same name (--source → SOURCE). Full annotated list with formats:"
+    echo "scripts/demo-preprod.env.example"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
