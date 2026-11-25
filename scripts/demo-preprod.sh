@@ -1241,8 +1241,28 @@ build_openshift() {
     --exclude docs/superpowers --exclude '*.out' \
     . | tar -C "$tmp" -xf -
   patch_operator_dockerfile "${tmp}/Dockerfile"
-  oc -n "$NAMESPACE" start-build koku-service-operator --from-dir="$tmp" --follow
+  # oc start-build --follow can exit 0 even when the build fails — the user's
+  # run sailed past a failed build and timed out 15 minutes later at the
+  # rollout. Capture the build name and verify its final phase.
+  local build_log build_name phase
+  if ! build_log="$(oc -n "$NAMESPACE" start-build koku-service-operator --from-dir="$tmp" --follow 2>&1)"; then
+    echo "$build_log"
+    rm -rf "$tmp"
+    echo "error: oc start-build failed" >&2
+    return 1
+  fi
+  echo "$build_log"
   rm -rf "$tmp"
+  build_name="$(printf '%s\n' "$build_log" | grep -oE 'koku-service-operator-[0-9]+' | head -1 || true)"
+  if [[ -z "$build_name" ]]; then
+    build_name="$(oc -n "$NAMESPACE" get builds -l buildconfig=koku-service-operator \
+      -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || true)"
+  fi
+  phase="$(oc -n "$NAMESPACE" get build "${build_name:-unknown}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ "$phase" != "Complete" ]]; then
+    echo "error: build ${build_name:-?} finished in phase ${phase:-unknown} — see the build log above" >&2
+    return 1
+  fi
 }
 build_docker() {
   local tool
