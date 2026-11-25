@@ -7,9 +7,11 @@ Keycloak), the koku-service-operator, and the Cost Management UI.
 
 The prerequisites are "BYOI" (bring your own infrastructure) in the operator's
 design: the operator never provisions them — it validates and connects to
-whatever the CR points at. This demo installs disposable stand-ins so you can
-evaluate without real infrastructure; a production install points the CR at
-your own services instead.
+whatever the CR points at. For evaluation this demo deploys its own minimal
+instances of the five services — real, working deployments, but single
+replicas, no TLS, and removed wholesale by `--reset`. For production you
+point the CR at your own managed services instead; see
+[docs/install/production.md](../install/production.md).
 
 > **Demo/evaluation profile — not for production.** Insecure settings are in
 > use by design (demo realm user, Kafka PLAINTEXT, `sslMode: disable`, OIDC

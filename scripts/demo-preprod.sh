@@ -4,8 +4,10 @@
 # Cost Management UI.
 #
 # The prerequisites are "BYOI" (bring your own infrastructure): the operator
-# never provisions them — it validates and connects. This demo installs
-# disposable stand-ins so you can evaluate without real infrastructure.
+# never provisions them — it validates and connects to whatever the CR points
+# at. For evaluation this demo deploys its own minimal instances of the five
+# services (single replicas, no TLS, removed by --reset); for production,
+# point the CR at your own managed services instead.
 #
 # Usage (from repo root or scripts/):
 #   ./scripts/demo-preprod.sh
