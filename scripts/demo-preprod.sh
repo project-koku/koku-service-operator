@@ -17,6 +17,7 @@
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
 #   ./scripts/demo-preprod.sh --help-env       # list every settings variable
+#   ./scripts/demo-preprod.sh --context <name>         # oc config get-contexts lists them; default: current
 #   ./scripts/demo-preprod.sh --source=registry|local|manual
 #   ./scripts/demo-preprod.sh --version <vX.Y.Z|commit-sha|latest>
 #   ./scripts/demo-preprod.sh --catalog-repo <quay namespace>
@@ -119,6 +120,11 @@ while [[ $# -gt 0 ]]; do
     --no-tmux) DEMO_NO_TMUX=1 ;;
     --rebuild) DEMO_REBUILD=1 ;;
     --no-open) DEMO_NO_OPEN=1 ;;
+    --context)
+      [[ $# -ge 2 ]] || { echo "error: --context requires a context name (oc config get-contexts lists them)" >&2; exit 2; }
+      KUBE_CONTEXT="$2"
+      shift
+      ;;
     --crc) PROFILE="single-node" ;;
     --profile)
       [[ $# -ge 2 ]] || { echo "error: --profile requires a value (single-node)" >&2; exit 2; }

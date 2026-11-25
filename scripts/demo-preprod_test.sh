@@ -1086,6 +1086,13 @@ rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architecture_from_config(open('${RC_TD
 assert_eq "$rc_out" "amd64" "config blob yields the architecture"
 unset RC_TD
 
+# --- --context flag: sets KUBE_CONTEXT, wins over env files ---
+ctx_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --context my-cluster 2>&1)"
+assert_contains "$ctx_plan" "context:     my-cluster" "--context selects the kube context"
+help_out2="$(./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out2" "--context <name>" "help documents --context"
+assert_contains "$help_out2" "oc config get-contexts lists them" "help says how to discover context names"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1
