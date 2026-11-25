@@ -16,7 +16,16 @@
 #   ./scripts/demo-preprod.sh --no-tmux
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
-#   ./scripts/demo-preprod.sh --help-env      # list every settings variable
+#   ./scripts/demo-preprod.sh --help-env       # list every settings variable
+#   ./scripts/demo-preprod.sh --source=registry|local|manual
+#   ./scripts/demo-preprod.sh --version <vX.Y.Z|commit-sha|latest>
+#   ./scripts/demo-preprod.sh --catalog-repo <quay namespace>
+#   ./scripts/demo-preprod.sh --channel <olm channel>
+#   ./scripts/demo-preprod.sh --watch          # observe an existing install until the UI is ready
+#   ./scripts/demo-preprod.sh --console        # print the OpenShift console URL and username
+#   ./scripts/demo-preprod.sh --prereqs-only   # install prerequisites only, then stop
+#   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
+#   ./scripts/demo-preprod.sh --profile=single-node   # small-cluster Kafka sizing (alias: --crc)
 #
 # Operator install source (--source=registry|local|manual; default: registry):
 #   registry  install the published operator (quay.io/project-koku) via OLM
@@ -27,12 +36,6 @@
 #   --version <vX.Y.Z|commit-sha|latest>   default: latest stable (discovered)
 #   --catalog-repo <quay namespace>        default: quay.io/project-koku
 #   --channel <olm channel>                default: beta
-#
-#   ./scripts/demo-preprod.sh --watch         # observe an existing install until the UI is ready
-#   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username
-#   ./scripts/demo-preprod.sh --prereqs-only  # install prerequisites only, then stop
-#   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
-#   ./scripts/demo-preprod.sh --profile=single-node   # small-cluster Kafka sizing (alias: --crc)
 #
 # tmux (default, when installed): left pane = numbered steps; top-right =
 # kubectl klock pods in NAMESPACE; bottom-right = kubectl klock pods in
