@@ -104,6 +104,28 @@ controller with 10Gi/5Gi volumes — **sizing only**. It never sets
 `KUBE_CONTEXT`, never forces a build mode, never selects an architecture, and
 never loads image overrides. CRC walkthrough: [crc-testing.md](crc-testing.md).
 
+### Local CRC (OpenShift Local): one-time setup
+
+Start CRC and register a context named `crc` (full guide:
+[crc-testing.md](crc-testing.md)):
+
+```bash
+crc start -p ~/.crc-secret.json
+oc login -u kubeadmin -p "$(crc console --credentials | sed -n 's/.*-p \([^ ]*\).*/\1/p' | tail -1)" \
+    https://api.crc.testing:6443 --insecure-skip-tls-verify=true
+oc config set-context crc --cluster=api-crc-testing:6443 \
+    --user=kubeadmin/api-crc-testing:6443 --namespace=default
+```
+
+Then run the demo against it:
+
+```bash
+./scripts/demo-preprod.sh --context crc --profile=single-node
+```
+
+`oc login` refreshes the token; re-run it (not `set-context`) if the context
+later reports `Unauthorized`.
+
 ## What you get
 
 - Four namespaces (`cost-byoi`, `cost-byoi-infra`, `kafka`, `keycloak`; all
