@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Full pre-prod demo: BYOI (AMQ Streams + Keycloak) → in-cluster operator → UI.
+# Full pre-prod demo: prerequisites (AMQ Streams Kafka, PostgreSQL, Valkey,
+# MinIO-compatible object storage, RHBK Keycloak) → koku-service-operator →
+# Cost Management UI.
+#
+# The prerequisites are "BYOI" (bring your own infrastructure): the operator
+# never provisions them — it validates and connects. This demo installs
+# disposable stand-ins so you can evaluate without real infrastructure.
 #
 # Usage (from repo root or scripts/):
 #   ./scripts/demo-preprod.sh
@@ -13,8 +19,11 @@
 #   registry  install the published operator (quay.io/project-koku) via OLM
 #   local     build the operator from this checkout, deploy in-cluster
 #   manual    prepare prereqs + CR; you install the operator via the console
-#   Version selection: --version <vX.Y.Z|commit-sha|latest>, --catalog-repo
-#   <quay namespace>, --channel <olm channel>; default: latest stable (discovered).
+#
+# Version selection (registry and manual sources):
+#   --version <vX.Y.Z|commit-sha|latest>   default: latest stable (discovered)
+#   --catalog-repo <quay namespace>        default: quay.io/project-koku
+#   --channel <olm channel>                default: beta
 #
 #   ./scripts/demo-preprod.sh --watch         # observe an existing install until the UI is ready
 #   ./scripts/demo-preprod.sh --console       # print the OpenShift console URL and username

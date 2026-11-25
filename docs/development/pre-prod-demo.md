@@ -1,9 +1,15 @@
 # Pre-prod demo runbook (prerequisites → operator → UI)
 
 `scripts/demo-preprod.sh` installs a complete Cost Management self-managed
-**demo/evaluation environment** on any OpenShift cluster: the BYOI
-prerequisites (AMQ Streams Kafka, PostgreSQL, Valkey, MinIO, RHBK Keycloak),
-the koku-service-operator, and the Cost Management UI.
+**demo/evaluation environment** on any OpenShift cluster: the prerequisites
+(AMQ Streams Kafka, PostgreSQL, Valkey, MinIO-compatible object storage, RHBK
+Keycloak), the koku-service-operator, and the Cost Management UI.
+
+The prerequisites are "BYOI" (bring your own infrastructure) in the operator's
+design: the operator never provisions them — it validates and connects to
+whatever the CR points at. This demo installs disposable stand-ins so you can
+evaluate without real infrastructure; a production install points the CR at
+your own services instead.
 
 > **Demo/evaluation profile — not for production.** Insecure settings are in
 > use by design (demo realm user, Kafka PLAINTEXT, `sslMode: disable`, OIDC
