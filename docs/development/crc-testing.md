@@ -7,7 +7,7 @@ Two paths:
 
 | Path | What it exercises | Section |
 |------|-------------------|---------|
-| **`./scripts/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
+| **`./scripts/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the operator from the published registry (default) or built locally — the same flow as any other cluster, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
 | **`make run` + a bundled sample CR** | Operator out-of-cluster, operator-provisioned Postgres/Valkey, no Kafka/Keycloak | rest of this document |
 
 **Scope:** use the minimal koku-only path for **operator + koku API/celery**
@@ -92,9 +92,9 @@ later reports `Unauthorized`.
 
 ```bash
 # uses this repo's scripts/deploy-rhbk.sh for Keycloak
-KUBE_CONTEXT=crc ./scripts/demo-preprod.sh --crc --dry-run     # show the plan
-KUBE_CONTEXT=crc ./scripts/demo-preprod.sh --crc               # tmux: steps + two klock panes
-KUBE_CONTEXT=crc ./scripts/demo-preprod.sh --crc --reset       # tear the four namespaces down first
+./scripts/demo-preprod.sh --context crc --crc --dry-run     # show the plan
+./scripts/demo-preprod.sh --context crc --crc               # tmux: steps + two klock panes
+./scripts/demo-preprod.sh --context crc --crc --reset       # tear the four namespaces down first
 ```
 
 (`KUBE_CONTEXT=crc` pins the context — without it the demo uses whatever
