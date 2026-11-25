@@ -166,13 +166,18 @@ assert_not_contains "$help_out" "No such file or directory" "--help from scripts
 assert_contains "$help_out" "tmux (default, when installed)" "--help documents the tmux default"
 assert_contains "$help_out" "Ctrl-b d" "--help says how to detach from tmux"
 assert_not_contains "$help_out" "HELP-END" "--help output ends at the marker"
-# The settings reference is generated from demo-preprod.env.example
-assert_contains "$help_out" "NAMESPACE              default: cost-byoi" "--help lists NAMESPACE with its default"
-assert_contains "$help_out" "CATALOG_REPO           quay namespace" "--help lists CATALOG_REPO with its description"
-assert_contains "$help_out" "REALM_ADMIN_PASSWORD" "--help lists REALM_ADMIN_PASSWORD"
-assert_contains "$help_out" "same name (--source → SOURCE)" "--help states the flag-to-env-var convention"
-case "$help_out" in
+# --help points at --help-env; --help-env carries the generated reference
+assert_contains "$help_out" "--help-env" "--help points at the settings reference"
+env_help="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help" "NAMESPACE              default: cost-byoi" "--help-env lists NAMESPACE with its default"
+assert_contains "$env_help" "CATALOG_REPO           quay namespace" "--help-env lists CATALOG_REPO with its description"
+assert_contains "$env_help" "REALM_ADMIN_PASSWORD" "--help-env lists REALM_ADMIN_PASSWORD"
+assert_contains "$env_help" "same name (--source → SOURCE)" "--help-env states the flag-to-env-var convention"
+case "$env_help" in
   *"  KEY  "*) echo "FAIL: format-doc lines must not render as entries" >&2; fail=1 ;;
+esac
+case "$help_out" in
+  *"default: cost-byoi"*) echo "FAIL: --help must not embed the full settings list" >&2; fail=1 ;;
 esac
 
 # --- Task 1 (#1): --source selector and current-context default ---

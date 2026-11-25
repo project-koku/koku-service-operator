@@ -16,6 +16,7 @@
 #   ./scripts/demo-preprod.sh --no-tmux
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
+#   ./scripts/demo-preprod.sh --help-env      # list every settings variable
 #
 # Operator install source (--source=registry|local|manual; default: registry):
 #   registry  install the published operator (quay.io/project-koku) via OLM
@@ -65,39 +66,47 @@ USER_CR_FILE="${USER_CR_FILE:-}"
 
 usage() {
   sed -n '2,/^# HELP-END/p' "$SCRIPT" | sed 's/^# \{0,1\}//' | sed '/^HELP-END/d'
-  # The settings reference is GENERATED from demo-preprod.env.example so it
-  # cannot drift: uncommented KEY=value lines are shipped defaults, commented
-  # "# KEY=... # description" lines are optional overrides.
+  echo ""
+  echo "Settings: environment variables (real environment >"
+  echo "scripts/demo-preprod.local.env > scripts/demo-preprod.env.example) —"
+  echo "run with --help-env for the full list."
+}
+
+# The settings reference is GENERATED from demo-preprod.env.example so it
+# cannot drift: uncommented KEY=value lines are shipped defaults, commented
+# "# KEY=... # description" lines are optional overrides.
+usage_env() {
   local _envf="${SCRIPT_DIR}/demo-preprod.env.example"
-  if [[ -f "$_envf" ]]; then
-    echo ""
-    echo "Settings (environment variables; precedence: real environment >"
-    echo "scripts/demo-preprod.local.env > scripts/demo-preprod.env.example):"
-    awk '
-      /^[A-Za-z_][A-Za-z0-9_]*=/ {
-        key = $0; sub(/=.*/, "", key)
-        val = $0; sub(/^[^=]*=/, "", val)
-        sub(/[[:space:]]#.*$/, "", val)
-        printf "  %-22s default: %s\n", key, val
-        next
-      }
-      /^#[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/ {
-        line = $0; sub(/^#[[:space:]]*/, "", line)
-        key = line; sub(/=.*/, "", key)
-        desc = ""
-        if (match(line, /#[[:space:]][^#]/)) {
-          desc = substr(line, RSTART + 1); sub(/^[[:space:]]*/, "", desc)
-        }
-        if (desc != "") printf "  %-22s %s\n", key, desc
-        else printf "  %-22s\n", key
-        next
-      }
-    ' "$_envf"
-    echo ""
-    echo "Every command-line flag has an environment-variable equivalent of the"
-    echo "same name (--source → SOURCE). Full annotated list with formats:"
-    echo "scripts/demo-preprod.env.example"
+  if [[ ! -f "$_envf" ]]; then
+    echo "error: settings reference not found: ${_envf}" >&2
+    return 1
   fi
+  echo "Settings (environment variables; precedence: real environment >"
+  echo "scripts/demo-preprod.local.env > scripts/demo-preprod.env.example):"
+  awk '
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      key = $0; sub(/=.*/, "", key)
+      val = $0; sub(/^[^=]*=/, "", val)
+      sub(/[[:space:]]#.*$/, "", val)
+      printf "  %-22s default: %s\n", key, val
+      next
+    }
+    /^#[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/ {
+      line = $0; sub(/^#[[:space:]]*/, "", line)
+      key = line; sub(/=.*/, "", key)
+      desc = ""
+      if (match(line, /#[[:space:]][^#]/)) {
+        desc = substr(line, RSTART + 1); sub(/^[[:space:]]*/, "", desc)
+      }
+      if (desc != "") printf "  %-22s %s\n", key, desc
+      else printf "  %-22s\n", key
+      next
+    }
+  ' "$_envf"
+  echo ""
+  echo "Every command-line flag has an environment-variable equivalent of the"
+  echo "same name (--source → SOURCE). Full annotated list with formats:"
+  echo "scripts/demo-preprod.env.example"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -146,6 +155,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help) usage; exit 0 ;;
+    --help-env) usage_env; exit 0 ;;
     *)
       echo "error: unknown flag $1" >&2
       usage >&2

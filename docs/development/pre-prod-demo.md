@@ -133,7 +133,9 @@ in `openshift-marketplace` with the resolved catalog image (grpc), install
 
 ## Configuration
 
-All flags have environment-variable equivalents; the precedence is real
+`./scripts/demo-preprod.sh --help-env` prints every settings variable with
+its default or description (generated from the env example, so it cannot
+drift). All flags have environment-variable equivalents; the precedence is real
 environment > `scripts/demo-preprod.local.env` >
 `scripts/demo-preprod.env.example` (first file wins per variable). See the
 comments in `scripts/demo-preprod.env.example` for the full list (namespaces,
