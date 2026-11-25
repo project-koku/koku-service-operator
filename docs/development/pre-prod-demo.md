@@ -120,6 +120,10 @@ never loads image overrides. CRC walkthrough: [crc-testing.md](crc-testing.md).
 - `--reset` teardown: the CMSC first (so the operator clears its finalizer),
   then the OLM objects (Subscription, CSV, OperatorGroup, CatalogSource), then
   the namespaces — with finalizer-stripping rescue for stuck deletions.
+  `--reset` assumes a **single-tenant demo cluster**: the CatalogSource is
+  removed from `openshift-marketplace` and labelled cluster-scoped RBAC is
+  deleted regardless of which source installed the operator (a warning is
+  printed when the source was not `registry`).
 
 ## Manual source: console install instructions
 

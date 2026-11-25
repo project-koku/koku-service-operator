@@ -12,7 +12,7 @@
 # Usage (from repo root or scripts/):
 #   ./scripts/demo-preprod.sh
 #   ./scripts/demo-preprod.sh --dry-run
-#   ./scripts/demo-preprod.sh --reset          # delete app/infra/kafka/keycloak NS first
+#   ./scripts/demo-preprod.sh --reset          # delete NS + OLM objects; single-tenant cluster
 #   ./scripts/demo-preprod.sh --no-tmux
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
@@ -852,6 +852,12 @@ if [[ "$DEMO_RESET" == "1" ]]; then
   # OLM objects go after the CMSC deletion (the operator cleared its finalizer
   # above) and before the namespaces: Subscription, CSV, OperatorGroup in the
   # app namespace, plus our CatalogSource in openshift-marketplace.
+  if [[ "$SOURCE" != "registry" ]] \
+     && "$KUBECTL" -n openshift-marketplace get catalogsource "$CATALOG_NAME" >/dev/null 2>&1; then
+    echo "  warning: deleting CatalogSource ${CATALOG_NAME} from openshift-marketplace although" >&2
+    echo "  SOURCE=${SOURCE} did not install from it — --reset assumes a single-tenant" >&2
+    echo "  demo cluster (the CatalogSource and labelled cluster RBAC are shared-scope)." >&2
+  fi
   reset_olm_objects "$KUBECTL" "$NAMESPACE" "$CATALOG_NAME"
 
   delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloakrealmimport
