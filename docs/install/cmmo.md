@@ -102,17 +102,12 @@ CMMO must be able to **create an OpenShift source** (`create_source: true`) and
 Beta installs that assigned `org-admin` to the CMMO SA should remove that
 realm role and switch to Sources administrator only.
 
-**Lab / Mini (`spec.rbac.backend: go`):** after a Mini build that includes
-Sources-only bootstrap, you can materialize the principal with:
-
-```bash
-# Inside the rbac-api container (rbac-mini). Bind the gateway username.
-rbac-mini bootstrap --org <org_id> --account <account_number> \
-  --users cost-mgmt-operator
-```
-
-That binds **Sources administrator** only (not Cost Administrator). Customer
-GA path remains User Access UI / API as an org-admin human — not this CLI.
+This RBAC bind is the same whether the stack runs insights-rbac or
+rbac-mini (`spec.rbac.backend`). The operator does not create or bind the
+CMMO principal for you — a human org-admin does that in User Access (or the
+RBAC API). Lab IQE/pytest may still over-grant Cost Administrator to a
+service-account principal for unrelated smoke; that is not the supported
+CMMO path ([COST-8648](https://redhat.atlassian.net/browse/COST-8648)).
 
 ## CostManagementMetricsConfig
 

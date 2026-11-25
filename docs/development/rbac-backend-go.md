@@ -98,23 +98,6 @@ previous operator image if you need the prior Mini. Freezing the resolved
 embedded image inside application revisions is a follow-up to the upgrade
 lifecycle work; it is intentionally out of scope for this beta embed.
 
-## CMMO service-account bootstrap (lab)
-
-For Metrics Operator source create without Keycloak `org-admin`, bind the
-**gateway** username (often `cost-mgmt-operator`) to **Sources administrator**
-only — see [cmmo.md](../install/cmmo.md#rbac-for-the-cmmo-service-account).
-With a Mini image that includes Sources-only `bootstrap`, lab shortcut:
-
-```bash
-oc -n "$NAMESPACE" exec deploy/"$CR"-rbac-api -c rbac-api -- \
-  rbac-mini bootstrap --org <org_id> --account <account_number> \
-  --users cost-mgmt-operator
-```
-
-Human first-admin remains Keycloak `org-admin` ([keycloak.md](../install/keycloak.md)).
-Operator IQE / pytest may still over-grant Cost Administrator for unrelated
-smoke — that is not the CMMO least-privilege path.
-
 ## CI coverage
 
 Unit tests cover image selection and command wiring. Pytest / CI e2e do not
