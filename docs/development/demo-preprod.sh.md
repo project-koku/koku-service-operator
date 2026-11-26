@@ -9,7 +9,8 @@ The prerequisites are "BYOI" (bring your own infrastructure) in the operator's
 design: the operator never provisions them — it validates and connects to
 whatever the CR points at. For evaluation this demo deploys its own minimal
 instances of the five services — real, working deployments, but single
-replicas, no TLS, and removed wholesale by `--reset`. For production you
+replicas, no TLS (`--uninstall` removes them wholesale; `--reset` keeps them
+and wipes only the Cost Management instance and data). For production you
 point the CR at your own managed services instead; see
 [docs/install/production.md](../install/production.md).
 
@@ -37,7 +38,7 @@ built locally.
 | `--source=` | What happens | Use when |
 |---|---|---|
 | `registry` (default) | The published operator from `quay.io/project-koku` via OLM; version discovered or pinned | You want the product as a customer gets it |
-| `local` | Build the operator from this checkout (docker/podman or in-cluster OpenShift build) and deploy with raw manifests | You are developing operator code |
+| `local` | Build the operator from this checkout (docker/podman or in-cluster OpenShift build) and deploy with raw manifests; the CMSC CRD and operator RBAC are bootstrapped by `scripts/deploy-dev.sh` first | You are developing operator code |
 | `manual` | Prerequisites and the rendered CR are prepared; **you** install the operator through the OpenShift console (instructions printed) | Console-guided demos, or no cluster-admin for automation |
 
 ### Version selection (registry / manual)
@@ -170,7 +171,8 @@ later reports `Unauthorized`.
     the infra operators and CRDs — including the AMQ Streams subscription in
     `openshift-operators` — leaving no Cost Management on-prem trace. The
     built-in CatalogSources (`redhat-operators`, …) are never touched. Use
-    this when returning a cluster to its owner.
+    this when returning a cluster to its owner. **Terminal:** unlike
+    `--reset`, the run ends after the teardown — nothing is reinstalled.
   Both assume a **single-tenant demo cluster** and only clean demo-owned
   infrastructure; anything else is reported as skipped. The CatalogSource is
   removed from `openshift-marketplace` and labelled cluster-scoped RBAC is
@@ -215,6 +217,17 @@ overrides).
   cluster's router CA does not match the served certificate (replaced ingress
   certificate, or a TLS-inspecting proxy in front of the `*.apps` domain).
   Set `RHBK_INSECURE_TLS=1` for such labs.
+- **`--reset` fails with "demo postgres is running … but byoi-db-credentials
+  is absent"** — the app namespace was deleted before `--reset` ran, so the
+  database credentials (which live there) are gone while the databases still
+  exist. Recovery: re-run the installer (its App Secrets step recreates the
+  secret), then `--reset` again — or `--uninstall`, where the databases die
+  with the infra namespace.
+- **`--reset`/`--uninstall` fails with "CMSC … still present after 8m"** — the
+  operator's finalizer cleanup did not complete (it tears down ~25
+  deployments; slow or wedged clusters can exceed the wait). Inspect
+  `oc -n <ns> get cmsc <name> -o yaml`; once the operator pod is gone a re-run
+  strips the finalizer and completes.
 - **Build failures with podman** — `BUILD_MODE=docker` auto-detects docker
   (with buildx) or podman; the podman-docker shim is detected and avoided.
   Note that `BUILD_MODE=auto` prefers the in-cluster OpenShift build whenever

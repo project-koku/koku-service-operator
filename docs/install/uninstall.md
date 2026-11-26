@@ -3,6 +3,11 @@
 Remove the `CostManagementServiceConfig` **before** the operator or the
 namespace.
 
+> **Demo installs:** `./scripts/demo-preprod.sh --uninstall` automates this
+> entire procedure (CR-first ordering, finalizer handling, infrastructure,
+> operators and CRDs) and is the recommended path for clusters where the demo
+> script installed everything.
+
 The CR carries a finalizer
 (`costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`)
 that deletes cluster-scoped objects the operator created: the ConsoleLink, and
@@ -93,8 +98,13 @@ Then retry the `oc patch` above, then ConsoleLink / Kruize RBAC.
 ## Lab reset
 
 `scripts/demo-preprod.sh --reset` deletes the CR first while the operator is
-Available, and strips the finalizer (plus ConsoleLink / Kruize RBAC) if the
-operator is already gone.
+Available, waits (up to 8 minutes) for the operator's finalizer cleanup, and
+strips the finalizer (plus ConsoleLink / Kruize RBAC) only once the operator
+is gone. It removes the Cost Management instance and data but **keeps the
+infrastructure instances** (PostgreSQL, Keycloak, Kafka, …) for a fast
+re-install. `scripts/demo-preprod.sh --uninstall` additionally removes the
+infrastructure, its operators and CRDs — for a demo install it automates this
+whole guide, terminal after the teardown.
 
 `scripts/install-cmsc.sh` cleanup also deletes the CR first, but it does **not**
 strip a stuck finalizer — if the operator is down, that path can still leave

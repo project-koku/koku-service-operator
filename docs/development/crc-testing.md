@@ -94,7 +94,8 @@ later reports `Unauthorized`.
 # uses this repo's scripts/deploy-rhbk.sh for Keycloak
 ./scripts/demo-preprod.sh --context crc --crc --dry-run     # show the plan
 ./scripts/demo-preprod.sh --context crc --crc               # tmux: steps + two klock panes
-./scripts/demo-preprod.sh --context crc --crc --reset       # tear the four namespaces down first
+./scripts/demo-preprod.sh --context crc --crc --reset       # wipe instance + data first (infra kept Ready: fast re-install)
+./scripts/demo-preprod.sh --context crc --crc --uninstall   # remove everything, then stop
 ```
 
 (`KUBE_CONTEXT=crc` pins the context — without it the demo uses whatever
