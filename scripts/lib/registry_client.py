@@ -54,15 +54,26 @@ def split_image_ref(ref):
         registry = "registry-1.docker.io"
     if "@" in rest:
         repo, _, reference = rest.rpartition("@")
-        base_repo, _, maybe_tag = repo.rpartition(":")
-        if "/" not in maybe_tag:
-            repo = base_repo
+        # Strip a tag before the digest (repo:tag@sha256:...) — but only when
+        # a tag separator actually exists: rpartition returns the WHOLE string
+        # as the last element when there is no colon, which used to turn a
+        # single-component repo (registry.example:5000/operator@sha256:...)
+        # into an empty repository.
+        if ":" in repo:
+            base_repo, _, maybe_tag = repo.rpartition(":")
+            if "/" not in maybe_tag:
+                repo = base_repo
     else:
-        repo, _, tag = rest.rpartition(":")
-        if "/" in tag or not tag:
-            repo, reference = rest, "latest"
+        # Same care for untagged refs: without the colon check, a
+        # single-component repo was misread as the tag of an empty repo.
+        if ":" in rest:
+            repo, _, tag = rest.rpartition(":")
+            if "/" in tag or not tag:
+                repo, reference = rest, "latest"
+            else:
+                reference = tag
         else:
-            reference = tag
+            repo, reference = rest, "latest"
     return registry, repo, reference
 
 

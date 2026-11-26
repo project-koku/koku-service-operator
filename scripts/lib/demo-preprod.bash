@@ -1208,6 +1208,10 @@ pin_tag_digest() {
   if [[ -n "$d" ]]; then
     printf '%s@%s\n' "$tag" "$d"
   else
+    # Every other fallback in resolve_catalog_version warns loudly; a silent
+    # bare tag here would quietly undo the digest pinning the PR promises
+    # (review: empty digest lookup silently installs an unpinned catalog tag).
+    echo "warning: could not resolve the manifest digest for '${tag}' — installing the moving tag; pin --version ${tag}@sha256:<digest> for absolute reproducibility" >&2
     printf '%s\n' "$tag"
   fi
 }

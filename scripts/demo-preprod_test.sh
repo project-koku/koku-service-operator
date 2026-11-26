@@ -235,10 +235,11 @@ grep -Fq "crc console --credentials" "${ROOT}/scripts/demo-preprod.sh" || {
 
 # --- Task 3 (#2): version discovery and selection ---
 fx="$(mktemp)"
-printf 'main\nlatest\n474d937\nv0.0.1\nv0.0.3\nv0.0.2\n' >"$fx"
+printf 'main\nlatest\n474d937\nv0.0.1 sha256:%s\nv0.0.3 sha256:%s\nv0.0.2 sha256:%s\n' \
+  "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})" "$(printf 'c%.0s' {1..64})" >"$fx"
 
 out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 2>&1 >/dev/null)"
-assert_eq "$out" "" "no warning when a semver tag exists"
+assert_eq "$out" "" "no warning when a semver tag exists (and its digest resolves)"
 
 printf 'main\nlatest\n474d937\n' >"$fx"
 out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog "")"
@@ -1083,6 +1084,26 @@ rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architecture_from_config(open('${RC_TD
 assert_eq "$rc_out" "amd64" "config blob yields the architecture"
 unset RC_TD
 
+# --- CodeRabbit round (fork #42): registry client and digest pinning ---
+# split_image_ref must preserve single-component repositories on custom
+# registries (rpartition returns the whole string as the tail when no
+# separator exists — these used to yield an EMPTY repository).
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('registry.example:5000/operator@sha256:abc')")"
+assert_contains "$rc_out" "'registry.example:5000', 'operator', 'sha256:abc'" "single-component repo with digest preserved"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('registry.example:5000/operator')")"
+assert_contains "$rc_out" "'registry.example:5000', 'operator', 'latest'" "untagged single-component repo preserved"
+
+# A digest lookup that comes back empty must warn about the moving tag, not
+# silently install unpinned (every other fallback warns; the PR promises pins).
+fx42="$(mktemp)"
+printf 'main\nv0.0.1\n' >"$fx42"
+out42="$(REGISTRY_TAG_FIXTURE="$fx42" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1)"
+assert_eq "$out42" "v0.0.1" "digest-less fixture still resolves the bare tag"
+warn42="$(REGISTRY_TAG_FIXTURE="$fx42" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>&1 >/dev/null)"
+assert_contains "$warn42" "could not resolve the manifest digest" "missing digest warns about the moving tag"
+assert_contains "$warn42" "moving tag" "warning names the consequence"
+rm -f "$fx42"
+
 # --- --context flag: sets KUBE_CONTEXT, wins over env files ---
 ctx_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --context my-cluster 2>&1)"
 assert_contains "$ctx_plan" "context:     my-cluster" "--context selects the kube context"
@@ -1189,6 +1210,11 @@ demo_src="$(cat "${ROOT}/scripts/demo-preprod.sh")"
 assert_contains "$demo_src" 'bootstrap_tenant "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls bootstrap_tenant"
 assert_contains "$demo_src" 'smoke_tenant_api "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls smoke_tenant_api"
 assert_contains "$demo_src" 'Bootstrap demo tenant' "step header present"
+# --watch (the manual-source completion path) must bootstrap too — otherwise
+# --source=manual reproduces the broken-Settings state (#223; CodeRabbit).
+watch_block="$(sed -n '/DEMO_WATCH" == "1"/,/start_watch_tmux/p' "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$watch_block" 'bootstrap_tenant "$KUBECTL"' "--watch bootstraps the tenant (manual source path)"
+assert_contains "$watch_block" 'smoke_tenant_api "$KUBECTL"' "--watch smoke-checks the tenant endpoints"
 plan_out="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
 assert_contains "$plan_out" "Bootstrap demo tenant" "dry-run plan lists the tenant step"
 local_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local 2>&1)"
@@ -1196,6 +1222,18 @@ assert_contains "$local_plan" "[9/9] open the UI Route" "local plan renumbers to
 env_help="$(./scripts/demo-preprod.sh --help-env 2>&1)"
 assert_contains "$env_help" "DEMO_ORG_ID" "--help-env documents DEMO_ORG_ID"
 assert_contains "$env_help" "DEMO_ACCOUNT_NUMBER" "--help-env documents DEMO_ACCOUNT_NUMBER"
+
+# --- CodeRabbit round (fork #42): truthful plans and env-mapping exceptions ---
+plan_po2="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only 2>&1)"
+assert_contains "$plan_po2" "stopping after the prerequisites" "prereqs-only plan states it stops"
+assert_not_contains "$plan_po2" "Operator install (registry via OLM" "prereqs-only plan omits the operator steps it never runs"
+plan_sp2="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --skip-prereqs 2>&1)"
+assert_contains "$plan_sp2" "BYOI is skipped (--skip-prereqs)" "skip-prereqs marks the BYOI step as skipped"
+env_help42="$(./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help42" "--no-tmux → DEMO_NO_TMUX" "--help-env names the no-tmux exception"
+assert_contains "$env_help42" "--cr-file → USER_CR_FILE" "--help-env names the cr-file exception"
+arm64_42="$(cat "${ROOT}/scripts/demo-preprod.arm64.env")"
+assert_not_contains "$arm64_42" "--profile=single-node" "arm64 template documents the current flag name"
 
 # --- --reset / --uninstall teardown helpers (fork #37/#38) ---
 td="$(mktemp -d)"

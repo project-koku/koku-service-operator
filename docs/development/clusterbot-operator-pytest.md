@@ -481,7 +481,8 @@ images and reconciliation — out of G0 beta scope.
 
 ## Optional — UI login (`Phase=Ready`)
 
-See [demo-preprod.sh.md](demo-preprod.sh.md) and `mirror-ui-oauth-secret.sh`.
+See [demo-preprod.sh.md](demo-preprod.sh.md); `mirror-ui-oauth-secret.sh` steps:
+[config/samples/byoi/README.md](../../config/samples/byoi/README.md).
 
 ## Problems we hit (and fixes)
 

@@ -95,7 +95,8 @@ intermediate signal only: `Available` stays `False`
 
 **Success:** `Available=True` (`AllComponentsReady`) and `Phase=Ready`.
 Keycloak is required: deploy it and run `mirror-ui-oauth-secret.sh`
-([demo-preprod.sh.md](demo-preprod.sh.md)).
+(steps: [config/samples/byoi/README.md](../../config/samples/byoi/README.md);
+full BYOI→UI flow: [demo-preprod.sh.md](demo-preprod.sh.md)).
 
 | Stage | How to verify | OK if still False? |
 |-------|---------------|--------------------|

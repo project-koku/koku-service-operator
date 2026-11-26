@@ -137,9 +137,10 @@ usage_env() {
   ' "$_envf"
   echo ""
   echo "Most command-line flags have an environment-variable equivalent of the"
-  echo "same name (--source → SOURCE); --context and --single-node map to"
-  echo "KUBE_CONTEXT and SINGLE_NODE. Full annotated list with formats:"
-  echo "scripts/demo-preprod.env.example"
+  echo "same name (--source → SOURCE). Exceptions: --no-tmux → DEMO_NO_TMUX,"
+  echo "--cr-file → USER_CR_FILE (CR_FILE is the manual mode's output path),"
+  echo "--context → KUBE_CONTEXT, --single-node → SINGLE_NODE. Full annotated"
+  echo "list with formats: scripts/demo-preprod.env.example"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -457,9 +458,17 @@ EOF
 EOF
     exit 0
   fi
-  cat <<EOF
-  [3/${STEP_TOTAL}] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
-EOF
+  if [[ "$SKIP_PREREQS" == "1" ]]; then
+    echo "  [3/${STEP_TOTAL}] BYOI is skipped (--skip-prereqs): the operator installs on existing infrastructure"
+  else
+    echo "  [3/${STEP_TOTAL}] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready"
+  fi
+  # Truthful plan (CodeRabbit): --prereqs-only never runs the operator steps,
+  # so the plan stops here instead of listing steps that will not execute.
+  if [[ "$PREREQS_ONLY" == "1" ]]; then
+    echo "  Prereqs only: stopping after the prerequisites — the operator is not installed in this mode."
+    return 0
+  fi
   case "$SOURCE" in
     registry)
       cat <<EOF
@@ -487,12 +496,6 @@ EOF
       ;;
   esac
 
-  if [[ "$PREREQS_ONLY" == "1" ]]; then
-    echo "  Prereqs only: stopping after the prerequisites."
-  fi
-  if [[ "$SKIP_PREREQS" == "1" ]]; then
-    echo "  Skip prereqs: BYOI is skipped; the operator installs on existing infrastructure."
-  fi
   if [[ -n "$USER_CR_FILE" ]]; then
     echo "  CR:          ${USER_CR_FILE} (user-provided; rendering skipped)"
   fi
@@ -740,6 +743,18 @@ if [[ "$DEMO_WATCH" == "1" ]]; then
     echo "Retrieve later: ${KUBECTL} -n ${NAMESPACE} extract secret/${CR_NAME}-realm-admin --to=-"
     verify_conditions "$KUBECTL" "$NAMESPACE" "$CR_NAME" || {
       echo "error: CMSC verification failed — see the table above" >&2
+      exit 1
+    }
+    # --watch finishes what a --source=manual install started (CodeRabbit:
+    # the manual path never set up the demo tenant): the operator install
+    # flows bootstrap the tenant after verification, and --watch must too —
+    # otherwise a manual install reproduces the broken-Settings state (#223).
+    bootstrap_tenant "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER" || {
+      echo "error: tenant bootstrap failed — see the log above" >&2
+      exit 1
+    }
+    smoke_tenant_api "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER" || {
+      echo "error: API smoke check failed — see the table above" >&2
       exit 1
     }
   else
