@@ -71,6 +71,46 @@ Token URL (replace host and realm):
 Use the same issuer host that matches `spec.auth.keycloak.issuerURL` (or `url`
 when issuer is derived from it).
 
+## RBAC for the CMMO service account
+
+| Capability | What is required |
+|------------|------------------|
+| Ingress upload (`202 Accepted`) | Valid JWT + identity (`org_id`, `account_number`, matching `aud`). No RBAC role. |
+| Source create (`create_source: true`) | RBAC **Sources administrator** (`sources:*:*`) on the principal the gateway sees |
+
+These steps apply to the default RBAC backend (insights-rbac / omit
+`spec.rbac.backend`, or `django`). There is no User Access “create principal”
+action: `/api/rbac/v1/principals/` is list-only, and adding an unknown
+username to a group returns 400 until the principal row exists.
+
+1. Create the Keycloak CMMO client and claim mappers as in
+   [keycloak.md](keycloak.md#cmmo-client_credentials).
+2. Decode a client-credentials access token and note the username Envoy uses
+   (`preferred_username`, else `sub`). Labs often map this to
+   `cost-mgmt-operator`. Keycloak’s internal user is typically
+   `service-account-<client-id>` — bind the JWT username, not that internal
+   name, unless they match.
+3. Materialize the principal by making one authenticated call as the CMMO
+   service account through the gateway (for example
+   `GET /api/rbac/v1/access/` or a source create that may return 403). On
+   insights-rbac, that call creates the principal for the caller’s username.
+   Then, as a human org-admin, open User Access (or the RBAC API) and bind
+   that principal to a group with **Sources administrator** only.
+4. If `spec.rbac.keycloakSync` is enabled and the gateway username is not a
+   Keycloak user (common with a `preferred_username` mapper), set
+   `spec.rbac.keycloakSync.pruneOrphans: false`. Sync skips
+   `service-account-*` usernames; with prune left at the default `true` (and
+   the usual ~15-minute schedule), each run can delete the gateway principal
+   and its group membership. Turning prune off keeps the bind, but orphaned
+   Keycloak users for that org are no longer cleaned up automatically.
+
+With `spec.rbac.backend: go` (rbac-mini), `/access/` does not create
+principals, group member add rejects unknown usernames, and Keycloak sync
+still skips `service-account-*` / never sees a mapped gateway-only username.
+There is not yet a supported customer path to materialize that principal on
+Mini; track that gap under [COST-8231](https://redhat.atlassian.net/browse/COST-8231)
+/ [COST-8648](https://redhat.atlassian.net/browse/COST-8648).
+
 ## CostManagementMetricsConfig
 
 Install CMMO from OperatorHub on the reporting cluster (OpenShift documentation

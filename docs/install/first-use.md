@@ -12,7 +12,7 @@ beta path.
 
 | Source | How data arrives | What you see first |
 |--------|------------------|-------------------|
-| OpenShift cluster metrics | [CMMO](cmmo.md) upload from a reporting cluster | Usage and inventory after Listener ingest |
+| OpenShift cluster metrics | [CMMO](cmmo.md) (JWT for upload; **Sources administrator** for source create) | Usage and inventory after Listener ingest |
 | Lab / test payloads | Your own upload tooling (not covered here) | Depends on payload type |
 
 Ingest alone can show **usage** (CPU, memory, node counts) before any **cost

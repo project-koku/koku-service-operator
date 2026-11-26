@@ -92,6 +92,15 @@ scope and **same** `org_id` / `account_number` mappers as the UI client.
 Service-account tokens must carry those claims (set them on the
 service-account user, or as hardcoded mapper values).
 
+Optional but recommended: a Hardcoded claim mapper so
+`preferred_username` is a stable gateway identity (labs often use
+`cost-mgmt-operator`). Without it, Envoy falls back to `sub` (see optional
+claims below).
+
+For RBAC (Sources administrator on the gateway principal), see
+[cmmo.md](cmmo.md#rbac-for-the-cmmo-service-account). The `org-admin` realm
+role in this page is for **human** first administrators, not the CMMO client.
+
 On each reporting cluster, store `client_id` / `client_secret` (underscore
 keys) as described in [cmmo.md](cmmo.md).
 
@@ -246,9 +255,8 @@ plus the `org-admin` realm role is the supported first-admin path.
    **Attributes** → **Role mapping** → **Assign role** → `org-admin`.
 3. User logs in through the UI (oauth2-proxy → Keycloak).
 
-Service-account users (CMMO) follow the same steps if they need org-admin
-claims; most reporting clusters only need the attribute mappers, not
-`org-admin`.
+CMMO client credentials use **Sources administrator** in RBAC, not this
+realm role — see [cmmo.md](cmmo.md#rbac-for-the-cmmo-service-account).
 
 ### Not the same as the `org-admin` Keycloak subgroup
 
