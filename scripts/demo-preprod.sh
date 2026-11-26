@@ -30,6 +30,15 @@
 #   ./scripts/demo-preprod.sh --skip-prereqs --cr-file <cmsc.yaml>  # operator on existing infra
 #   ./scripts/demo-preprod.sh --single-node   # small-cluster Kafka sizing (alias: --crc)
 #
+# Common examples:
+#   # Evaluate on a full OpenShift cluster — latest stable operator (registry via OLM)
+#   ./scripts/demo-preprod.sh --context my-context   # kubeconfig context name — oc config get-contexts lists yours
+#
+#   # Develop on CRC — operator built from this checkout, small-cluster sizing
+#   ./scripts/demo-preprod.sh --context crc --single-node --source local
+#   #   after code changes: add --rebuild   |   fast retry: --reset (wipes
+#   #   instance + data, keeps infra)       |   leave clean: --uninstall
+#
 # Operator install source (--source=registry|local|manual; default: registry):
 #   registry  install the published operator (quay.io/project-koku) via OLM
 #   local     build the operator from this checkout, deploy in-cluster

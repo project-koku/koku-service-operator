@@ -1089,6 +1089,10 @@ assert_contains "$ctx_plan" "context:     my-cluster" "--context selects the kub
 help_out2="$(./scripts/demo-preprod.sh --help 2>&1)"
 assert_contains "$help_out2" "--context <name>" "help documents --context"
 assert_contains "$help_out2" "oc config get-contexts lists them" "help says how to discover context names"
+assert_contains "$help_out2" "Common examples:" "help has an examples section"
+assert_contains "$help_out2" "--context my-context   # kubeconfig context name — oc config get-contexts lists yours" "example 1: full-cluster evaluation with an unambiguous context placeholder"
+assert_contains "$help_out2" "./scripts/demo-preprod.sh --context crc --single-node --source local" "example 2: CRC developer command"
+assert_contains "$help_out2" "leave clean: --uninstall" "example 2 mentions the teardown follow-ups"
 
 # --- --flag=value form works for every value-taking flag ---
 eq_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=local --context=ctx9 --channel=stable 2>&1)"
