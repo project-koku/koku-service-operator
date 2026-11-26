@@ -1261,11 +1261,49 @@ assert_contains "$db_stdin" "DROP DATABASE IF EXISTS costonprem_kruize WITH (FOR
 assert_contains "$db_stdin" "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" "pg_stat_statements extension restored (migration needs it)"
 assert_contains "$db_stdin" "pgpass123" "password travels via stdin"
 
-# missing secret → skip, not fail
+# missing secret + no demo-owned postgres → skip, not fail
 rec_oc
 db_skip="$(recreate_demo_databases "${td}/oc" cost-byoi cost-byoi-infra)" && db_skip_rc=0 || db_skip_rc=$?
 assert_eq "$db_skip_rc" "0" "missing db secret skips cleanly"
 assert_contains "$db_skip" "skipping database wipe" "skip message names what was skipped"
+
+# missing secret + demo-owned postgres running → strict failure (fork #40):
+# a claimed-successful reset with stale databases is worse than an error.
+cat >"${td}/oc-strict" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *byoi-db-credentials*) : ;;
+  *get\ deploy\ postgresql*-o\ jsonpath*) printf 'koku-service-operator-byoi' ;;
+  *deploy\ postgresql*) exit 0 ;;
+  *) exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-strict"
+: >"${td}/oc-args.log"
+db_strict="$(recreate_demo_databases "${td}/oc-strict" cost-byoi cost-byoi-infra 2>&1)" && db_strict_rc=0 || db_strict_rc=$?
+assert_eq "$db_strict_rc" "1" "demo-owned postgres without credentials fails the reset"
+assert_contains "$db_strict" "demo postgres is running in cost-byoi-infra but byoi-db-credentials is absent from cost-byoi" "error names both namespaces"
+assert_contains "$db_strict" "Recovery: re-run the installer" "error states the recovery path"
+assert_contains "$db_strict" "--uninstall" "error mentions the uninstall alternative"
+assert_not_contains "$db_strict" "skipping database wipe" "no skip message on the strict path"
+
+# missing secret + FOREIGN postgres (no part-of label) → still skips
+cat >"${td}/oc-foreign" <<EOF
+#!/bin/bash
+case "\$*" in
+  *byoi-db-credentials*) : ;;
+  *get\ deploy\ postgresql*-o\ jsonpath*) printf 'some-other-owner' ;;
+  *deploy\ postgresql*) exit 0 ;;
+  *) exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-foreign"
+db_foreign="$(recreate_demo_databases "${td}/oc-foreign" cost-byoi custom-infra)" && db_foreign_rc=0 || db_foreign_rc=$?
+assert_eq "$db_foreign_rc" "0" "foreign postgres without credentials still skips (scope guard)"
+assert_contains "$db_foreign" "skipping database wipe" "foreign infra gets the skip message"
 
 # delete_demo_kafka_topics: label-scoped delete; missing cluster skips
 rec_oc

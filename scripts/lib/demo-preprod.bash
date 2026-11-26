@@ -801,6 +801,24 @@ recreate_demo_databases() {
   local user koku_role rbac_role ros_role kruize_role
   user="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.postgres-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
   if [[ -z "$user" ]]; then
+    # Strict (fork #40): missing credentials are only a clean skip when there
+    # is nothing demo-owned to wipe. If OUR postgres is still running in the
+    # infra namespace, the costonprem_* databases exist and cannot be wiped
+    # without the secret — fail loudly instead of reporting a successful
+    # reset with stale data left behind. Ownership is the part-of label the
+    # infra kustomize puts on everything it deploys; a foreign postgres
+    # deployment does not match and still skips.
+    if "$kubectl" -n "$db_ns" get deploy postgresql >/dev/null 2>&1 \
+       && [[ "$("$kubectl" -n "$db_ns" get deploy postgresql \
+                -o jsonpath='{.metadata.labels.app\.kubernetes\.io/part-of}' 2>/dev/null)" \
+            == "koku-service-operator-byoi" ]]; then
+      echo "error: demo postgres is running in ${db_ns} but byoi-db-credentials is absent from ${secret_ns}" >&2
+      echo "  — the databases cannot be wiped. The app namespace was likely deleted before" >&2
+      echo "  --reset ran. Recovery: re-run the installer (its App Secrets step recreates" >&2
+      echo "  byoi-db-credentials in ${secret_ns}), then --reset again — or use --uninstall" >&2
+      echo "  (the databases die with the infra namespace)." >&2
+      return 1
+    fi
     echo "  skipping database wipe: byoi-db-credentials not found in ${secret_ns} (infra not demo-owned or already gone)"
     return 0
   fi
