@@ -13,6 +13,10 @@ paths = [
   '''(^|/)config/samples/byoi/''',
   '''(^|/)docs/jira/''',
   '''(^|/)releases/''',
+  # Recorded registry API responses for the offline registry-client tests.
+  # The docker.io token fixture is an ANONYMOUS, EXPIRED pull token (5-minute
+  # validity at capture time, exp long past) — public API data, not a secret.
+  '''(^|/)scripts/testdata/registry/''',
 ]
 
 # Explicit fixture credential strings (also referenced outside byoi YAML).
@@ -25,4 +29,11 @@ regexes = [
   '''byoi-valkey-password''',
   '''byoi-minio-access''',
   '''byoi-minio-secret-key''',
+  # deploy-rhbk_test.sh fixture stub: obviously-fake token string exercising
+  # the credential-hygiene assertions (safe_curl moves real credentials out
+  # of argv); the curl-auth-header rule matches the literal test header.
+  '''super-secret-token''',
 ]
+
+# Recorded registry API responses live in scripts/testdata/registry/ (see the
+# paths allowlist above): expired anonymous pull tokens, public API data.

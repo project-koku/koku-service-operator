@@ -237,7 +237,7 @@ overrides).
 ## Related docs
 
 - [docs/install/production.md](../install/production.md) — production installs
-- [keycloak.md](keycloak.md) — Keycloak/RHBK details
+- [keycloak.md](../install/keycloak.md) — Keycloak/RHBK details
 - [crc-testing.md](crc-testing.md) — everything CRC: host setup, the demo
   flow, the minimal koku-only developer loop, arm64 rebuilds, troubleshooting
 - `./scripts/demo-preprod.sh --help` — the full flag reference
