@@ -12,7 +12,8 @@
 # Usage (from repo root or scripts/):
 #   ./scripts/demo-preprod.sh
 #   ./scripts/demo-preprod.sh --dry-run
-#   ./scripts/demo-preprod.sh --reset          # delete NS + OLM objects; single-tenant cluster
+#   ./scripts/demo-preprod.sh --reset          # remove instance + operator + data; KEEP infra (fast re-install)
+#   ./scripts/demo-preprod.sh --uninstall      # remove EVERYTHING incl. infra instances, operators and CRDs
 #   ./scripts/demo-preprod.sh --no-tmux
 #   ./scripts/demo-preprod.sh --rebuild        # force operator image rebuild
 #   ./scripts/demo-preprod.sh --no-open        # never open the UI in a browser
@@ -70,12 +71,14 @@ unset NORMALIZED_ARGS _arg
 ORIGINAL_ARGS=("$@")
 
 DEMO_RESET="${DEMO_RESET:-0}"
+DEMO_UNINSTALL="${DEMO_UNINSTALL:-0}"
 DEMO_DRY_RUN="${DEMO_DRY_RUN:-0}"
 DEMO_NO_TMUX="${DEMO_NO_TMUX:-0}"
 DEMO_REBUILD="${DEMO_REBUILD:-0}"
 DEMO_NO_OPEN="${DEMO_NO_OPEN:-0}"
 DEMO_ORG_ID="${DEMO_ORG_ID:-1234567}"
 DEMO_ACCOUNT_NUMBER="${DEMO_ACCOUNT_NUMBER:-7890123}"
+REALM_NAME="${REALM_NAME:-kubernetes}"
 SINGLE_NODE="${SINGLE_NODE:-0}"
 DEMO_WATCH="${DEMO_WATCH:-0}"
 DEMO_CONSOLE="${DEMO_CONSOLE:-0}"
@@ -132,6 +135,7 @@ usage_env() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reset) DEMO_RESET=1 ;;
+    --uninstall) DEMO_UNINSTALL=1 ;;
     --dry-run) DEMO_DRY_RUN=1 ;;
     --no-tmux) DEMO_NO_TMUX=1 ;;
     --rebuild) DEMO_REBUILD=1 ;;
@@ -218,6 +222,12 @@ load_env_file "${ROOT}/scripts/demo-preprod.env.example"
 # juggling several clusters.
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 SOURCE="${SOURCE:-registry}"
+if [[ "$DEMO_RESET" == "1" && "$DEMO_UNINSTALL" == "1" ]]; then
+  echo "error: --reset and --uninstall are mutually exclusive" >&2
+  echo "  --reset     removes the Cost Management instance, operator and data; keeps infra" >&2
+  echo "  --uninstall removes everything, including infra instances, operators and CRDs" >&2
+  exit 2
+fi
 case "$SOURCE" in
   registry|local|manual) ;;
   *)
@@ -349,11 +359,11 @@ STEP_N=0
 # Flag-parsed values must be exported: the tmux wrapper serializes the
 # exported environment into the inner run (a pane inherits the tmux SERVER's
 # environment, not the caller's, so shell variables would be lost).
-export DEMO_RESET DEMO_REBUILD DEMO_NO_OPEN SINGLE_NODE PREREQS_ONLY SKIP_PREREQS \
+export DEMO_RESET DEMO_UNINSTALL DEMO_REBUILD DEMO_NO_OPEN SINGLE_NODE PREREQS_ONLY SKIP_PREREQS \
        USER_CR_FILE VERSION CHANNEL CATALOG_REPO ARCH_CHECK CONTAINER_TOOL \
        KUBE_CONTEXT OPEN_BROWSER CONSOLE_USERNAME CONSOLE_PASSWORD CR_FILE \
        BUILD_MODE IMAGE_TAG IMG WATCHER STORAGE_CLASS DEMO_SMOKE DEMO_RHBK_CHANNEL \
-       SINGLE_NODE DEMO_ORG_ID DEMO_ACCOUNT_NUMBER
+       SINGLE_NODE DEMO_ORG_ID DEMO_ACCOUNT_NUMBER REALM_NAME
 case "$SOURCE" in
   registry) STEP_TOTAL=8 ;;
   local) STEP_TOTAL=9 ;;
@@ -423,12 +433,21 @@ Pre-prod demo plan
   watcher:     ${WATCHER}
   tmux:        ${TMUX_SESSION}  (NO_TMUX=${DEMO_NO_TMUX})
   reset:       ${DEMO_RESET}
+  uninstall:   ${DEMO_UNINSTALL}
   rebuild:     ${DEMO_REBUILD}
   profile:     $([[ "$SINGLE_NODE" == "1" ]] && echo "single-node (Kafka 1 broker + 1 controller, 10Gi/5Gi)" || echo default)
   open UI:     ${OPEN_BROWSER} (NO_OPEN=${DEMO_NO_OPEN})
 
   [1/${STEP_TOTAL}] Preflight (context, oc, RHBK script, StorageClass)
-  [2/${STEP_TOTAL}] --reset: delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}
+  [2/${STEP_TOTAL}] teardown: $([[ "$DEMO_UNINSTALL" == "1" ]] && echo "--uninstall: CM + infra instances + operators + CRDs (${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}) — then exit" || echo "--reset: CM instance + operator + data (keep infra: ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE})")
+EOF
+  if [[ "$DEMO_UNINSTALL" == "1" ]]; then
+    cat <<EOF
+  --uninstall is terminal: the run ends after the teardown.
+EOF
+    exit 0
+  fi
+  cat <<EOF
   [3/${STEP_TOTAL}] BYOI (./scripts/deploy-byoi.sh) — skip inner stages that are already Ready
 EOF
   case "$SOURCE" in
@@ -846,20 +865,40 @@ delete_ns() {
   return 1
 }
 
-step "Reset namespaces (optional)"
-if [[ "$DEMO_RESET" == "1" ]]; then
-  # CMSC finalizer requires the operator pod. Deleting the namespace first
-  # kills the operator and leaves the CR (and NS) stuck in Terminating.
-  if "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
-    if operator_ready; then
-      echo "  deleting CMSC ${NAMESPACE}/${CR_NAME} so the operator can clear its finalizer…"
-      "$KUBECTL" -n "$NAMESPACE" delete cmsc "$CR_NAME" --timeout=180s || true
-    fi
-    if "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
-      echo "  operator not running or CMSC still present — stripping finalizer"
-      "$KUBECTL" -n "$NAMESPACE" patch cmsc "$CR_NAME" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null || true
-    fi
+step "$([[ "$DEMO_UNINSTALL" == "1" ]] && echo "Full uninstall (everything)" || echo "Instance reset (keep infra)")"
+# CMSC deletion with a real wait. The operator's finalizer cleanup removes
+# ~25 deployments and can exceed a short timeout on slow clusters (CRC); the
+# old code fired one 180s delete plus a single finalizer-strip patch and
+# marched on — leaving the CR alive, which then hung the CRD delete for good
+# (observed live: a 9h-stuck reset). Finalizers are stripped only while the
+# operator is gone; stripping mid-cleanup orphans its teardown.
+delete_cmsc_robustly() {
+  local deadline=$((SECONDS + 480))
+  if ! "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+    return 0
   fi
+  echo "  deleting CMSC ${NAMESPACE}/${CR_NAME} so the operator can clear its finalizer…"
+  "$KUBECTL" -n "$NAMESPACE" delete cmsc "$CR_NAME" --wait=false >/dev/null 2>&1 || true
+  while (( SECONDS < deadline )); do
+    if ! "$KUBECTL" -n "$NAMESPACE" get cmsc "$CR_NAME" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! operator_ready; then
+      # Operator gone: its finalizer will never clear by itself — strip it.
+      "$KUBECTL" -n "$NAMESPACE" patch cmsc "$CR_NAME" --type=merge \
+        -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    fi
+    sleep 10
+  done
+  echo "error: CMSC ${NAMESPACE}/${CR_NAME} still present after 8m — refusing to continue" >&2
+  echo "  (the operator's finalizer cleanup did not complete; inspect with:" >&2
+  echo "   ${KUBECTL} -n ${NAMESPACE} get cmsc ${CR_NAME} -o yaml)" >&2
+  return 1
+}
+
+if [[ "$DEMO_RESET" == "1" || "$DEMO_UNINSTALL" == "1" ]]; then
+  # CMSC first: the operator must survive long enough to clear its finalizer.
+  delete_cmsc_robustly || exit 1
   "$KUBECTL" delete consolelink "${CR_NAME}-cost-management" --ignore-not-found=true >/dev/null || true
   "$KUBECTL" delete clusterrole,clusterrolebinding -l "app.kubernetes.io/instance=${CR_NAME}" --ignore-not-found=true >/dev/null || true
   # OLM objects go after the CMSC deletion (the operator cleared its finalizer
@@ -868,24 +907,58 @@ if [[ "$DEMO_RESET" == "1" ]]; then
   if [[ "$SOURCE" != "registry" ]] \
      && "$KUBECTL" -n openshift-marketplace get catalogsource "$CATALOG_NAME" >/dev/null 2>&1; then
     echo "  warning: deleting CatalogSource ${CATALOG_NAME} from openshift-marketplace although" >&2
-    echo "  SOURCE=${SOURCE} did not install from it — --reset assumes a single-tenant" >&2
+    echo "  SOURCE=${SOURCE} did not install from it — teardown assumes a single-tenant" >&2
     echo "  demo cluster (the CatalogSource and labelled cluster RBAC are shared-scope)." >&2
   fi
   reset_olm_objects "$KUBECTL" "$NAMESPACE" "$CATALOG_NAME"
+  # CRD + webhooks (both modes): the instance reset removes the operator, so
+  # its CRD must go too — otherwise the next install adopts a stale schema.
+  # Runs only after delete_cmsc_robustly verified the CR is gone: a CRD
+  # delete blocks on CR garbage collection.
+  delete_koku_crd "$KUBECTL" || exit 1
+  delete_operator_rbac "$KUBECTL" "$NAMESPACE"
 
-  delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloakrealmimport
-  delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloak keycloak
-  delete_cr_or_strip "$KAFKA_NAMESPACE" kafkatopic
-  delete_cr_or_strip "$KAFKA_NAMESPACE" kafka "$KAFKA_CLUSTER_NAME"
-  delete_cr_or_strip "$KAFKA_NAMESPACE" kafkanodepool
-
-  delete_ns "$NAMESPACE"
-  delete_ns "$INFRA_NAMESPACE"
-  delete_ns "$KEYCLOAK_NAMESPACE"
-  delete_ns "$KAFKA_NAMESPACE"
-  ok "namespaces removed"
+  if [[ "$DEMO_UNINSTALL" == "1" ]]; then
+    # Full teardown (--uninstall, fork #38): infra instances, operators and
+    # CRDs go too. Order: CRs → namespaces → operators → CRDs (a CRD delete
+    # hangs on CR finalizers). Never touch the built-in CatalogSources.
+    delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloakrealmimport
+    delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloak keycloak
+    delete_cr_or_strip "$KAFKA_NAMESPACE" kafkatopic
+    delete_cr_or_strip "$KAFKA_NAMESPACE" kafka "$KAFKA_CLUSTER_NAME"
+    delete_cr_or_strip "$KAFKA_NAMESPACE" kafkanodepool
+    delete_ns "$NAMESPACE"
+    delete_ns "$INFRA_NAMESPACE"
+    delete_ns "$KEYCLOAK_NAMESPACE"
+    delete_ns "$KAFKA_NAMESPACE"
+    delete_rhbk_operator "$KUBECTL" "$KEYCLOAK_NAMESPACE"
+    delete_amq_streams_operator "$KUBECTL"
+    delete_infra_crds "$KUBECTL"
+    ok "uninstalled — no Cost Management on-prem trace left (built-in CatalogSources untouched)"
+    # --uninstall is terminal: the point is to leave, not to reinstall.
+    demo_profile_banner
+    echo ""
+    echo "${C_BOLD}${C_GREEN}Uninstalled.${C_RESET} Cluster returned to its pre-Cost-Management state."
+    exit 0
+  else
+    # Instance/data reset (--reset, fork #37): the Cost Management instance,
+    # its operator and all its data go; infra instances and infra operators
+    # stay Ready so a re-install skips their provisioning.
+    delete_cr_or_strip "$KEYCLOAK_NAMESPACE" keycloakrealmimport
+    delete_demo_kafka_topics "$KUBECTL" "$KAFKA_NAMESPACE" "$KAFKA_CLUSTER_NAME"
+    delete_keycloak_realm "$KUBECTL" "$KEYCLOAK_NAMESPACE" "$REALM_NAME" || exit 1
+    # Database wipe BEFORE the app namespace deletion: the credentials
+    # secret lives in the app namespace. WITH (FORCE) terminates the
+    # applications' connections. Foreign/user-provided infra is detected and
+    # skipped by the helper.
+    recreate_demo_databases "$KUBECTL" "$NAMESPACE" "$INFRA_NAMESPACE" || exit 1
+    delete_ns "$NAMESPACE"
+    flush_valkey "$KUBECTL" "$INFRA_NAMESPACE"
+    clear_minio "$KUBECTL" "$INFRA_NAMESPACE"
+    ok "instance reset — infra kept Ready (postgresql, valkey, minio, Keycloak, Kafka)"
+  fi
 else
-  skip "pass --reset to delete ${NAMESPACE}, ${INFRA_NAMESPACE}, ${KAFKA_NAMESPACE}, ${KEYCLOAK_NAMESPACE}"
+  skip "pass --reset (instance + data; infra kept) or --uninstall (everything) to tear down"
 fi
 
 # Pre-create so klock panes have a namespace from the start (empty table, not
@@ -903,7 +976,14 @@ else
 fi
 
 kafka_ready() {
-  [[ "$("$KUBECTL" -n "$KAFKA_NAMESPACE" get kafka "$KAFKA_CLUSTER_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
+  # Ready cluster AND our topics present: an instance --reset deletes the
+  # KafkaTopics (data wipe) — without this check a re-install would skip
+  # deploy-kafka.sh and leave the apps without their topics.
+  [[ "$("$KUBECTL" -n "$KAFKA_NAMESPACE" get kafka "$KAFKA_CLUSTER_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]] || return 1
+  local topic
+  for topic in hccm.ros.events platform.sources.event-stream rosocp.kruize.recommendations platform.upload.announce platform.payload-status; do
+    "$KUBECTL" -n "$KAFKA_NAMESPACE" get kafkatopic "$topic" >/dev/null 2>&1 || return 1
+  done
 }
 infra_ready() {
   # SKIP_INFRA skips Postgres AND Valkey AND MinIO AND the minio-init job —
@@ -915,7 +995,11 @@ infra_ready() {
     && [[ "$("$KUBECTL" -n "$INFRA_NAMESPACE" get job minio-init -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)" == "True" ]]
 }
 keycloak_ready() {
-  [[ "$("$KUBECTL" -n "$KEYCLOAK_NAMESPACE" get keycloak keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]]
+  # Ready instance AND the realm-import CR present: an instance --reset
+  # deletes the realm (Admin API) and the keycloakrealmimport CR — without
+  # this check a re-install would skip deploy-rhbk.sh and never re-import it.
+  [[ "$("$KUBECTL" -n "$KEYCLOAK_NAMESPACE" get keycloak keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)" == "True" ]] \
+    && "$KUBECTL" -n "$KEYCLOAK_NAMESPACE" get keycloakrealmimport kubernetes-realm >/dev/null 2>&1
 }
 oauth_secret_ready() {
   "$KUBECTL" -n "$NAMESPACE" get secret "${CR_NAME}-ui-oauth-client" >/dev/null 2>&1
@@ -1326,6 +1410,10 @@ step "In-cluster operator"
 if [[ "$DEMO_REBUILD" != "1" && "$BUILT_IMAGE" != "1" ]] && operator_ready; then
   skip "koku-service-operator Deployment already Available"
 else
+  # CRD + RBAC + SCC bootstrap for the default SA (fork #39): deploy-incluster
+  # only applies the Deployment, so on a cluster that never had an OLM install
+  # the operator would be CRD-less and permission-less. Idempotent.
+  "$ROOT/scripts/deploy-dev.sh" "$NAMESPACE"
   IMG="$IMG" ./scripts/deploy-incluster.sh "$NAMESPACE"
 fi
 ok "operator running"

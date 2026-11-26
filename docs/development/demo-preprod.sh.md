@@ -23,7 +23,8 @@ point the CR at your own managed services instead; see
 ```bash
 ./scripts/demo-preprod.sh                  # everything: prereqs + latest stable operator (quay.io/project-koku) + UI
 ./scripts/demo-preprod.sh --dry-run        # print the resolved plan and exit
-./scripts/demo-preprod.sh --reset          # tear down first (CMSC → OLM objects → namespaces)
+./scripts/demo-preprod.sh --reset          # instance + data teardown first (infra kept Ready; fast re-install)
+./scripts/demo-preprod.sh --uninstall      # full teardown: no Cost Management on-prem trace left
 ```
 
 The default install source is `registry`: the latest **stable** operator
@@ -155,10 +156,23 @@ later reports `Unauthorized`.
   `{CR_NAME}-realm-admin` in the app namespace, printed once at the end;
   re-runs read it back from the Secret).
 - Idempotent re-runs: every stage is skipped when already healthy.
-- `--reset` teardown: the CMSC first (so the operator clears its finalizer),
-  then the OLM objects (Subscription, CSV, OperatorGroup, CatalogSource), then
-  the namespaces — with finalizer-stripping rescue for stuck deletions.
-  `--reset` assumes a **single-tenant demo cluster**: the CatalogSource is
+- Two teardown granularities:
+  - `--reset` (instance + data): removes the CMSC, the operator (OLM objects
+    or local Deployment, the CRD and webhooks) and **all Cost Management
+    data** — the four `costonprem_*` databases are dropped and recreated
+    empty, the Keycloak realm is deleted, the Kafka topics are removed, and
+    the Valkey cache and MinIO buckets are cleared. The infrastructure
+    instances and operators (PostgreSQL, Valkey, MinIO, Keycloak, Kafka, AMQ
+    Streams) are kept Ready, so a re-install skips their provisioning and
+    only takes minutes. This is the loop for evaluation and testing
+    iterations.
+  - `--uninstall` (everything): additionally removes the four namespaces and
+    the infra operators and CRDs — including the AMQ Streams subscription in
+    `openshift-operators` — leaving no Cost Management on-prem trace. The
+    built-in CatalogSources (`redhat-operators`, …) are never touched. Use
+    this when returning a cluster to its owner.
+  Both assume a **single-tenant demo cluster** and only clean demo-owned
+  infrastructure; anything else is reported as skipped. The CatalogSource is
   removed from `openshift-marketplace` and labelled cluster-scoped RBAC is
   deleted regardless of which source installed the operator (a warning is
   printed when the source was not `registry`).

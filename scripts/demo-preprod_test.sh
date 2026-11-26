@@ -1193,6 +1193,240 @@ env_help="$(./scripts/demo-preprod.sh --help-env 2>&1)"
 assert_contains "$env_help" "DEMO_ORG_ID" "--help-env documents DEMO_ORG_ID"
 assert_contains "$env_help" "DEMO_ACCOUNT_NUMBER" "--help-env documents DEMO_ACCOUNT_NUMBER"
 
+# --- --reset / --uninstall teardown helpers (fork #37/#38) ---
+td="$(mktemp -d)"
+rec_oc() {
+  cat >"${td}/oc" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+if [[ -t 0 ]]; then :; else cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log"; fi
+exit 0
+EOF
+  chmod +x "${td}/oc"
+  : >"${td}/oc-args.log"
+  : >"${td}/oc-stdin.log"
+}
+
+# delete_koku_crd: CRD + both webhook configurations, non-blocking deletes,
+# bounded wait for the CRD to disappear
+cat >"${td}/oc-crdgone" <<'EOF'
+#!/bin/bash
+echo "ARGS: $*" >>"${TD_LOG}"
+if [[ "$1" == "get" && "$2" == "crd" ]]; then exit 1; fi
+exit 0
+EOF
+chmod +x "${td}/oc-crdgone"
+TD_LOG="${td}/oc-args.log" delete_koku_crd "${td}/oc-crdgone"
+ck_args="$(cat "${td}/oc-args.log")"
+assert_contains "$ck_args" "delete crd costmanagementserviceconfigs.service.costmanagement.openshift.io --ignore-not-found --wait=false" "CRD delete issued non-blocking"
+assert_contains "$ck_args" "delete mutatingwebhookconfiguration koku-service-operator-mutating-webhook-configuration --ignore-not-found --wait=false" "mutating webhook delete issued non-blocking"
+assert_contains "$ck_args" "delete validatingwebhookconfiguration koku-service-operator-validating-webhook-configuration --ignore-not-found --wait=false" "validating webhook delete issued non-blocking"
+assert_contains "$ck_args" "get crd costmanagementserviceconfigs.service.costmanagement.openshift.io" "CRD disappearance is confirmed, not assumed"
+
+# delete_operator_rbac: deploy-dev bindings and roles
+rec_oc
+delete_operator_rbac "${td}/oc" cost-byoi
+args="$(cat "${td}/oc-args.log")"
+assert_contains "$args" "delete clusterrolebinding koku-operator-dev koku-operator-dev-cluster --ignore-not-found" "dev ClusterRoleBindings deleted"
+assert_contains "$args" "delete rolebinding koku-operator-dev-leader-election -n cost-byoi --ignore-not-found" "leader-election RoleBinding deleted"
+assert_contains "$args" "delete clusterrole manager-role manager-cluster-role --ignore-not-found" "manager ClusterRoles deleted"
+
+# recreate_demo_databases: DROP + CREATE with owners; password via stdin
+cat >"${td}/oc-db" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *postgres-user*) printf 'postgres' | base64 ;;
+  *koku-user*) printf 'koku_user' | base64 ;;
+  *rbac-user*) printf 'rbac_user' | base64 ;;
+  *ros-user*) printf 'ros_user' | base64 ;;
+  *kruize-user*) printf 'kruize_user' | base64 ;;
+  *postgres-password*) printf 'pgpass123' | base64 ;;
+  exec*) cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log" ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-db"
+: >"${td}/oc-args.log"; : >"${td}/oc-stdin.log"
+db_out="$(recreate_demo_databases "${td}/oc-db" cost-byoi cost-byoi-infra)" && db_rc=0 || db_rc=$?
+assert_eq "$db_rc" "0" "recreate_demo_databases succeeds with credentials present"
+db_args="$(cat "${td}/oc-args.log")"
+db_stdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$db_args" "get secret byoi-db-credentials -n cost-byoi " "credentials read from the app namespace"
+assert_contains "$db_args" "exec -i -n cost-byoi-infra deploy/postgresql" "database wipe execs into infra postgres with stdin"
+assert_not_contains "$db_args" "pgpass123" "postgres password never appears in oc argv"
+assert_contains "$db_stdin" "DROP DATABASE IF EXISTS costonprem_koku WITH (FORCE)" "koku DB dropped with FORCE"
+assert_contains "$db_stdin" "CREATE DATABASE costonprem_rbac OWNER rbac_user" "rbac DB recreated with owner"
+assert_contains "$db_stdin" "DROP DATABASE IF EXISTS costonprem_kruize WITH (FORCE)" "kruize DB dropped"
+assert_contains "$db_stdin" "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" "pg_stat_statements extension restored (migration needs it)"
+assert_contains "$db_stdin" "pgpass123" "password travels via stdin"
+
+# missing secret → skip, not fail
+rec_oc
+db_skip="$(recreate_demo_databases "${td}/oc" cost-byoi cost-byoi-infra)" && db_skip_rc=0 || db_skip_rc=$?
+assert_eq "$db_skip_rc" "0" "missing db secret skips cleanly"
+assert_contains "$db_skip" "skipping database wipe" "skip message names what was skipped"
+
+# delete_demo_kafka_topics: label-scoped delete; missing cluster skips
+rec_oc
+delete_demo_kafka_topics "${td}/oc" kafka cost-onprem-kafka
+assert_contains "$(cat "${td}/oc-args.log")" "delete kafkatopic -n kafka -l strimzi.io/cluster=cost-onprem-kafka --ignore-not-found" "topics deleted scoped to our cluster label"
+cat >"${td}/oc-nokafka" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${td}/oc-nokafka"
+kt_skip="$(delete_demo_kafka_topics "${td}/oc-nokafka" kafka other-cluster)"
+assert_contains "$kt_skip" "skipping Kafka topic deletion" "missing kafka cluster skips topic deletion"
+
+# flush_valkey: FLUSHALL via exec, password via stdin
+: >"${td}/oc-args.log"; : >"${td}/oc-stdin.log"
+cat >"${td}/oc-valkey" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *redis-password*) printf 'vpass9' | base64 ;;
+  exec*) cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log" ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-valkey"
+flush_valkey "${td}/oc-valkey" cost-byoi-infra
+vargs="$(cat "${td}/oc-args.log")"; vstdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$vargs" "exec -i -n cost-byoi-infra deploy/valkey" "valkey flush execs with stdin"
+assert_contains "$vargs" "FLUSHALL" "valkey FLUSHALL issued"
+assert_contains "$vstdin" "vpass9" "valkey password travels via stdin"
+assert_not_contains "$vargs" "vpass9" "valkey password never in argv"
+
+# clear_minio: applies a Job that empties the buckets, waits, deletes it
+rec_oc
+clear_minio "${td}/oc" cost-byoi-infra
+margs="$(cat "${td}/oc-args.log")"; mstdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$margs" "apply -f -" "minio-clear Job applied via stdin"
+assert_contains "$mstdin" "name: minio-clear" "Job named minio-clear"
+assert_contains "$mstdin" "mc rb --force" "Job removes bucket contents"
+assert_contains "$mstdin" "koku-upload-bucket" "Job covers the upload bucket"
+assert_contains "$margs" "wait --for=condition=complete job/minio-clear" "Job completion is awaited"
+assert_contains "$margs" "delete job minio-clear --ignore-not-found" "Job cleaned up afterwards"
+
+# delete_amq_streams_operator / delete_rhbk_operator
+rec_oc
+delete_amq_streams_operator "${td}/oc"
+aargs="$(cat "${td}/oc-args.log")"
+assert_contains "$aargs" "delete subscription amq-streams -n openshift-operators --ignore-not-found" "AMQ subscription deleted from openshift-operators"
+assert_contains "$aargs" "-l operators.coreos.com/amq-streams.openshift-operators" "AMQ CSV deleted by label"
+rec_oc
+delete_rhbk_operator "${td}/oc" keycloak
+assert_contains "$(cat "${td}/oc-args.log")" "delete subscription rhbk-operator -n keycloak --ignore-not-found" "RHBK subscription deleted"
+assert_contains "$(cat "${td}/oc-args.log")" "delete operatorgroup rhbk-operator-group -n keycloak --ignore-not-found" "RHBK OperatorGroup deleted"
+
+# delete_infra_crds: only strimzi + keycloak CRDs, never anything else
+cat >"${td}/oc-crd" <<EOF
+#!/bin/bash
+if [[ "\$1" == "get" ]]; then
+  cat <<'CRDS'
+customresourcedefinition.apiextensions.k8s.io/kafkas.kafka.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/kafkatopics.kafka.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/strimzipodsets.core.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/keycloaks.k8s.keycloak.org
+customresourcedefinition.apiextensions.k8s.io/keycloakrealmimports.k8s.keycloak.org
+customresourcedefinition.apiextensions.k8s.io/consolelinks.console.openshift.io
+customresourcedefinition.apiextensions.k8s.io/batchjobs.batch.project.io
+CRDS
+  exit 0
+fi
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+exit 0
+EOF
+chmod +x "${td}/oc-crd"
+: >"${td}/oc-args.log"
+delete_infra_crds "${td}/oc-crd"
+cargs="$(cat "${td}/oc-args.log")"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/kafkas.kafka.strimzi.io --ignore-not-found" "strimzi CRD deleted"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/strimzipodsets.core.strimzi.io --ignore-not-found" "strimzipodsets CRD (core.strimzi.io group) deleted"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/keycloaks.k8s.keycloak.org --ignore-not-found" "keycloak CRD deleted"
+assert_not_contains "$cargs" "consolelinks" "foreign CRD never deleted"
+assert_not_contains "$cargs" "batchjobs" "unrelated CRD never deleted"
+
+# delete_keycloak_realm: token + DELETE via Admin API; secrets out of argv
+kr="$(mktemp -d)"
+cat >"${kr}/oc" <<EOF
+#!/bin/bash
+case "\$*" in
+  *keycloak-initial-admin*username*) printf 'kcadmin' | base64 ;;
+  *keycloak-initial-admin*password*) printf 'kcpass77' | base64 ;;
+  *route*keycloak*) echo 'keycloak.apps.demo.test' ;;
+  *) : ;;
+esac
+exit 0
+EOF
+chmod +x "${kr}/oc"
+cat >"${kr}/curl" <<EOF
+#!/bin/bash
+echo "CURL: \$*" >>"${kr}/curl.log"
+if [[ "\$*" == *"/token"* ]]; then
+  echo '{"access_token":"tok-abc"}'
+else
+  echo 204
+fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+kr_out="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes)" && kr_rc=0 || kr_rc=$?
+assert_eq "$kr_rc" "0" "realm deletion succeeds on 204"
+assert_contains "$kr_out" "realm 'kubernetes' deleted" "success message names the realm"
+kr_curl="$(cat "${kr}/curl.log")"
+assert_contains "$kr_curl" "https://keycloak.apps.demo.test/admin/realms/kubernetes" "DELETE hits the realm endpoint"
+assert_not_contains "$kr_curl" "kcpass77" "admin password never in curl argv"
+assert_not_contains "$kr_curl" "tok-abc" "bearer token never in curl argv"
+# 404 → already gone, still success
+cat >"${kr}/curl" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"/token"* ]]; then echo '{"access_token":"tok-abc"}'; else echo 404; fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+kr404="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes)" && kr404_rc=0 || kr404_rc=$?
+assert_eq "$kr404_rc" "0" "404 counts as already-gone"
+assert_contains "$kr404" "already gone" "404 message says already gone"
+# token failure → hard error
+cat >"${kr}/curl" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"/token"* ]]; then echo '{"error":"invalid_grant"}'; else echo 500; fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+krfail="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes 2>&1)" && krf_rc=0 || krf_rc=$?
+assert_eq "$krf_rc" "1" "token failure fails the reset"
+assert_contains "$krfail" "could not obtain a Keycloak admin token" "token failure message is explicit"
+rm -rf "$kr"
+
+# Flag wiring: --uninstall plan, mutual exclusion, flow wiring (cluster-only
+# paths — documented source greps per test policy).
+un_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --uninstall 2>&1)"
+assert_contains "$un_plan" "--uninstall: CM + infra instances + operators + CRDs" "--uninstall plan describes full teardown"
+rs_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --reset 2>&1)"
+assert_contains "$rs_plan" "--reset: CM instance + operator + data (keep infra" "--reset plan describes the instance reset"
+both_out="$(./scripts/demo-preprod.sh --reset --uninstall 2>&1)" && both_rc=0 || both_rc=$?
+assert_eq "$both_rc" "2" "--reset + --uninstall rejected"
+assert_contains "$both_out" "mutually exclusive" "rejection explains the two modes"
+demo_src="$(cat "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$demo_src" 'delete_cmsc_robustly || exit 1' "teardown waits for the CMSC CR to be gone before touching the CRD"
+assert_contains "$demo_src" 'delete_koku_crd "$KUBECTL" || exit 1' "both flows fail loudly if the CRD lingers"
+assert_contains "$demo_src" 'recreate_demo_databases "$KUBECTL" "$NAMESPACE" "$INFRA_NAMESPACE"' "reset flow wipes the databases (app-NS credentials, infra-NS postgres)"
+assert_contains "$demo_src" 'delete_keycloak_realm "$KUBECTL" "$KEYCLOAK_NAMESPACE" "$REALM_NAME"' "reset flow deletes the realm"
+assert_contains "$demo_src" 'delete_demo_kafka_topics "$KUBECTL" "$KAFKA_NAMESPACE" "$KAFKA_CLUSTER_NAME"' "reset flow deletes the topics"
+assert_contains "$demo_src" 'delete_amq_streams_operator "$KUBECTL"' "uninstall flow removes the AMQ Streams operator"
+assert_contains "$demo_src" 'delete_infra_crds "$KUBECTL"' "uninstall flow removes infra CRDs"
+assert_contains "$demo_src" 'delete_koku_crd "$KUBECTL"' "both flows remove the CMSC CRD"
+assert_contains "$demo_src" 'delete_ns "$INFRA_NAMESPACE"' "uninstall deletes the infra namespace"
+assert_not_contains "$(sed -n '/DEMO_UNINSTALL.*==.*1/,/ok "uninstalled/p' "${ROOT}/scripts/demo-preprod.sh")" 'recreate_demo_databases' "uninstall does not wipe data (dies with the namespace)"
+assert_contains "$demo_src" 'scripts/deploy-dev.sh" "$NAMESPACE"' "local source bootstraps CRD+RBAC via deploy-dev.sh (#39)"
+assert_contains "$demo_src" "platform.upload.announce" "kafka_ready requires the CM topics after a reset"
+assert_contains "$demo_src" "keycloakrealmimport kubernetes-realm" "keycloak_ready requires the realm import after a reset"
+
+rm -rf "$td"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2
   exit 1

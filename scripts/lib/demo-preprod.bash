@@ -732,6 +732,325 @@ sys.exit(0 if d.get("meta", {}).get("count", 0) > 0 else 1)' 2>/dev/null; then
   return "$fails"
 }
 
+# --- Teardown helpers (--reset / --uninstall; fork issues #37/#38) ----------
+# Ordering rule for everything below: CRs must be gone before their CRDs
+# (CRD deletion hangs on CR finalizers), and namespaces before anything that
+# lives inside them. All deletes are --ignore-not-found and safe to re-run.
+
+# Remove the CMSC CRD and the operator's admission webhooks. Both install
+# paths can leave these: OLM (CSV-owned) and the local path (deploy-dev.sh
+# applies the CRD; the webhooks come from the CSV or a kustomize apply).
+# Deletes use --wait=false: `oc delete crd` blocks until every CR is
+# garbage-collected, which is an unbounded hang when one is still present
+# (observed live). The bounded wait below then confirms the CRD is really
+# gone — a lingering deleting-CRD breaks the next install's apply.
+delete_koku_crd() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local crd=costmanagementserviceconfigs.service.costmanagement.openshift.io
+  echo "  removing CMSC CRD and admission webhooks…"
+  "$kubectl" delete crd "$crd" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  "$kubectl" delete mutatingwebhookconfiguration koku-service-operator-mutating-webhook-configuration \
+    --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  "$kubectl" delete validatingwebhookconfiguration koku-service-operator-validating-webhook-configuration \
+    --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # The CRD completes deletion once its CRs are gone (the caller guarantees
+  # the CMSC CR was deleted first).
+  local tries=0
+  while (( tries < 12 )); do
+    "$kubectl" get crd "$crd" >/dev/null 2>&1 || return 0
+    sleep 5
+    tries=$((tries + 1))
+  done
+  echo "error: CMSC CRD still present after 60s — a leftover CR may be blocking it:" >&2
+  echo "  ${kubectl} get costmanagementserviceconfigs -A" >&2
+  return 1
+}
+
+# Remove the local-path operator RBAC applied by scripts/deploy-dev.sh:
+# ClusterRoleBindings (cluster-scoped, fixed names) and the ClusterRoles they
+# reference. The leader-election RoleBinding is namespaced and dies with the
+# app namespace. OLM-installed roles carry CSV-hash names and are untouched.
+delete_operator_rbac() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  echo "  removing operator RBAC (deploy-dev bindings)…"
+  "$kubectl" delete clusterrolebinding koku-operator-dev koku-operator-dev-cluster \
+    --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete rolebinding koku-operator-dev-leader-election -n "$ns" \
+    --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete clusterrole manager-role manager-cluster-role \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+# Drop and recreate the Cost Management databases in the RETAINED postgres
+# (instance reset keeps the deployment running, so nothing re-runs the
+# first-boot db-init). Recreating them empty with the original owners is what
+# lets a re-install's migration job succeed without a postgres restart —
+# including the pg_stat_statements extension the db-init installs as the
+# superuser (koku's migration needs it and cannot create it itself; observed
+# live as MigrationFailed "permission denied to create extension").
+# The credentials secret lives in the APP namespace (deleted later in the
+# reset) while postgres runs in the infra namespace — hence the two
+# arguments. Call this BEFORE the app namespace deletion: WITH (FORCE)
+# terminates the applications' connections. The password travels via stdin
+# (oc exec argv is visible in `ps` on the host — review #24 hygiene).
+recreate_demo_databases() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local secret_ns="${2:?credentials namespace required}"
+  local db_ns="${3:?database namespace required}"
+  local user koku_role rbac_role ros_role kruize_role
+  user="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.postgres-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  if [[ -z "$user" ]]; then
+    echo "  skipping database wipe: byoi-db-credentials not found in ${secret_ns} (infra not demo-owned or already gone)"
+    return 0
+  fi
+  koku_role="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.koku-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  rbac_role="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.rbac-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  ros_role="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.ros-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  kruize_role="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.kruize-user}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  local role
+  for role in "$user" "$koku_role" "$rbac_role" "$ros_role" "$kruize_role"; do
+    if [[ ! "$role" =~ ^[a-zA-Z0-9_]+$ ]]; then
+      echo "error: unexpected role name in byoi-db-credentials — refusing to run SQL" >&2
+      return 1
+    fi
+  done
+  echo "  dropping + recreating Cost Management databases in ${db_ns}…"
+  local pass sql
+  pass="$("$kubectl" get secret byoi-db-credentials -n "$secret_ns" -o jsonpath='{.data.postgres-password}' 2>/dev/null | base64 -d 2>/dev/null)"
+  sql="DROP DATABASE IF EXISTS costonprem_koku WITH (FORCE); CREATE DATABASE costonprem_koku OWNER ${koku_role};
+\\c costonprem_koku
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+DROP DATABASE IF EXISTS costonprem_rbac WITH (FORCE); CREATE DATABASE costonprem_rbac OWNER ${rbac_role};
+DROP DATABASE IF EXISTS costonprem_ros WITH (FORCE); CREATE DATABASE costonprem_ros OWNER ${ros_role};
+DROP DATABASE IF EXISTS costonprem_kruize WITH (FORCE); CREATE DATABASE costonprem_kruize OWNER ${kruize_role};"
+  if ! printf '%s\n%s\n' "$pass" "$sql" | "$kubectl" exec -i -n "$db_ns" deploy/postgresql -- \
+      sh -c 'read -r pgpass; PGPASSWORD="$pgpass" psql -U "'"$user"'" -d postgres -v ON_ERROR_STOP=1' >/dev/null 2>&1; then
+    echo "error: database drop/recreate failed in ${db_ns}/deploy/postgresql" >&2
+    return 1
+  fi
+}
+
+# Delete the Cost Management Kafka topics (label-scoped to OUR Kafka cluster —
+# a shared namespace with foreign topics on other clusters is not touched).
+# The cluster itself and the AMQ Streams operator are kept by the instance
+# reset; deploy-kafka.sh recreates missing topics on re-install.
+delete_demo_kafka_topics() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  local cluster="${3:?kafka cluster name required}"
+  if ! "$kubectl" -n "$ns" get kafka "$cluster" >/dev/null 2>&1; then
+    echo "  skipping Kafka topic deletion: kafka/${cluster} not found in ${ns}"
+    return 0
+  fi
+  echo "  deleting Cost Management Kafka topics (cluster ${cluster})…"
+  "$kubectl" delete kafkatopic -n "$ns" -l "strimzi.io/cluster=${cluster}" \
+    --ignore-not-found --timeout=120s >/dev/null 2>&1 || true
+}
+
+# Delete the Cost Management realm via the Keycloak Admin API, keeping the
+# Keycloak instance and the RHBK operator. Deleting the keycloakrealmimport
+# CR does NOT delete the realm — the API call is required. deploy-rhbk.sh
+# re-imports the realm on the next install. Sensitive values (password,
+# bearer token) travel via temp files, never curl argv (review #24).
+delete_keycloak_realm() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  local realm="${3:?realm name required}"
+  if [[ ! "$realm" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "error: invalid realm name '${realm}'" >&2
+    return 1
+  fi
+  local user pass host
+  user="$("$kubectl" get secret keycloak-initial-admin -n "$ns" -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  pass="$("$kubectl" get secret keycloak-initial-admin -n "$ns" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  host="$("$kubectl" get route keycloak -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null)" || true
+  if [[ -z "$user" || -z "$pass" || -z "$host" ]]; then
+    echo "  skipping realm deletion: keycloak-initial-admin secret or keycloak route not found in ${ns}"
+    return 0
+  fi
+  echo "  deleting Keycloak realm '${realm}'…"
+  local tls=(-k)
+  local ca=""
+  if [[ "${RHBK_INSECURE_TLS:-0}" != "1" ]]; then
+    ca="$(mktemp "${TMPDIR:-/tmp}/realm-ca-XXXXXX")"
+    if "$kubectl" get secret router-ca -n openshift-ingress-operator \
+        -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$ca" 2>/dev/null && [[ -s "$ca" ]]; then
+      tls=(--cacert "$ca")
+    else
+      rm -f "$ca"; ca=""
+      echo "  warning: cluster router CA not found; falling back to insecure TLS for the realm API call" >&2
+    fi
+  fi
+  local body token status rc=0
+  body="$(mktemp "${TMPDIR:-/tmp}/realm-body-XXXXXX")"
+  python3 - "$body" "$user" "$pass" <<'PY'
+import sys, urllib.parse
+path, user, pw = sys.argv[1:4]
+open(path, "w").write(
+    "grant_type=password&client_id=admin-cli&"
+    + urllib.parse.urlencode({"username": user, "password": pw})
+)
+PY
+  token="$(curl -s --max-time 30 "${tls[@]}" -X POST \
+    "https://${host}/realms/master/protocol/openid-connect/token" \
+    --data "@${body}" 2>/dev/null | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("access_token", ""))
+except Exception:
+    print("")')"
+  rm -f "$body"
+  if [[ -z "$token" ]]; then
+    echo "error: could not obtain a Keycloak admin token (realm ${realm} NOT deleted)" >&2
+    [[ -n "$ca" ]] && rm -f "$ca"
+    return 1
+  fi
+  local hdr
+  hdr="$(mktemp "${TMPDIR:-/tmp}/realm-hdr-XXXXXX")"
+  printf 'Authorization: Bearer %s\n' "$token" >"$hdr"
+  status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${tls[@]}" -X DELETE \
+    --header "@${hdr}" "https://${host}/admin/realms/${realm}" 2>/dev/null)" || status=000
+  rm -f "$hdr"
+  [[ -n "$ca" ]] && rm -f "$ca"
+  case "$status" in
+    2*)
+      echo "  realm '${realm}' deleted"
+      ;;
+    404)
+      echo "  realm '${realm}' already gone (404)"
+      ;;
+    *)
+      echo "error: realm deletion returned HTTP ${status} (realm ${realm} NOT deleted)" >&2
+      rc=1
+      ;;
+  esac
+  return "$rc"
+}
+
+# Flush the retained Valkey (stale cache keys from the previous install).
+flush_valkey() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  local pass
+  pass="$("$kubectl" get secret valkey-credentials -n "$ns" -o jsonpath='{.data.redis-password}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+  if [[ -z "$pass" ]]; then
+    echo "  skipping Valkey flush: valkey-credentials not found in ${ns}"
+    return 0
+  fi
+  echo "  flushing Valkey cache…"
+  printf '%s\n' "$pass" | "$kubectl" exec -i -n "$ns" deploy/valkey -- \
+    sh -c 'read -r vp; redis-cli -a "$vp" --no-auth-warning FLUSHALL' >/dev/null 2>&1 \
+    || echo "  warning: Valkey FLUSHALL failed (continuing)" >&2
+}
+
+# Clear the object-storage buckets (previous install's uploaded payloads).
+# Runs the same pinned mc image as the minio-init job: the MinIO server image
+# does not ship mc. Buckets are removed and recreated empty so the state is
+# pristine even if a later install skips minio-init.
+clear_minio() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  if ! "$kubectl" -n "$ns" get deploy minio >/dev/null 2>&1; then
+    echo "  skipping MinIO clear: deploy/minio not found in ${ns}"
+    return 0
+  fi
+  echo "  clearing MinIO buckets…"
+  if ! "$kubectl" apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-clear
+  namespace: ${ns}
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: docker.io/pgsty/mc:latest@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MC_CONFIG_DIR
+              value: /tmp/.mc
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secret-key
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              until mc alias set local http://minio:9000 "\$MINIO_ROOT_USER" "\$MINIO_ROOT_PASSWORD"; do sleep 3; done
+              for b in koku-bucket koku-upload-bucket ros-data; do
+                mc rb --force "local/\$b" 2>/dev/null || true
+                mc mb --ignore-existing "local/\$b"
+              done
+              echo "buckets cleared"
+EOF
+  then
+    echo "error: could not create the minio-clear Job" >&2
+    return 1
+  fi
+  if ! "$kubectl" -n "$ns" wait --for=condition=complete job/minio-clear --timeout=180s >/dev/null 2>&1; then
+    echo "  warning: minio-clear job did not complete in time — stale objects may remain" >&2
+  fi
+  "$kubectl" -n "$ns" delete job minio-clear --ignore-not-found >/dev/null 2>&1 || true
+}
+
+# --- --uninstall helpers (full teardown; fork issue #38) ---------------------
+
+# Remove the AMQ Streams operator: its Subscription lives in
+# openshift-operators (NOT the kafka namespace), so deleting the namespace
+# leaves it behind — the original --reset gap.
+delete_amq_streams_operator() {
+  local kubectl="${1:?kubectl/oc binary}"
+  echo "  removing AMQ Streams operator (openshift-operators)…"
+  "$kubectl" delete subscription amq-streams -n openshift-operators \
+    --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete csv -n openshift-operators \
+    -l operators.coreos.com/amq-streams.openshift-operators \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+# Remove the RHBK operator objects (Subscription + OperatorGroup in the
+# keycloak namespace; the namespace deletion usually takes them, this makes
+# it explicit and covers a renamed namespace).
+delete_rhbk_operator() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local ns="${2:?namespace required}"
+  echo "  removing RHBK operator objects…"
+  "$kubectl" delete subscription rhbk-operator -n "$ns" \
+    --ignore-not-found >/dev/null 2>&1 || true
+  "$kubectl" delete operatorgroup rhbk-operator-group -n "$ns" \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+# Remove the Kafka and Keycloak CRDs (after their CRs and namespaces are
+# gone — CRD deletion hangs on CR finalizers otherwise). Only CRDs from the
+# strimzi (both API groups: kafka.strimzi.io AND core.strimzi.io — the
+# strimzipodsets CRD lives in the latter) and keycloak API groups are
+# touched; everything else is listed and skipped.
+delete_infra_crds() {
+  local kubectl="${1:?kubectl/oc binary}"
+  local crd
+  echo "  removing Kafka and Keycloak CRDs…"
+  while IFS= read -r crd; do
+    [[ -z "$crd" ]] && continue
+    "$kubectl" delete "$crd" --ignore-not-found >/dev/null 2>&1 || true
+  done < <("$kubectl" get crd -o name 2>/dev/null \
+    | grep -E '\.(kafka\.strimzi\.io|core\.strimzi\.io|k8s\.keycloak\.org)$' || true)
+}
+
 # Demo/evaluation profile banner: this installer is not for production, and the
 # summary lists the insecure settings the demo profile uses.
 demo_profile_banner() {
