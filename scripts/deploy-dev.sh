@@ -28,8 +28,31 @@ oc get namespace "$NS" &>/dev/null || oc create namespace "$NS"
 # Install CRDs via kustomize (only the resources listed in config/crd/kustomization.yaml).
 # Do not `oc apply -f config/crd/bases/` — that directory is a generator output and
 # may contain leftover files from prior API-group renames.
+# NOTE: deliberately NOT `make install` — that target depends on `manifests`
+# (controller-gen), which requires a Go toolchain on the client. The local
+# demo path builds the operator in-cluster precisely so no local toolchain is
+# needed; the committed, generated CRDs are applied as-is via kustomize alone
+# (pinned to the Makefile's KUSTOMIZE_VERSION; the release binary is
+# downloaded when bin/ does not already provide one).
+KUSTOMIZE_VERSION="v5.6.0"
+KUSTOMIZE_BIN="bin/kustomize"
+if [[ ! -x "$KUSTOMIZE_BIN" ]]; then
+  case "$(uname -m)" in
+    aarch64|arm64) KARCH=arm64 ;;
+    x86_64|amd64) KARCH=amd64 ;;
+    *) echo "error: unsupported client architecture for the kustomize download: $(uname -m)" >&2; exit 1 ;;
+  esac
+  echo "Downloading kustomize ${KUSTOMIZE_VERSION} (linux/${KARCH})..."
+  mkdir -p bin
+  if ! curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_${KARCH}.tar.gz" \
+      | tar -xz -C bin kustomize; then
+    echo "error: kustomize download failed — or place a kustomize binary at ${KUSTOMIZE_BIN}" >&2
+    exit 1
+  fi
+  chmod +x "$KUSTOMIZE_BIN"
+fi
 echo "[1/4] Installing CRDs..."
-make install
+"$KUSTOMIZE_BIN" build config/crd | oc apply -f -
 
 # Apply RBAC needed by the operator (AllNamespaces).
 echo "[2/4] Applying RBAC..."
