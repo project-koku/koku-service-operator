@@ -52,8 +52,11 @@ ENV CGO_ENABLED=0 \
 ARG TARGETOS
 ARG TARGETARCH
 ARG RBAC_MINI_REPO=https://github.com/project-koku/rbac-mini
-# Pin: rbac-mini main after FIPS + go 1.26.5 (PR #2 / COST-8610).
-ARG RBAC_MINI_REF=2f4ba4f752b656f4ce5364674c40100f7f3a2926
+# Pin: rbac-mini main after COST-8184 seed roles (PR #9). The previous pin
+# 2f4ba4f (PR #2 / COST-8610) became unreachable when rbac-mini's history was
+# rewritten, so fresh clones cannot check it out — keep this at a commit
+# reachable from a branch.
+ARG RBAC_MINI_REF=002253b401b788b5f0635df263b6ca8ff5ccbc96
 
 # Makefile always creates rbac-mini-src/ (local tree or .gitkeep placeholder).
 # Local tree has go.mod → build that. Otherwise clone the pin into a fresh dir
