@@ -42,3 +42,4 @@ scripts/demo-preprod.local.env
 .worktrees/
 .claude/
 docs/.markdown-viewer-temp.html
+__pycache__/
