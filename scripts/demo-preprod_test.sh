@@ -6,6 +6,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/lib/demo-preprod.bash"
 
+# Fixture hooks are gated behind DEMO_ALLOW_FIXTURES (issue #18): this runner
+# is the intended user; a production install without the gate fails loudly.
+export DEMO_ALLOW_FIXTURES=1
+# Default registry fixture so the whole suite stays offline (issue #23);
+# tests that exercise fallback/pinning set their own fixture, which wins.
+DEFAULT_TAG_FIXTURE="$(mktemp)"
+printf 'main\nlatest\nv0.0.1 sha256:%s\n' "$(printf 'e%.0s' {1..64})" >"$DEFAULT_TAG_FIXTURE"
+export REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE"
+
 fail=0
 assert_eq() {
   local got="$1" want="$2" msg="$3"
@@ -35,7 +44,12 @@ assert_not_contains() {
   fi
 }
 
-# --- Dockerfile: OpenShift non-root UID cannot write WORKDIR /workspace ---
+# TEST POLICY (issue #22): behavior tests first — stub the command and assert
+# what it does (see the tmux, ready-check, and wait_for_ui tests). Source-text
+# greps are kept ONLY as wiring checks for paths that need a live cluster
+# (OLM apply, password generation, arch preflight wiring) and must say so.
+
+# --- Dockerfile: OpenShift non-root UID cannot write WORKSPACE ---
 tmp="$(mktemp)"
 cat >"$tmp" <<'EOF'
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
@@ -149,6 +163,1349 @@ help_out="$(cd "${ROOT}/scripts" && ./demo-preprod.sh --help 2>&1)" || {
 }
 assert_contains "$help_out" "./scripts/demo-preprod.sh --dry-run" "--help from scripts/ prints usage"
 assert_not_contains "$help_out" "No such file or directory" "--help from scripts/ must not sed a relative \$0"
+assert_contains "$help_out" "tmux (default, when installed)" "--help documents the tmux default"
+assert_contains "$help_out" "Ctrl-b d" "--help says how to detach from tmux"
+assert_not_contains "$help_out" "HELP-END" "--help output ends at the marker"
+# --help points at --help-env; --help-env carries the generated reference
+assert_contains "$help_out" "--help-env" "--help points at the settings reference"
+env_help="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help" "NAMESPACE              default: cost-byoi" "--help-env lists NAMESPACE with its default"
+assert_contains "$env_help" "CATALOG_REPO           quay namespace" "--help-env lists CATALOG_REPO with its description"
+assert_contains "$env_help" "REALM_ADMIN_PASSWORD" "--help-env lists REALM_ADMIN_PASSWORD"
+assert_contains "$env_help" "same name (--source → SOURCE)" "--help-env states the flag-to-env-var convention"
+case "$env_help" in
+  *"  KEY  "*) echo "FAIL: format-doc lines must not render as entries" >&2; fail=1 ;;
+esac
+case "$help_out" in
+  *"default: cost-byoi"*) echo "FAIL: --help must not embed the full settings list" >&2; fail=1 ;;
+esac
+
+# --- Task 1 (#1): --source selector and current-context default ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--source=registry|local|manual" "help documents --source"
+
+plan="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan" "source:      registry" "dry run defaults to the registry source"
+assert_not_contains "$plan" "clusterbot" "dry run must not default KUBE_CONTEXT to clusterbot"
+
+plan_local="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=local ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_local" "source:      local" "SOURCE=local selects the local source"
+
+bad_src="$(cd "$ROOT" && env -u KUBE_CONTEXT SOURCE=bogus ./scripts/demo-preprod.sh --dry-run 2>&1)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "2" "invalid SOURCE exits 2"
+assert_contains "$bad_src" "registry, local or manual" "invalid SOURCE names the valid values"
+
+# --- Task 2 (#1): manual source, --watch/--console; demo-preprod-olm.sh absorbed ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--watch" "help documents --watch"
+assert_contains "$help_out" "--console" "help documents --console"
+
+if [[ -e "${ROOT}/scripts/demo-preprod-olm.sh" ]]; then
+  echo "FAIL: demo-preprod-olm.sh must be absorbed into demo-preprod.sh" >&2
+  fail=1
+fi
+
+fx_manual="$(mktemp)"
+printf 'main\nlatest\n474d937\n' >"$fx_manual"
+plan_manual="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx_manual" SOURCE=manual ./scripts/demo-preprod.sh --dry-run 2>&1)"
+rm -f "$fx_manual"
+assert_contains "$plan_manual" "CR file:     " "manual plan shows the CR file"
+assert_contains "$plan_manual" "Install the operator through the OpenShift console" "manual plan previews the console step"
+assert_contains "$plan_manual" "quay.io/project-koku/koku-service-operator-catalog:latest" "manual plan falls back to latest when no semver tag exists"
+assert_contains "$plan_manual" "version:     latest" "manual plan shows the truthful resolved version"
+assert_contains "$plan_manual" "--watch" "manual plan points at --watch"
+
+# Ported from demo-preprod-olm_test.sh (offline greps against the merged script)
+grep -Fq 'CONSOLE_URL="https://console-openshift-console.${DOMAIN}"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: prepare output must derive the OpenShift Console URL" >&2
+  fail=1
+}
+grep -Fq 'if [[ "$DEMO_CONSOLE" == "1" ]]' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must offer a no-mutation Console URL mode" >&2
+  fail=1
+}
+grep -Fq 'Console username: ${CONSOLE_USERNAME}' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must print the console username" >&2
+  fail=1
+}
+grep -Fq "crc console --credentials" "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: helper must explain where the kubeadmin password comes from" >&2
+  fail=1
+}
+
+# --- Task 3 (#2): version discovery and selection ---
+fx="$(mktemp)"
+printf 'main\nlatest\n474d937\nv0.0.1 sha256:%s\nv0.0.3 sha256:%s\nv0.0.2 sha256:%s\n' \
+  "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})" "$(printf 'c%.0s' {1..64})" >"$fx"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 2>&1 >/dev/null)"
+assert_eq "$out" "" "no warning when a semver tag exists (and its digest resolves)"
+
+printf 'main\nlatest\n474d937\n' >"$fx"
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog "")"
+assert_eq "$out" "latest" "no semver falls back to latest"
+warn="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 2>&1 >/dev/null)"
+assert_contains "$warn" "no semver" "fallback sets a loud warning"
+assert_contains "$warn" "moving target" "warning explains the consequence"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 474d937)"
+assert_eq "$out" "474d937" "commit SHA passthrough"
+
+printf 'v0.0.1\nmain\n474d937\n' >"$fx"
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1@sha256:abc123)"
+assert_eq "$out" "v0.0.1@sha256:abc123" "digest suffix preserved"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 474d9370123456789abcdef0123456789abcdef0)"
+assert_eq "$out" "474d937" "full SHA normalized to the short tag"
+
+out="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog 0.0.1)"
+assert_eq "$out" "v0.0.1" "semver without v normalized"
+
+bad_ver="$(REGISTRY_TAG_FIXTURE="$fx" resolve_catalog_version project-koku/koku-service-operator-catalog v9.9.9 2>&1)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "1" "unknown version fails"
+assert_contains "$bad_ver" "not found" "unknown version error names the problem"
+assert_contains "$bad_ver" "v0.0.1" "unknown version error lists available tags"
+rm -f "$fx"
+
+out="$(REGISTRY_TAG_FIXTURE="/nonexistent-tag-fixture-$$" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>/dev/null)" && unreach_rc=0 || unreach_rc=$?
+assert_eq "$unreach_rc" "0" "unreachable registry passes an explicit hint through"
+assert_eq "$out" "v0.0.1" "unreachable registry uses the hint as-is"
+warn="$(REGISTRY_TAG_FIXTURE="/nonexistent-tag-fixture-$$" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>&1 >/dev/null)"
+assert_contains "$warn" "could not verify" "unreachable registry warns"
+
+fx="$(mktemp)"
+printf 'main\nlatest\n474d937\nv0.0.1\nv0.0.3\n' >"$fx"
+plan_v="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx" ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_v" "catalog:     quay.io/project-koku/koku-service-operator-catalog:v0.0.3" "dry run prints the resolved catalog image"
+plan_pin="$(cd "$ROOT" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx" VERSION=v0.0.1 ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_pin" "catalog:     quay.io/project-koku/koku-service-operator-catalog:v0.0.1" "VERSION pins the catalog image"
+rm -f "$fx"
+
+# --- Task 4 (#3): OLM manifests and install path ---
+mans="$(olm_manifests "quay.io/example/catalog:v0.0.3" "beta" "cost-demo" "koku-service-operator-catalog")"
+assert_contains "$mans" "kind: CatalogSource" "manifests include the CatalogSource"
+assert_contains "$mans" "name: koku-service-operator-catalog" "CatalogSource named"
+assert_contains "$mans" "namespace: openshift-marketplace" "CatalogSource in openshift-marketplace"
+assert_contains "$mans" "sourceType: grpc" "CatalogSource is grpc"
+assert_contains "$mans" "image: quay.io/example/catalog:v0.0.3" "CatalogSource pins the resolved image"
+assert_contains "$mans" "kind: OperatorGroup" "manifests include the OperatorGroup"
+assert_not_contains "$mans" "targetNamespaces" "OperatorGroup is AllNamespaces (no targetNamespaces)"
+assert_contains "$mans" "kind: Subscription" "manifests include the Subscription"
+assert_contains "$mans" "installPlanApproval: Automatic" "Subscription is Automatic"
+assert_contains "$mans" "channel: beta" "Subscription uses the channel"
+assert_contains "$mans" "namespace: cost-demo" "OG and Subscription live in the app namespace"
+assert_contains "$mans" "source: koku-service-operator-catalog" "Subscription points at the CatalogSource"
+
+warn_out="$(warn_existing_install cost-demo 2>&1)"
+assert_contains "$warn_out" "--reset" "existing-install warning names --reset"
+assert_contains "$warn_out" "0.0.1" "existing-install warning explains the equal-version trap"
+
+stub_dir="$(mktemp -d)"
+cat >"${stub_dir}/oc-csv" <<'EOF'
+#!/bin/bash
+if [[ "$1" == "get" && "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/koku-service-operator.v0.0.1"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-csv"
+assert_contains "$(olm_existing_csvs "${stub_dir}/oc-csv" cost-demo)" "koku-service-operator.v0.0.1" "existing koku CSVs are detected"
+
+cat >"${stub_dir}/oc-nocsv" <<'EOF'
+#!/bin/bash
+if [[ "$1" == "get" && "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/something-else.v1.0.0"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-nocsv"
+assert_eq "$(olm_existing_csvs "${stub_dir}/oc-nocsv" cost-demo)" "" "unrelated CSVs are ignored"
+rm -rf "$stub_dir"
+
+# Behavior: the registry plan shows the OLM install step (not the build steps).
+plan_reg="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_reg" "[4/8] Operator install (registry via OLM" "registry plan shows the OLM step"
+assert_not_contains "$plan_reg" "Operator image (" "registry plan promises no image build"
+# Wiring (cluster-only path): the marketplace permission pre-check.
+grep -Fq 'can-i create catalogsources -n openshift-marketplace' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: registry source must pre-check marketplace permissions" >&2
+  fail=1
+}
+
+# --- Task 5 (#4): architecture discovery and image-arch checks ---
+archfx="$(mktemp -d)"
+printf 'amd64 arm64\n' >"${archfx}/quay.io_example_multi_v1.txt"
+printf 'amd64\n' >"${archfx}/quay.io_example_single_v1.txt"
+
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/multi:v1)"
+assert_eq "$out" "amd64 arm64" "multi-arch image detected"
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/single:v1)"
+assert_eq "$out" "amd64" "single-arch image detected"
+out="$(IMAGE_ARCH_FIXTURE="$archfx" image_arches quay.io/example/missing:v1)"
+assert_eq "$out" "unknown" "missing fixture degrades to unknown"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible arm64 quay.io/example/single:v1 2>&1)" && arch_rc=0 || arch_rc=$?
+assert_eq "$arch_rc" "1" "arch mismatch fails"
+assert_contains "$arch_out" "quay.io/example/single:v1" "mismatch names the image"
+assert_contains "$arch_out" "#219" "mismatch references upstream #219"
+assert_contains "$arch_out" "ARCH_CHECK=0" "mismatch names the escape hatch"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible arm64 quay.io/example/missing:v1 2>&1)" && unverify_rc=0 || unverify_rc=$?
+assert_eq "$unverify_rc" "0" "unverifiable image does not fail"
+assert_contains "$arch_out" "could not verify" "unverifiable image warns"
+
+arch_out="$(IMAGE_ARCH_FIXTURE="$archfx" assert_arch_compatible amd64 quay.io/example/multi:v1 2>&1)" && ok_rc=0 || ok_rc=$?
+assert_eq "$ok_rc" "0" "compatible image passes"
+assert_not_contains "$arch_out" "warning" "compatible image passes silently"
+
+stub_dir="$(mktemp -d)"
+mk_oc_arch() {
+  cat >"$1" <<EOF
+#!/bin/bash
+if [[ "\$1" == "get" && "\$2" == "nodes" ]]; then
+  printf '%b\n' '$2'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$1"
+}
+mk_oc_arch "${stub_dir}/oc-amd64" 'amd64'
+mk_oc_arch "${stub_dir}/oc-mixed" 'amd64\narm64'
+mk_oc_arch "${stub_dir}/oc-s390x" 's390x'
+
+out="$(cluster_node_arch "${stub_dir}/oc-amd64")"
+assert_eq "$out" "amd64" "cluster arch detected"
+mixed_out="$(cluster_node_arch "${stub_dir}/oc-mixed" 2>&1)" && mixed_rc=0 || mixed_rc=$?
+assert_eq "$mixed_rc" "1" "mixed-architecture clusters are refused"
+assert_contains "$mixed_out" "mixed-architecture" "mixed-arch error names the problem"
+assert_contains "$mixed_out" "homogeneous" "mixed-arch error suggests the fix"
+
+s390x_out="$(cluster_node_arch "${stub_dir}/oc-s390x" 2>&1)" && s390x_rc=0 || s390x_rc=$?
+assert_eq "$s390x_rc" "1" "unsupported arch fails"
+assert_contains "$s390x_out" "unsupported" "unsupported arch message"
+
+# CR workload image extraction
+tmp_cr="$(mktemp)"
+render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp_cr" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+cr_imgs="$(cr_workload_images "$tmp_cr")"
+assert_contains "$cr_imgs" "quay.io/project-koku/koku:422f758" "CR images include koku"
+assert_contains "$cr_imgs" "quay.io/project-koku/insights-rbac:34e25ed" "CR images include insights-rbac"
+assert_contains "$cr_imgs" "registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0" "CR images include oauth2-proxy"
+assert_eq "$(printf '%s\n' "$cr_imgs" | grep -c .)" "7" "CR yields seven workload image slots (koku api + masu)"
+rm -f "$tmp_cr"
+
+# installed operator image from the CSV (stub oc)
+cat >"${stub_dir}/oc-opimg" <<'EOF'
+#!/bin/bash
+if [[ "$2" == "csv" ]]; then
+  echo "clusterserviceversion.operators.coreos.com/koku-service-operator.v0.0.1"
+  exit 0
+fi
+if [[ "$1" == "get" ]]; then
+  echo "quay.io/project-koku/koku-service-operator@sha256:deadbeef"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-opimg"
+out="$(installed_operator_image "${stub_dir}/oc-opimg" cost-demo)"
+assert_eq "$out" "quay.io/project-koku/koku-service-operator@sha256:deadbeef" "operator image read from the CSV"
+rm -rf "$stub_dir" "$archfx"
+
+grep -Fq 'assert_arch_compatible "$NODE_ARCH"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: preflight must assert image arch compatibility" >&2
+  fail=1
+}
+grep -Fq -- '--platform linux/${arch}' "${ROOT}/scripts/lib/demo-preprod.bash" || {
+  echo "FAIL: container build must target the discovered arch" >&2
+  fail=1
+}
+grep -Fq 'build_operator_image "$tool" "$NODE_ARCH"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: build_docker must pass the discovered arch to build_operator_image" >&2
+  fail=1
+}
+grep -Fq 'byoi_pod_images' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: post-deploy pass must check BYOI pod images" >&2
+  fail=1
+}
+
+# --- Task 13 (#12): container tool abstraction (docker/podman) ---
+toolbin="$(mktemp -d)"
+tlog="${toolbin}/log"
+
+mk_docker_stub() {
+  cat >"${toolbin}/docker" <<EOF
+#!/bin/bash
+if [[ "\$1" == "info" ]]; then exit $1; fi
+if [[ "\$1" == "buildx" && "\$2" == "version" ]]; then exit $2; fi
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+  chmod +x "${toolbin}/docker"
+}
+cat >"${toolbin}/podman" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${toolbin}/podman"
+
+SAVE_PATH="$PATH"
+export PATH="${toolbin}:$PATH"
+
+# podman-docker shim emulation: `docker info` works, `docker buildx` does not
+mk_docker_stub 0 1
+docker_up && shim_rc=0 || shim_rc=1
+assert_eq "$shim_rc" "1" "podman-docker shim fails the capability probe"
+out="$(container_tool)"
+assert_eq "$out" "podman" "shim falls through to podman when present"
+
+rm -f "${toolbin}/podman"
+# Isolated PATH: only the stub dir — no real podman from the system PATH.
+out="$(cd "$ROOT" && PATH="${toolbin}" "$BASH" -c 'source scripts/lib/demo-preprod.bash && container_tool')"
+assert_eq "$out" "none" "shim with no podman yields none"
+
+# capable docker (info and buildx both work)
+mk_docker_stub 0 0
+out="$(container_tool)"
+assert_eq "$out" "docker" "capable docker detected"
+
+cat >"${toolbin}/podman" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${toolbin}/podman"
+out="$(CONTAINER_TOOL=podman container_tool)"
+assert_eq "$out" "podman" "CONTAINER_TOOL override wins"
+bad_ct="$(CONTAINER_TOOL=bogus container_tool 2>&1)" && ct_rc=0 || ct_rc=$?
+assert_eq "$ct_rc" "1" "invalid CONTAINER_TOOL fails"
+assert_contains "$bad_ct" "docker or podman" "invalid CONTAINER_TOOL names the valid values"
+
+# command emission
+: >"$tlog"
+build_operator_image docker amd64 quay.example/op:tag /tmp/fake-root >/dev/null
+assert_contains "$(cat "$tlog")" "buildx build --platform linux/amd64 -t quay.example/op:tag --push /tmp/fake-root" "docker emits one buildx --push command"
+
+: >"$tlog"
+build_operator_image podman arm64 quay.example/op:tag /tmp/fake-root >/dev/null
+pod_log="$(cat "$tlog")"
+assert_contains "$pod_log" "build --platform linux/arm64 -t quay.example/op:tag /tmp/fake-root" "podman emits build"
+assert_contains "$pod_log" "push quay.example/op:tag" "podman emits push"
+
+build_operator_image none amd64 img root >/dev/null 2>&1 && none_rc=0 || none_rc=$?
+assert_eq "$none_rc" "1" "no tool fails the build"
+rm -rf "$toolbin"
+export PATH="$SAVE_PATH"
+
+grep -Fq 'container_tool' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: auto mode must pick the container tool via container_tool" >&2
+  fail=1
+}
+grep -Fq 'build_operator_image' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: build_docker must delegate to build_operator_image" >&2
+  fail=1
+}
+
+# --- Task 6 (#9): unified wait and post-install verification ---
+vdir="$(mktemp -d)"
+cat >"${vdir}/cmsc-alltrue.json" <<'EOF'
+{"status":{"phase":"Ready","conditions":[
+ {"type":"Available","status":"True","reason":"AllComponentsReady"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"False","reason":"ReconcileComplete"},
+ {"type":"Degraded","status":"False","reason":"ReconcileComplete"},
+ {"type":"ROSEnabled","status":"False","reason":"Disabled"},
+ {"type":"DiscoveryComplete","status":"True","reason":"Discovered"},
+ {"type":"DatabaseReady","status":"True","reason":"DatabaseReachable"},
+ {"type":"CacheReady","status":"True","reason":"CacheReachable"},
+ {"type":"KafkaReady","status":"True","reason":"KafkaContractValid"},
+ {"type":"StorageReady","status":"True","reason":"StorageBucketsAccessible"},
+ {"type":"AuthenticationReady","status":"True","reason":"OIDCReachable"},
+ {"type":"SchemaUpToDate","status":"True","reason":"MigrationComplete"},
+ {"type":"RBACWorkerReady","status":"True","reason":"RBACWorkerAvailable"},
+ {"type":"RBACReady","status":"True","reason":"RBACAvailable"},
+ {"type":"IngressReady","status":"True","reason":"IngressReady"},
+ {"type":"GatewayReady","status":"True","reason":"GatewayReady"}
+]}}
+EOF
+cat >"${vdir}/cmsc-bad.json" <<'EOF'
+{"status":{"phase":"Degraded","conditions":[
+ {"type":"Available","status":"False","reason":"WaitingForRBAC"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"True","reason":"Reconciling"},
+ {"type":"Degraded","status":"True","reason":"MigrationFailed"},
+ {"type":"KafkaReady","status":"False","reason":"TopicMissing"}
+]}}
+EOF
+mk_oc_cmsc() {
+  cat >"$1" <<EOF
+#!/bin/bash
+if [[ "\$2" == "cmsc" ]]; then cat "$2"; exit 0; fi
+exit 0
+EOF
+  chmod +x "$1"
+}
+mk_oc_cmsc "${vdir}/oc-good" "${vdir}/cmsc-alltrue.json"
+mk_oc_cmsc "${vdir}/oc-bad" "${vdir}/cmsc-bad.json"
+
+good_out="$(verify_conditions "${vdir}/oc-good" cost-demo cost-management)" && good_rc=0 || good_rc=$?
+assert_eq "$good_rc" "0" "all-True conditions pass"
+assert_contains "$good_out" "Available" "table lists Available"
+assert_contains "$good_out" "PASS" "table marks passes"
+assert_contains "$good_out" "INFO" "ROSEnabled is informational"
+assert_not_contains "$good_out" "FAIL" "no failures on the healthy fixture"
+
+bad_out="$(verify_conditions "${vdir}/oc-bad" cost-demo cost-management)" && bad_rc=0 || bad_rc=$?
+assert_eq "$bad_rc" "1" "failing conditions fail"
+assert_contains "$bad_out" "FAIL" "table marks failures"
+assert_contains "$bad_out" "TopicMissing" "failure row shows the reason"
+assert_contains "$bad_out" "KafkaReady" "failure row names the condition"
+assert_contains "$bad_out" "MISSING" "absent conditions are reported"
+rm -rf "${vdir}"
+
+grep -Fq 'verify_conditions "$KUBECTL"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: main flow must run the CMSC verification table" >&2
+  fail=1
+}
+# --- #15: wait_for_ui never reports success after a failed rollout (behavior test) ---
+wbin="$(mktemp -d)"
+cat >"${wbin}/oc" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"rollout status"* ]]; then
+  exit "$ROLLOUT_RC"
+fi
+if [[ "$*" == *"availableReplicas"* ]]; then
+  echo "1"
+  exit 0
+fi
+if [[ "$*" == *" cmsc "* ]]; then
+  echo "phase=Progressing"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${wbin}/oc"
+
+export ROLLOUT_RC=1
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "1" "failed rollout fails the wait"
+assert_not_contains "$wout" "UI ready" "no success message after a failed rollout"
+assert_contains "$wout" "rollout failed" "failure names the rollout"
+
+export ROLLOUT_RC=0
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "0" "successful rollout passes"
+assert_contains "$wout" "UI ready" "success message printed"
+unset ROLLOUT_RC
+
+# Timeout path: deployment never becomes available; 2s deadline, 0s poll.
+cat >"${wbin}/oc" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"availableReplicas"* ]]; then
+  exit 1
+fi
+if [[ "$2" == "cmsc" ]]; then
+  echo "phase=Progressing"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${wbin}/oc"
+wout="$(wait_for_ui "${wbin}/oc" cost-demo cost-management https://ui.example 0 2 0 2>&1)" && wrc=0 || wrc=$?
+assert_eq "$wrc" "1" "deadline expiry fails the wait"
+assert_contains "$wout" "did not become Available" "timeout message printed"
+rm -rf "$wbin"
+
+# --- Task 7 (#5): demo-profile hardening ---
+tmp7="$(mktemp)"
+render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp7" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+rendered7="$(cat "$tmp7")"
+assert_not_contains "$rendered7" "IQE_TEST_RUN" "default render drops IQE_TEST_RUN"
+assert_not_contains "$rendered7" "CURRENCY_URL" "default render drops CURRENCY_URL"
+assert_not_contains "$rendered7" "open.er-api.com" "default render drops the external currency API"
+rm -f "$tmp7"
+
+tmp7="$(mktemp)"
+DEMO_SMOKE=1 render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp7" \
+  "apps.example.test" "https://keycloak-keycloak.apps.example.test" "catalog-demo" "catalog-cost"
+unset DEMO_SMOKE
+rendered7="$(cat "$tmp7")"
+assert_contains "$rendered7" "IQE_TEST_RUN" "smoke escape hatch keeps IQE_TEST_RUN"
+assert_contains "$rendered7" "CURRENCY_URL" "smoke escape hatch keeps CURRENCY_URL"
+rm -f "$tmp7"
+
+banner7="$(demo_profile_banner)"
+assert_contains "$banner7" "not for production" "banner states the demo profile"
+assert_contains "$banner7" "docs/install/production.md" "banner points at the production docs"
+assert_contains "$banner7" "PLAINTEXT" "banner lists the insecure settings"
+
+grep -Fq 'openssl rand' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must generate a random realm password" >&2
+  fail=1
+}
+grep -Fq 'realm-admin' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must store the realm password in a Secret" >&2
+  fail=1
+}
+grep -Fq 'demo_profile_banner' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the demo must print the profile banner" >&2
+  fail=1
+}
+
+# --- Task 8 (#6): prereqs-only, skip-prereqs, --cr-file ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out" "--prereqs-only" "help documents --prereqs-only"
+assert_contains "$help_out" "--skip-prereqs" "help documents --skip-prereqs"
+assert_contains "$help_out" "--cr-file" "help documents --cr-file"
+
+plan_po="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only 2>&1)"
+assert_contains "$plan_po" "stopping after the prerequisites" "prereqs-only plan states it stops"
+
+tmp_cr8="$(mktemp)"
+printf 'apiVersion: service.costmanagement.openshift.io/v1alpha1\nkind: CostManagementServiceConfig\nmetadata:\n  name: cost-management\n  namespace: cost-byoi\n' >"$tmp_cr8"
+plan_sp="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --skip-prereqs --cr-file "$tmp_cr8" 2>&1)"
+rm -f "$tmp_cr8"
+assert_contains "$plan_sp" "CR:          " "skip-prereqs plan shows the user CR"
+assert_contains "$plan_sp" "user-provided; rendering skipped" "plan marks the CR as user-provided"
+assert_contains "$plan_sp" "BYOI is skipped" "skip-prereqs plan states BYOI is skipped"
+
+bad_combo="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only --skip-prereqs 2>&1)" && combo_rc=0 || combo_rc=$?
+assert_eq "$combo_rc" "2" "prereqs-only + skip-prereqs rejected"
+assert_contains "$bad_combo" "mutually exclusive" "combo error names the conflict"
+
+bad_cr="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --cr-file /nonexistent-cr.yaml 2>&1)" && cr_rc=0 || cr_rc=$?
+assert_eq "$cr_rc" "2" "missing --cr-file fails fast"
+assert_contains "$bad_cr" "not found" "missing --cr-file error names the file"
+
+grep -Fq '"$CR_TO_APPLY"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the apply step must use the resolved CR (user file or rendered)" >&2
+  fail=1
+}
+grep -Fq 'USER_CR_FILE' "${ROOT}/scripts/demo-preprod.env.example" || {
+  echo "FAIL: env example documents the user CR override" >&2
+  fail=1
+}
+
+# --- Task 9 (#8): single-node profile and crc.env split ---
+plan_sn="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --single-node 2>&1)"
+assert_contains "$plan_sn" "profile:     single-node" "single-node shows in the plan"
+assert_contains "$plan_sn" "Kafka 1 broker + 1 controller" "plan shows the Kafka sizing"
+assert_contains "$plan_sn" "context:     <current>" "profile does not pin KUBE_CONTEXT"
+assert_not_contains "$plan_sn" "martin_povolny" "plan has no arm64 image overrides"
+
+plan_crc_alias="$(cd "$ROOT" && env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --crc 2>&1)"
+assert_eq "$plan_crc_alias" "$plan_sn" "--crc is an alias for --single-node"
+
+if [[ -e "${ROOT}/scripts/demo-preprod.crc.env" ]]; then
+  echo "FAIL: demo-preprod.crc.env must be replaced by the opt-in arm64 template" >&2
+  fail=1
+fi
+if [[ ! -f "${ROOT}/scripts/demo-preprod.arm64.env" ]]; then
+  echo "FAIL: demo-preprod.arm64.env template must exist" >&2
+  fail=1
+fi
+if grep -qE "load_env_file.*arm64" "${ROOT}/scripts/demo-preprod.sh"; then
+  echo "FAIL: no flag may auto-load the arm64 template" >&2
+  fail=1
+fi
+# --- Task 10 (#7): reset removes OLM objects ---
+stub_dir="$(mktemp -d)"
+cat >"${stub_dir}/oc-reset" <<EOF
+#!/bin/bash
+echo "\$*" >> "${stub_dir}/log"
+exit 0
+EOF
+chmod +x "${stub_dir}/oc-reset"
+reset_olm_objects "${stub_dir}/oc-reset" cost-demo koku-service-operator-catalog >/dev/null 2>&1
+reset_cmds="$(cat "${stub_dir}/log")"
+rm -rf "$stub_dir"
+assert_contains "$reset_cmds" "delete subscription koku-service-operator -n cost-demo --ignore-not-found" "reset removes the Subscription"
+assert_contains "$reset_cmds" "delete csv -l operators.coreos.com/koku-service-operator.cost-demo -n cost-demo --ignore-not-found" "reset removes CSVs by label"
+assert_contains "$reset_cmds" "delete operatorgroup koku-service-operator-group -n cost-demo --ignore-not-found" "reset removes the OperatorGroup"
+assert_contains "$reset_cmds" "delete catalogsource koku-service-operator-catalog -n openshift-marketplace --ignore-not-found" "reset removes the CatalogSource"
+
+grep -Fq 'reset_olm_objects "$KUBECTL" "$NAMESPACE" "$CATALOG_NAME"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the reset block must call reset_olm_objects" >&2
+  fail=1
+}
+
+# --- Task 11 (#10): consolidation — remaining acceptance coverage ---
+help_out="$(cd "$ROOT" && ./scripts/demo-preprod.sh --help 2>&1)"
+for _flag in --reset --dry-run --no-tmux --rebuild --no-open --version --catalog-repo --channel --source; do
+  case "$help_out" in
+    *"$_flag"*) ;;
+    *) echo "FAIL: help must document $_flag" >&2; fail=1 ;;
+  esac
+done
+
+# KUBE_CONTEXT defaults to empty (current context), never clusterbot
+grep -Fq 'KUBE_CONTEXT="${KUBE_CONTEXT:-}"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: KUBE_CONTEXT must default to the current context" >&2
+  fail=1
+}
+
+# ARCH_CHECK=0 skip path exists and warns
+grep -Fq 'ARCH_CHECK=0 — image architecture checks skipped' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: ARCH_CHECK=0 must warn that checks are skipped" >&2
+  fail=1
+}
+
+# --cr-file passthrough: the apply step uses the resolved CR, not a fixed path
+grep -Fq '"$KUBECTL" apply -f "$CR_TO_APPLY"' "${ROOT}/scripts/demo-preprod.sh" || {
+  echo "FAIL: the apply step must use the resolved CR (rendered or user-provided)" >&2
+  fail=1
+}
+
+# The arm64 template is parseable as an env file (comments + KEY=VALUE only)
+while IFS= read -r _line || [[ -n "$_line" ]]; do
+  _line="${_line%$'\r'}"
+  [[ "$_line" =~ ^[[:space:]]*# ]] && continue
+  [[ -z "${_line//[[:space:]]/}" ]] && continue
+  [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
+    echo "FAIL: demo-preprod.arm64.env has a non-assignment line: ${_line}" >&2
+    fail=1
+  }
+done <"${ROOT}/scripts/demo-preprod.arm64.env"
+
+# --- #13: tmux wrapper forwards every flag to the inner run (behavior test) ---
+tbin="$(mktemp -d)"
+tlog="${tbin}/tmux.log"
+cat >"${tbin}/tmux" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog}"
+exit 0
+EOF
+chmod +x "${tbin}/tmux"
+fx13="$(mktemp)"
+printf 'v0.0.1\n' >"$fx13"
+# The outer process exits after start_tmux; the stub captures the inner
+# command, which points at a runner file carrying the caller's full exported
+# environment plus the raw invocation. Assert against the RUNNER (the
+# cross-model review proved command-line allowlists drop documented vars).
+env -u KUBE_CONTEXT PATH="${tbin}:$PATH" REGISTRY_TAG_FIXTURE="$fx13" \
+  ./scripts/demo-preprod.sh --prereqs-only --version v0.0.1 --channel stable >/dev/null 2>&1 || true
+inner_cmd="$(grep 'send-keys' "$tlog" | grep demo-preprod-runner | tail -1 || true)"
+assert_contains "$inner_cmd" "bash " "inner runs via the env runner"
+assert_contains "$inner_cmd" "demo-preprod-runner" "inner command names the runner"
+runner13="$(printf '%s\n' "$inner_cmd" | grep -oE '/[^ ]*demo-preprod-runner[^ ]*' | head -1 || true)"
+if [[ -z "$runner13" || ! -f "$runner13" ]]; then
+  echo "FAIL: cannot locate the runner file from: $inner_cmd" >&2
+  fail=1
+else
+  runner_body="$(cat "$runner13")"
+  assert_contains "$runner_body" "--prereqs-only" "runner receives --prereqs-only"
+  assert_contains "$runner_body" "--version v0.0.1" "runner receives --version v0.0.1"
+  assert_contains "$runner_body" "--channel stable" "runner receives --channel stable"
+fi
+rm -rf "$tbin" "$fx13" "$runner13"
+
+# --- #14: .local.env overrides the example defaults (behavior test) ---
+demo_root14="$(mktemp -d)"
+mkdir -p "${demo_root14}/scripts/lib"
+cp -p "${ROOT}/scripts/demo-preprod.sh" "${ROOT}/scripts/demo-preprod.env.example" "${demo_root14}/scripts/"
+cp -p "${ROOT}/scripts/lib/demo-preprod.bash" "${demo_root14}/scripts/lib/"
+printf 'NAMESPACE=custom-ns\nKAFKA_NAMESPACE=custom-kafka\n' >"${demo_root14}/scripts/demo-preprod.local.env"
+fx14="$(mktemp)"
+printf 'v0.0.1\n' >"$fx14"
+plan14="$(cd "${demo_root14}" && env -u KUBE_CONTEXT REGISTRY_TAG_FIXTURE="$fx14" ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan14" "custom-ns" "local.env NAMESPACE overrides the example default"
+assert_contains "$plan14" "custom-kafka" "local.env KAFKA_NAMESPACE overrides the example default"
+assert_not_contains "$plan14" "cost-byoi " "example default namespace is not used when overridden"
+rm -rf "${demo_root14}" "$fx14"
+
+# --- #16: zero/empty availableReplicas is NOT ready (behavior test) ---
+rbin="$(mktemp -d)"
+mk_oc_avail() {
+  cat >"${rbin}/oc" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"availableReplicas"* ]]; then
+  printf '%s' "$1"
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "${rbin}/oc"
+}
+mk_oc_avail "1"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "0" "one available replica is ready"
+mk_oc_avail ""
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "EMPTY availableReplicas (zero, omitted by k8s) is not ready"
+mk_oc_avail "0"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "explicit zero replicas is not ready"
+cat >"${rbin}/oc" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${rbin}/oc"
+deploy_available "${rbin}/oc" ns dep && avail_rc=0 || avail_rc=$?
+assert_eq "$avail_rc" "1" "missing deployment is not ready"
+rm -rf "$rbin"
+
+# --- #18: fixture hooks refuse to run without the explicit gate ---
+gate_fx="$(mktemp)"
+printf 'v0.0.1\n' >"$gate_fx"
+gate_out="$(env -u DEMO_ALLOW_FIXTURES REGISTRY_TAG_FIXTURE="$gate_fx" \
+  bash -c 'source scripts/lib/demo-preprod.bash && registry_list_tags project-koku/koku-service-operator-catalog' 2>&1)" && gate_rc=0 || gate_rc=$?
+assert_eq "$gate_rc" "1" "fixture without the gate fails"
+assert_contains "$gate_out" "fixture mode is not enabled" "ungated fixture names the problem"
+rm -f "$gate_fx"
+
+# --- #17: inputs are validated before interpolation ---
+validate_version_hint "v0.0.1" && v17=0 || v17=$?
+validate_version_hint "latest" && : || v17=1
+validate_version_hint "474d937" && : || v17=1
+validate_version_hint "474d9370123456789abcdef0123456789abcdef0" && : || v17=1
+validate_version_hint "v0.0.1@sha256:$(printf 'a%.0s' {1..64})" && : || v17=1
+validate_version_hint "" && : || v17=1
+assert_eq "$v17" "0" "valid version hints pass"
+bad_v="$(validate_version_hint $'v0.0.1\nextra: yaml' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "multiline version rejected"
+bad_v="$(validate_version_hint 'v0.0.1@sha256:short' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "short digest rejected"
+bad_v="$(validate_version_hint 'a"b' 2>&1)" && bv17=0 || bv17=$?
+assert_eq "$bv17" "1" "quoted version rejected"
+
+# hostile REALM_ADMIN_PASSWORD survives as JSON (deploy-rhbk.sh builds it with jq --arg)
+pw17='bad"pass\word'
+json17="$(jq -n --arg pw "$pw17" '[{"username":"admin","password":$pw}]')"
+jq -e --arg pw "$pw17" '.[0].password == $pw' <<<"$json17" >/dev/null \
+  && : || { echo "FAIL: jq --arg must round-trip hostile passwords" >&2; fail=1; }
+grep -Fq 'jq -n --arg pw' "${ROOT}/scripts/deploy-rhbk.sh" || {
+  echo "FAIL: deploy-rhbk.sh must build the default users JSON with jq --arg" >&2
+  fail=1
+}
+
+# DEMO_* override charset
+tmp17="$(mktemp)"
+render17_rc=0
+DEMO_KOKU_TAG='x"y' render_preprod_cr "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" "$tmp17" \
+  "apps.example.test" "https://kc.apps.example.test" "ns17" "cr17" >/dev/null 2>&1 || render17_rc=$?
+assert_eq "$render17_rc" "1" "override value with a quote fails the render"
+rm -f "$tmp17"
+
+# --- #19: resolved versions are pinned by digest when known ---
+fx19="$(mktemp)"
+printf 'main\nv0.0.1 sha256:%s\nv0.0.3 sha256:%s\n' "$(printf 'b%.0s' {1..64})" "$(printf 'c%.0s' {1..64})" >"$fx19"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog "")"
+assert_eq "$out" "v0.0.3@sha256:$(printf 'c%.0s' {1..64})" "discovered semver is digest-pinned"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1)"
+assert_eq "$out" "v0.0.1@sha256:$(printf 'b%.0s' {1..64})" "explicit tag is digest-pinned"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog main)"
+assert_eq "$out" "main" "fixture without a digest stays a bare tag"
+out="$(REGISTRY_TAG_FIXTURE="$fx19" resolve_catalog_version project-koku/koku-service-operator-catalog "v0.0.1@sha256:$(printf 'd%.0s' {1..64})")"
+assert_eq "$out" "v0.0.1@sha256:$(printf 'd%.0s' {1..64})" "user-supplied digest is preserved verbatim"
+rm -f "$fx19"
+
+# --- #21: drifted samples fail the render instead of rendering wrong ---
+tmp21a="$(mktemp)"; tmp21b="$(mktemp)"
+sed 's/clusterDomain: "apps.cluster.example.com"/clusterDomain: "renamed.example.com"/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$tmp21a"
+render21_rc=0
+render_preprod_cr "$tmp21a" "$tmp21b" "apps.example.test" "https://kc.apps.example.test" "ns21" "cr21" >/dev/null 2>&1 || render21_rc=$?
+assert_eq "$render21_rc" "1" "drifted clusterDomain placeholder fails the render"
+sed 's/  namespace: cost-byoi$/  namespace: renamed-ns$/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$tmp21a"
+render21_rc=0
+render_preprod_cr "$tmp21a" "$tmp21b" "apps.example.test" "https://kc.apps.example.test" "ns21" "cr21" >/dev/null 2>&1 || render21_rc=$?
+assert_eq "$render21_rc" "1" "drifted namespace block fails the render"
+rm -f "$tmp21a" "$tmp21b"
+
+# --- re-review regressions: --no-open folding, env-form forwarding, watch password ---
+out="$(DEMO_NO_OPEN=1 OPEN_BROWSER=1 should_open_browser)"
+assert_eq "$out" "0" "--no-open suppresses the browser"
+out="$(DEMO_NO_OPEN=0 OPEN_BROWSER=1 should_open_browser)"
+assert_eq "$out" "1" "default opens the browser"
+out="$(DEMO_NO_OPEN=0 OPEN_BROWSER=0 should_open_browser)"
+assert_eq "$out" "0" "OPEN_BROWSER=0 suppresses the browser"
+
+# env forms survive the tmux wrapper (behavior test with the tmux stub)
+tbin2="$(mktemp -d)"
+tlog2="${tbin2}/tmux.log"
+cat >"${tbin2}/tmux" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "${tlog2}"
+exit 0
+EOF
+chmod +x "${tbin2}/tmux"
+# Cross-model review regression: variables beyond any allowlist (SOURCE,
+# NAMESPACE, CATALOG_IMG, DEMO_SMOKE, image overrides) must reach the inner
+# run — the runner serializes the whole exported environment.
+env -u KUBE_CONTEXT PATH="${tbin2}:$PATH" REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
+  SOURCE=manual NAMESPACE=crosscheck-ns CR_NAME=crosscheck-cr CATALOG_IMG=quay.io/x/catalog:v9.9.9 \
+  DEMO_SMOKE=1 DEMO_KOKU_IMAGE=quay.io/me/koku-build PREREQS_ONLY=1 \
+  ./scripts/demo-preprod.sh >/dev/null 2>&1 || true
+env2_cmd="$(grep 'send-keys' "$tlog2" | grep demo-preprod-runner | tail -1 || true)"
+runner2="$(printf '%s\n' "$env2_cmd" | grep -oE '/[^ ]*demo-preprod-runner[^ ]*' | head -1 || true)"
+if [[ -z "$runner2" || ! -f "$runner2" ]]; then
+  echo "FAIL: cannot locate the runner file from: $env2_cmd" >&2
+  fail=1
+else
+  env2_body="$(cat "$runner2")"
+  assert_contains "$env2_body" 'SOURCE="manual"' "runner carries SOURCE"
+  assert_contains "$env2_body" 'NAMESPACE="crosscheck-ns"' "runner carries NAMESPACE"
+  assert_contains "$env2_body" 'CR_NAME="crosscheck-cr"' "runner carries CR_NAME"
+  assert_contains "$env2_body" 'CATALOG_IMG="quay.io/x/catalog:v9.9.9"' "runner carries CATALOG_IMG (digest pin preserved)"
+  assert_contains "$env2_body" 'DEMO_SMOKE="1"' "runner carries DEMO_SMOKE"
+  assert_contains "$env2_body" 'DEMO_KOKU_IMAGE="quay.io/me/koku-build"' "runner carries image overrides"
+  assert_contains "$env2_body" 'PREREQS_ONLY="1"' "runner carries the PREREQS_ONLY env form"
+fi
+rm -rf "$tbin2" "$runner2"
+
+# ungated fixture aborts the install outright
+ungated="$(env -u KUBE_CONTEXT -u DEMO_ALLOW_FIXTURES REGISTRY_TAG_FIXTURE="$DEFAULT_TAG_FIXTURE" \
+  ./scripts/demo-preprod.sh --dry-run 2>&1)" && ungated_rc=0 || ungated_rc=$?
+assert_eq "$ungated_rc" "1" "ungated fixture aborts"
+assert_contains "$ungated" "aborting" "ungated fixture names the abort"
+
+# CATALOG_IMG validation + truthful CATALOG_VERSION for explicit overrides
+bad_img="$(env -u KUBE_CONTEXT CATALOG_IMG='bad"img' ./scripts/demo-preprod.sh --dry-run 2>&1)" && bi_rc=0 || bi_rc=$?
+assert_eq "$bi_rc" "2" "CATALOG_IMG with a quote is rejected"
+img_plan="$(env -u KUBE_CONTEXT CATALOG_IMG=quay.io/example/catalog:v9.9.9 ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$img_plan" "version:     v9.9.9" "explicit CATALOG_IMG version shows the tag, not a digest fragment"
+
+# --- cross-model review: cr-file reconciliation, channel validation, repo normalization ---
+badcr="$(mktemp)"
+sed 's/  namespace: cost-byoi$/  namespace: elsewhere-ns/' \
+  "${ROOT}/config/samples/byoi/app/costmanagementserviceconfig.yaml" >"$badcr"
+cr_mismatch="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --cr-file "$badcr" 2>&1)" && cm_rc=0 || cm_rc=$?
+assert_eq "$cm_rc" "2" "cr-file with mismatched namespace is rejected before anything runs"
+assert_contains "$cr_mismatch" "elsewhere-ns" "mismatch error names the CR's namespace"
+rm -f "$badcr"
+
+bad_ch="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --channel $'beta\nevil: x' 2>&1)" && ch_rc=0 || ch_rc=$?
+assert_eq "$ch_rc" "2" "multiline channel rejected"
+assert_contains "$bad_ch" "CHANNEL" "channel error names the variable"
+
+repo_norm="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --catalog-repo project-koku 2>&1)"
+assert_contains "$repo_norm" "catalog:     quay.io/project-koku/koku-service-operator-catalog:" "bare catalog repo normalizes to quay.io"
+
+# RBACWorkerReady is non-gating: a fixture missing only it still passes
+vdir2="$(mktemp -d)"
+python3 - "$vdir2" <<'PY'
+import json
+conds = [
+ {"type":"Available","status":"True","reason":"AllComponentsReady"},
+ {"type":"UIReady","status":"True","reason":"OAuthClientSecretReady"},
+ {"type":"Progressing","status":"False","reason":"ReconcileComplete"},
+ {"type":"Degraded","status":"False","reason":"ReconcileComplete"},
+]
+for t in ["DiscoveryComplete","DatabaseReady","CacheReady","KafkaReady","StorageReady",
+          "AuthenticationReady","SchemaUpToDate","RBACReady","IngressReady","GatewayReady"]:
+    conds.append({"type":t,"status":"True","reason":"ok"})
+json.dump({"status":{"phase":"Ready","conditions":conds}}, open(f"{__import__('sys').argv[1]}/cmsc.json","w"))
+PY
+cat >"${vdir2}/oc" <<EOF
+#!/bin/bash
+if [[ "\$2" == "cmsc" ]]; then cat "${vdir2}/cmsc.json"; exit 0; fi
+exit 0
+EOF
+chmod +x "${vdir2}/oc"
+wk_out="$(verify_conditions "${vdir2}/oc" cost-demo cost-management)" && wk_rc=0 || wk_rc=$?
+assert_eq "$wk_rc" "0" "missing RBACWorkerReady does not fail the verification (non-gating)"
+assert_not_contains "$wk_out" "FAIL" "no failures with RBACWorkerReady absent"
+rm -rf "$vdir2"
+
+# --- #25: OAuth mirror is required when the secret is absent OR stale ---
+obin="$(mktemp -d)"
+cat >"${obin}/oc-secret" <<'EOF'
+#!/bin/bash
+if [[ "$3" == "get" && "$4" == "secret" ]]; then exit 0; fi
+exit 1
+EOF
+cat >"${obin}/oc-nosecret" <<'EOF'
+#!/bin/bash
+if [[ "$3" == "get" && "$4" == "secret" ]]; then echo "Error from server (NotFound)" >&2; exit 1; fi
+exit 1
+EOF
+chmod +x "${obin}/oc-secret" "${obin}/oc-nosecret"
+# Return 0 = mirror required. Secret exists + Keycloak skipped -> NOT required.
+oauth_mirror_needed "${obin}/oc-secret" ns cr 1 && om=0 || om=$?
+assert_eq "$om" "1" "existing secret with skipped Keycloak: no re-mirror"
+# Secret exists + Keycloak being (re)provisioned -> required (stale client secret)
+oauth_mirror_needed "${obin}/oc-secret" ns cr 0 && om=0 || om=$?
+assert_eq "$om" "0" "existing secret with fresh Keycloak: re-mirror (stale client secret)"
+# Secret absent -> always required
+oauth_mirror_needed "${obin}/oc-nosecret" ns cr 1 && om=0 || om=$?
+assert_eq "$om" "0" "absent secret with skipped Keycloak: mirror"
+oauth_mirror_needed "${obin}/oc-nosecret" ns cr 0 && om=0 || om=$?
+assert_eq "$om" "0" "absent secret with fresh Keycloak: mirror"
+rm -rf "$obin"
+
+# --- #25: registry client parsing against recorded API responses ---
+RC_TD="${ROOT}/scripts/testdata/registry"
+rc_py() {
+  python3 - "$@" <<'PYRC'
+import sys
+sys.path.insert(0, sys.argv[1])
+import registry_client as rc
+print(eval(sys.argv[2]))
+PYRC
+}
+# quay tag pages: names + pagination flag
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-page-1.json').read())")"
+assert_contains "$rc_out" "'main'" "recorded quay page 1 parses tag names"
+assert_contains "$rc_out" "True" "recorded quay page 1 reports has_additional (pagination continues)"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-page-2.json').read())")"
+assert_contains "$rc_out" "True" "recorded quay page 2 continues pagination"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_page(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read())")"
+assert_contains "$rc_out" "False" "recorded filtered query ends pagination"
+# quay digest query
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_digest(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read(), 'v0.0.1')")"
+assert_contains "$rc_out" "sha256:439e1d9d18c58496a2e85d56a3892657b2347b947e15643acc885dcd7cf3efb9" "recorded digest query parses manifest_digest"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.parse_tag_digest(open('${RC_TD}/quay-tag-digest-v0.0.1.json').read(), 'no-such-tag')")"
+assert_eq "$rc_out" "" "unknown tag yields an empty digest"
+# image ref splitting: docker.io redirect, tag+digest refs, bare repos
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('docker.io/library/postgres:16')")"
+assert_contains "$rc_out" "'registry-1.docker.io', 'library/postgres', '16'" "docker.io refs address registry-1"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('docker.io/pgsty/silo:latest@sha256:abc')")"
+assert_contains "$rc_out" "'registry-1.docker.io', 'pgsty/silo', 'sha256:abc'" "tag+digest refs split to the digest"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('quay.io/project-koku/koku')")"
+assert_contains "$rc_out" "'quay.io', 'project-koku/koku', 'latest'" "bare refs default to latest"
+# token URL from the docker.io challenge (no scope in the header -> constructed)
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.token_url_from_challenge(open('${RC_TD}/docker-io-challenge.txt').read().strip(), 'library/postgres')")"
+assert_contains "$rc_out" "https://auth.docker.io/token?service=registry.docker.io" "challenge realm and service parsed"
+assert_contains "$rc_out" "scope=repository:library/postgres:pull" "pull scope constructed when the challenge omits it"
+# manifest list architectures (real postgres:16 index)
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architectures_from_manifests(__import__('json').load(open('${RC_TD}/docker-io-manifest-list-postgres16.json'))['manifests'])")"
+assert_contains "$rc_out" "'amd64'" "postgres:16 manifest list yields amd64"
+assert_contains "$rc_out" "'arm64'" "postgres:16 manifest list yields arm64"
+assert_not_contains "$rc_out" "'unknown'" "no unknown architectures from the recorded index"
+# config blob architecture
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.architecture_from_config(open('${RC_TD}/docker-io-config-postgres16-amd64.json').read())")"
+assert_eq "$rc_out" "amd64" "config blob yields the architecture"
+unset RC_TD
+
+# --- CodeRabbit round (fork #42): registry client and digest pinning ---
+# split_image_ref must preserve single-component repositories on custom
+# registries (rpartition returns the whole string as the tail when no
+# separator exists — these used to yield an EMPTY repository).
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('registry.example:5000/operator@sha256:abc')")"
+assert_contains "$rc_out" "'registry.example:5000', 'operator', 'sha256:abc'" "single-component repo with digest preserved"
+rc_out="$(rc_py "${ROOT}/scripts/lib" "rc.split_image_ref('registry.example:5000/operator')")"
+assert_contains "$rc_out" "'registry.example:5000', 'operator', 'latest'" "untagged single-component repo preserved"
+
+# A digest lookup that comes back empty must warn about the moving tag, not
+# silently install unpinned (every other fallback warns; the PR promises pins).
+fx42="$(mktemp)"
+printf 'main\nv0.0.1\n' >"$fx42"
+out42="$(REGISTRY_TAG_FIXTURE="$fx42" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1)"
+assert_eq "$out42" "v0.0.1" "digest-less fixture still resolves the bare tag"
+warn42="$(REGISTRY_TAG_FIXTURE="$fx42" resolve_catalog_version project-koku/koku-service-operator-catalog v0.0.1 2>&1 >/dev/null)"
+assert_contains "$warn42" "could not resolve the manifest digest" "missing digest warns about the moving tag"
+assert_contains "$warn42" "moving tag" "warning names the consequence"
+rm -f "$fx42"
+
+# --- --context flag: sets KUBE_CONTEXT, wins over env files ---
+ctx_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --context my-cluster 2>&1)"
+assert_contains "$ctx_plan" "context:     my-cluster" "--context selects the kube context"
+help_out2="$(./scripts/demo-preprod.sh --help 2>&1)"
+assert_contains "$help_out2" "--context <name>" "help documents --context"
+assert_contains "$help_out2" "oc config get-contexts lists them" "help says how to discover context names"
+assert_contains "$help_out2" "Common examples:" "help has an examples section"
+assert_contains "$help_out2" "--context my-context   # kubeconfig context name — oc config get-contexts lists yours" "example 1: full-cluster evaluation with an unambiguous context placeholder"
+assert_contains "$help_out2" "./scripts/demo-preprod.sh --context crc --single-node --source local" "example 2: CRC developer command"
+assert_contains "$help_out2" "leave clean: --uninstall" "example 2 mentions the teardown follow-ups"
+
+# --- --flag=value form works for every value-taking flag ---
+eq_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=local --context=ctx9 --channel=stable 2>&1)"
+assert_contains "$eq_plan" "source:      local" "--source=local (equals form) parses"
+assert_contains "$eq_plan" "context:     ctx9" "--context=ctx9 (equals form) parses"
+eq_ver="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source=registry --version=v0.0.1 --context=ctx9 2>&1)"
+assert_contains "$eq_ver" "version:     v0.0.1" "--version=v0.0.1 (equals form) parses"
+eq_sp="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local --context ctx9 2>&1)"
+assert_eq "$eq_sp" "$eq_plan" "equals and space forms are equivalent"
+
+# --- tenant bootstrap + API smoke check (Settings is broken until the demo
+# tenant exists: data-retention 503s, currency dropdown empty) ---
+tb="$(mktemp -d)"
+cat >"${tb}/oc" <<EOF
+#!/bin/bash
+# Record the invocation; stdin (the bootstrap snippet) is saved to a file so
+# the assertions can inspect exactly what was piped into manage.py shell.
+echo "ARGS: \$*" >"${tb}/args.txt"
+cat >"${tb}/stdin.txt"
+echo "BOOTSTRAP OK schema=org1234567 currencies=23"
+EOF
+chmod +x "${tb}/oc"
+bt_out="$(bootstrap_tenant "${tb}/oc" cost-byoi cost-management 1234567 7890123)" && bt_rc=0 || bt_rc=$?
+assert_eq "$bt_rc" "0" "bootstrap_tenant succeeds when the pod reports BOOTSTRAP OK"
+assert_contains "$bt_out" "BOOTSTRAP OK schema=org1234567 currencies=23" "bootstrap_tenant surfaces the summary line"
+bt_args="$(cat "${tb}/args.txt")"
+bt_stdin="$(cat "${tb}/stdin.txt")"
+assert_contains "$bt_args" "exec -i -n cost-byoi deploy/cost-management-koku-api" "bootstrap_tenant execs into the koku-api deployment with stdin"
+assert_contains "$bt_args" "cd /opt/koku/koku && python manage.py shell" "bootstrap_tenant runs manage.py shell in the pod"
+# The snippet piped on stdin must be the idempotent provisioning.
+assert_contains "$bt_stdin" 'IdentityHeaderMiddleware.create_customer(ACCOUNT, ORG_ID, "POST")' "snippet provisions the Customer row"
+assert_contains "$bt_stdin" 'Tenant.objects.get_or_create(schema_name=schema)' "snippet is idempotent (get_or_create Tenant)"
+assert_contains "$bt_stdin" "tenant.create_schema()" "snippet creates the schema when missing"
+assert_contains "$bt_stdin" 'ORG_ID = "1234567"' "snippet carries the configured org_id"
+assert_contains "$bt_stdin" 'ACCOUNT = "7890123"' "snippet carries the configured account number"
+
+# Non-alphanumeric identity values are rejected before reaching the pod.
+bt_bad="$(bootstrap_tenant "${tb}/oc" cost-byoi cost-management '12"; DROP' 7890123 2>&1)" && bb_rc=0 || bb_rc=$?
+assert_eq "$bb_rc" "1" "bootstrap_tenant rejects non-alphanumeric org_id"
+assert_contains "$bt_bad" "alphanumeric" "rejection message names the constraint"
+
+# A failing pod (no BOOTSTRAP OK marker) fails the bootstrap with the log.
+cat >"${tb}/oc-fail" <<'EOF'
+#!/bin/bash
+cat >/dev/null
+echo "Traceback (most recent call last):" >&2
+echo "psycopg2.errors.UndefinedTable" >&2
+exit 1
+EOF
+chmod +x "${tb}/oc-fail"
+bt_fail="$(bootstrap_tenant "${tb}/oc-fail" cost-byoi cost-management 1234567 7890123 2>&1)" && bf_rc=0 || bf_rc=$?
+assert_eq "$bf_rc" "1" "bootstrap_tenant fails when the pod command fails"
+assert_contains "$bt_fail" "UndefinedTable" "bootstrap_tenant surfaces the pod log on failure"
+assert_contains "$bt_fail" "tenant bootstrap failed" "bootstrap failure names the step"
+
+# Smoke check: two stubbed curl responses decide pass/fail. Bodies live in
+# files so the stub heredoc never has to quote JSON.
+smoke_oc() {
+  printf '%s' "$1" >"${tb}/retention.json"
+  printf '%s' "$2" >"${tb}/currency.json"
+  cat >"${tb}/oc-smoke" <<EOF
+#!/bin/bash
+if [[ "\$*" == *data-retention* ]]; then
+  cat "${tb}/retention.json"
+else
+  cat "${tb}/currency.json"
+fi
+EOF
+  chmod +x "${tb}/oc-smoke"
+}
+smoke_oc '{"data_retention_months":4,"env_override":false}' '{"meta":{"count":23},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "0" "smoke_tenant_api passes on healthy tenant endpoints"
+assert_contains "$sm_out" "data-retention     PASS" "data-retention row passes"
+assert_contains "$sm_out" "currency list      PASS" "currency row passes"
+assert_contains "$sm_out" "23 enabled" "currency row shows the enabled count"
+
+smoke_oc '{"detail": "Service Unavailable"}' '{"meta":{"count":23},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123 2>&1)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "1" "smoke_tenant_api fails on data-retention error body"
+assert_contains "$sm_out" "data-retention     FAIL" "data-retention row fails"
+
+smoke_oc '{"data_retention_months":4}' '{"meta":{"count":0},"data":[]}'
+sm_out="$(smoke_tenant_api "${tb}/oc-smoke" cost-byoi cost-management 1234567 7890123 2>&1)" && sm_rc=0 || sm_rc=$?
+assert_eq "$sm_rc" "1" "smoke_tenant_api fails on empty currency list"
+assert_contains "$sm_out" "currency list      FAIL" "currency row fails on count 0"
+
+rm -rf "$tb"
+
+# Wiring (cluster-only path, documented source grep per test policy): the
+# install flow must call the bootstrap and the smoke check after CMSC
+# verification, and the plan must announce the step.
+demo_src="$(cat "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$demo_src" 'bootstrap_tenant "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls bootstrap_tenant"
+assert_contains "$demo_src" 'smoke_tenant_api "$KUBECTL" "$NAMESPACE" "$CR_NAME" "$DEMO_ORG_ID" "$DEMO_ACCOUNT_NUMBER"' "install flow calls smoke_tenant_api"
+assert_contains "$demo_src" 'Bootstrap demo tenant' "step header present"
+# --watch (the manual-source completion path) must bootstrap too — otherwise
+# --source=manual reproduces the broken-Settings state (#223; CodeRabbit).
+watch_block="$(sed -n '/DEMO_WATCH" == "1"/,/start_watch_tmux/p' "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$watch_block" 'bootstrap_tenant "$KUBECTL"' "--watch bootstraps the tenant (manual source path)"
+assert_contains "$watch_block" 'smoke_tenant_api "$KUBECTL"' "--watch smoke-checks the tenant endpoints"
+plan_out="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run 2>&1)"
+assert_contains "$plan_out" "Bootstrap demo tenant" "dry-run plan lists the tenant step"
+local_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --source local 2>&1)"
+assert_contains "$local_plan" "[9/9] open the UI Route" "local plan renumbers to 9 steps"
+env_help="$(./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help" "DEMO_ORG_ID" "--help-env documents DEMO_ORG_ID"
+assert_contains "$env_help" "DEMO_ACCOUNT_NUMBER" "--help-env documents DEMO_ACCOUNT_NUMBER"
+
+# --- CodeRabbit round (fork #42): truthful plans and env-mapping exceptions ---
+plan_po2="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --prereqs-only 2>&1)"
+assert_contains "$plan_po2" "stopping after the prerequisites" "prereqs-only plan states it stops"
+assert_not_contains "$plan_po2" "Operator install (registry via OLM" "prereqs-only plan omits the operator steps it never runs"
+plan_sp2="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --skip-prereqs 2>&1)"
+assert_contains "$plan_sp2" "BYOI is skipped (--skip-prereqs)" "skip-prereqs marks the BYOI step as skipped"
+env_help42="$(./scripts/demo-preprod.sh --help-env 2>&1)"
+assert_contains "$env_help42" "--no-tmux → DEMO_NO_TMUX" "--help-env names the no-tmux exception"
+assert_contains "$env_help42" "--cr-file → USER_CR_FILE" "--help-env names the cr-file exception"
+arm64_42="$(cat "${ROOT}/scripts/demo-preprod.arm64.env")"
+assert_not_contains "$arm64_42" "--profile=single-node" "arm64 template documents the current flag name"
+
+# --- --reset / --uninstall teardown helpers (fork #37/#38) ---
+td="$(mktemp -d)"
+rec_oc() {
+  cat >"${td}/oc" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+if [[ -t 0 ]]; then :; else cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log"; fi
+exit 0
+EOF
+  chmod +x "${td}/oc"
+  : >"${td}/oc-args.log"
+  : >"${td}/oc-stdin.log"
+}
+
+# delete_koku_crd: CRD + both webhook configurations, non-blocking deletes,
+# bounded wait for the CRD to disappear
+cat >"${td}/oc-crdgone" <<'EOF'
+#!/bin/bash
+echo "ARGS: $*" >>"${TD_LOG}"
+if [[ "$1" == "get" && "$2" == "crd" ]]; then exit 1; fi
+exit 0
+EOF
+chmod +x "${td}/oc-crdgone"
+TD_LOG="${td}/oc-args.log" delete_koku_crd "${td}/oc-crdgone"
+ck_args="$(cat "${td}/oc-args.log")"
+assert_contains "$ck_args" "delete crd costmanagementserviceconfigs.service.costmanagement.openshift.io --ignore-not-found --wait=false" "CRD delete issued non-blocking"
+assert_contains "$ck_args" "delete mutatingwebhookconfiguration koku-service-operator-mutating-webhook-configuration --ignore-not-found --wait=false" "mutating webhook delete issued non-blocking"
+assert_contains "$ck_args" "delete validatingwebhookconfiguration koku-service-operator-validating-webhook-configuration --ignore-not-found --wait=false" "validating webhook delete issued non-blocking"
+assert_contains "$ck_args" "get crd costmanagementserviceconfigs.service.costmanagement.openshift.io" "CRD disappearance is confirmed, not assumed"
+
+# delete_operator_rbac: deploy-dev bindings and roles
+rec_oc
+delete_operator_rbac "${td}/oc" cost-byoi
+args="$(cat "${td}/oc-args.log")"
+assert_contains "$args" "delete clusterrolebinding koku-operator-dev koku-operator-dev-cluster --ignore-not-found" "dev ClusterRoleBindings deleted"
+assert_contains "$args" "delete rolebinding koku-operator-dev-leader-election -n cost-byoi --ignore-not-found" "leader-election RoleBinding deleted"
+assert_contains "$args" "delete clusterrole manager-role manager-cluster-role --ignore-not-found" "manager ClusterRoles deleted"
+
+# recreate_demo_databases: DROP + CREATE with owners; password via stdin
+cat >"${td}/oc-db" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *postgres-user*) printf 'postgres' | base64 ;;
+  *koku-user*) printf 'koku_user' | base64 ;;
+  *rbac-user*) printf 'rbac_user' | base64 ;;
+  *ros-user*) printf 'ros_user' | base64 ;;
+  *kruize-user*) printf 'kruize_user' | base64 ;;
+  *postgres-password*) printf 'pgpass123' | base64 ;;
+  exec*) cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log" ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-db"
+: >"${td}/oc-args.log"; : >"${td}/oc-stdin.log"
+db_out="$(recreate_demo_databases "${td}/oc-db" cost-byoi cost-byoi-infra)" && db_rc=0 || db_rc=$?
+assert_eq "$db_rc" "0" "recreate_demo_databases succeeds with credentials present"
+db_args="$(cat "${td}/oc-args.log")"
+db_stdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$db_args" "get secret byoi-db-credentials -n cost-byoi " "credentials read from the app namespace"
+assert_contains "$db_args" "exec -i -n cost-byoi-infra deploy/postgresql" "database wipe execs into infra postgres with stdin"
+assert_not_contains "$db_args" "pgpass123" "postgres password never appears in oc argv"
+assert_contains "$db_stdin" "DROP DATABASE IF EXISTS costonprem_koku WITH (FORCE)" "koku DB dropped with FORCE"
+assert_contains "$db_stdin" "CREATE DATABASE costonprem_rbac OWNER rbac_user" "rbac DB recreated with owner"
+assert_contains "$db_stdin" "DROP DATABASE IF EXISTS costonprem_kruize WITH (FORCE)" "kruize DB dropped"
+assert_contains "$db_stdin" "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" "pg_stat_statements extension restored (migration needs it)"
+assert_contains "$db_stdin" "pgpass123" "password travels via stdin"
+
+# missing secret + no demo-owned postgres → skip, not fail
+rec_oc
+db_skip="$(recreate_demo_databases "${td}/oc" cost-byoi cost-byoi-infra)" && db_skip_rc=0 || db_skip_rc=$?
+assert_eq "$db_skip_rc" "0" "missing db secret skips cleanly"
+assert_contains "$db_skip" "skipping database wipe" "skip message names what was skipped"
+
+# missing secret + demo-owned postgres running → strict failure (fork #40):
+# a claimed-successful reset with stale databases is worse than an error.
+cat >"${td}/oc-strict" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *byoi-db-credentials*) : ;;
+  *get\ deploy\ postgresql*-o\ jsonpath*) printf 'koku-service-operator-byoi' ;;
+  *deploy\ postgresql*) exit 0 ;;
+  *) exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-strict"
+: >"${td}/oc-args.log"
+db_strict="$(recreate_demo_databases "${td}/oc-strict" cost-byoi cost-byoi-infra 2>&1)" && db_strict_rc=0 || db_strict_rc=$?
+assert_eq "$db_strict_rc" "1" "demo-owned postgres without credentials fails the reset"
+assert_contains "$db_strict" "demo postgres is running in cost-byoi-infra but byoi-db-credentials is absent from cost-byoi" "error names both namespaces"
+assert_contains "$db_strict" "Recovery: re-run the installer" "error states the recovery path"
+assert_contains "$db_strict" "--uninstall" "error mentions the uninstall alternative"
+assert_not_contains "$db_strict" "skipping database wipe" "no skip message on the strict path"
+
+# missing secret + FOREIGN postgres (no part-of label) → still skips
+cat >"${td}/oc-foreign" <<EOF
+#!/bin/bash
+case "\$*" in
+  *byoi-db-credentials*) : ;;
+  *get\ deploy\ postgresql*-o\ jsonpath*) printf 'some-other-owner' ;;
+  *deploy\ postgresql*) exit 0 ;;
+  *) exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-foreign"
+db_foreign="$(recreate_demo_databases "${td}/oc-foreign" cost-byoi custom-infra)" && db_foreign_rc=0 || db_foreign_rc=$?
+assert_eq "$db_foreign_rc" "0" "foreign postgres without credentials still skips (scope guard)"
+assert_contains "$db_foreign" "skipping database wipe" "foreign infra gets the skip message"
+
+# delete_demo_kafka_topics: label-scoped delete; missing cluster skips
+rec_oc
+delete_demo_kafka_topics "${td}/oc" kafka cost-onprem-kafka
+assert_contains "$(cat "${td}/oc-args.log")" "delete kafkatopic -n kafka -l strimzi.io/cluster=cost-onprem-kafka --ignore-not-found" "topics deleted scoped to our cluster label"
+cat >"${td}/oc-nokafka" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${td}/oc-nokafka"
+kt_skip="$(delete_demo_kafka_topics "${td}/oc-nokafka" kafka other-cluster)"
+assert_contains "$kt_skip" "skipping Kafka topic deletion" "missing kafka cluster skips topic deletion"
+
+# flush_valkey: FLUSHALL via exec, password via stdin
+: >"${td}/oc-args.log"; : >"${td}/oc-stdin.log"
+cat >"${td}/oc-valkey" <<EOF
+#!/bin/bash
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+case "\$*" in
+  *redis-password*) printf 'vpass9' | base64 ;;
+  exec*) cat >>"${td}/oc-stdin.log"; echo >>"${td}/oc-stdin.log" ;;
+esac
+exit 0
+EOF
+chmod +x "${td}/oc-valkey"
+flush_valkey "${td}/oc-valkey" cost-byoi-infra
+vargs="$(cat "${td}/oc-args.log")"; vstdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$vargs" "exec -i -n cost-byoi-infra deploy/valkey" "valkey flush execs with stdin"
+assert_contains "$vargs" "FLUSHALL" "valkey FLUSHALL issued"
+assert_contains "$vstdin" "vpass9" "valkey password travels via stdin"
+assert_not_contains "$vargs" "vpass9" "valkey password never in argv"
+
+# clear_minio: applies a Job that empties the buckets, waits, deletes it
+rec_oc
+clear_minio "${td}/oc" cost-byoi-infra
+margs="$(cat "${td}/oc-args.log")"; mstdin="$(cat "${td}/oc-stdin.log")"
+assert_contains "$margs" "apply -f -" "minio-clear Job applied via stdin"
+assert_contains "$mstdin" "name: minio-clear" "Job named minio-clear"
+assert_contains "$mstdin" "mc rb --force" "Job removes bucket contents"
+assert_contains "$mstdin" "koku-upload-bucket" "Job covers the upload bucket"
+assert_contains "$margs" "wait --for=condition=complete job/minio-clear" "Job completion is awaited"
+assert_contains "$margs" "delete job minio-clear --ignore-not-found" "Job cleaned up afterwards"
+
+# delete_amq_streams_operator / delete_rhbk_operator
+rec_oc
+delete_amq_streams_operator "${td}/oc"
+aargs="$(cat "${td}/oc-args.log")"
+assert_contains "$aargs" "delete subscription amq-streams -n openshift-operators --ignore-not-found" "AMQ subscription deleted from openshift-operators"
+assert_contains "$aargs" "-l operators.coreos.com/amq-streams.openshift-operators" "AMQ CSV deleted by label"
+rec_oc
+delete_rhbk_operator "${td}/oc" keycloak
+assert_contains "$(cat "${td}/oc-args.log")" "delete subscription rhbk-operator -n keycloak --ignore-not-found" "RHBK subscription deleted"
+assert_contains "$(cat "${td}/oc-args.log")" "delete operatorgroup rhbk-operator-group -n keycloak --ignore-not-found" "RHBK OperatorGroup deleted"
+
+# delete_infra_crds: only strimzi + keycloak CRDs, never anything else
+cat >"${td}/oc-crd" <<EOF
+#!/bin/bash
+if [[ "\$1" == "get" ]]; then
+  cat <<'CRDS'
+customresourcedefinition.apiextensions.k8s.io/kafkas.kafka.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/kafkatopics.kafka.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/strimzipodsets.core.strimzi.io
+customresourcedefinition.apiextensions.k8s.io/keycloaks.k8s.keycloak.org
+customresourcedefinition.apiextensions.k8s.io/keycloakrealmimports.k8s.keycloak.org
+customresourcedefinition.apiextensions.k8s.io/consolelinks.console.openshift.io
+customresourcedefinition.apiextensions.k8s.io/batchjobs.batch.project.io
+CRDS
+  exit 0
+fi
+echo "ARGS: \$*" >>"${td}/oc-args.log"
+exit 0
+EOF
+chmod +x "${td}/oc-crd"
+: >"${td}/oc-args.log"
+delete_infra_crds "${td}/oc-crd"
+cargs="$(cat "${td}/oc-args.log")"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/kafkas.kafka.strimzi.io --ignore-not-found" "strimzi CRD deleted"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/strimzipodsets.core.strimzi.io --ignore-not-found" "strimzipodsets CRD (core.strimzi.io group) deleted"
+assert_contains "$cargs" "delete customresourcedefinition.apiextensions.k8s.io/keycloaks.k8s.keycloak.org --ignore-not-found" "keycloak CRD deleted"
+assert_not_contains "$cargs" "consolelinks" "foreign CRD never deleted"
+assert_not_contains "$cargs" "batchjobs" "unrelated CRD never deleted"
+
+# delete_keycloak_realm: token + DELETE via Admin API; secrets out of argv
+kr="$(mktemp -d)"
+cat >"${kr}/oc" <<EOF
+#!/bin/bash
+case "\$*" in
+  *keycloak-initial-admin*username*) printf 'kcadmin' | base64 ;;
+  *keycloak-initial-admin*password*) printf 'kcpass77' | base64 ;;
+  *route*keycloak*) echo 'keycloak.apps.demo.test' ;;
+  *) : ;;
+esac
+exit 0
+EOF
+chmod +x "${kr}/oc"
+cat >"${kr}/curl" <<EOF
+#!/bin/bash
+echo "CURL: \$*" >>"${kr}/curl.log"
+if [[ "\$*" == *"/token"* ]]; then
+  echo '{"access_token":"tok-abc"}'
+else
+  echo 204
+fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+kr_out="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes)" && kr_rc=0 || kr_rc=$?
+assert_eq "$kr_rc" "0" "realm deletion succeeds on 204"
+assert_contains "$kr_out" "realm 'kubernetes' deleted" "success message names the realm"
+kr_curl="$(cat "${kr}/curl.log")"
+assert_contains "$kr_curl" "https://keycloak.apps.demo.test/admin/realms/kubernetes" "DELETE hits the realm endpoint"
+assert_not_contains "$kr_curl" "kcpass77" "admin password never in curl argv"
+assert_not_contains "$kr_curl" "tok-abc" "bearer token never in curl argv"
+# 404 → already gone, still success
+cat >"${kr}/curl" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"/token"* ]]; then echo '{"access_token":"tok-abc"}'; else echo 404; fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+kr404="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes)" && kr404_rc=0 || kr404_rc=$?
+assert_eq "$kr404_rc" "0" "404 counts as already-gone"
+assert_contains "$kr404" "already gone" "404 message says already gone"
+# token failure → hard error
+cat >"${kr}/curl" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"/token"* ]]; then echo '{"error":"invalid_grant"}'; else echo 500; fi
+exit 0
+EOF
+chmod +x "${kr}/curl"
+krfail="$(PATH="${kr}:${PATH}" RHBK_INSECURE_TLS=1 delete_keycloak_realm "${kr}/oc" keycloak kubernetes 2>&1)" && krf_rc=0 || krf_rc=$?
+assert_eq "$krf_rc" "1" "token failure fails the reset"
+assert_contains "$krfail" "could not obtain a Keycloak admin token" "token failure message is explicit"
+rm -rf "$kr"
+
+# Flag wiring: --uninstall plan, mutual exclusion, flow wiring (cluster-only
+# paths — documented source greps per test policy).
+un_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --uninstall 2>&1)"
+assert_contains "$un_plan" "--uninstall: CM + infra instances + operators + CRDs" "--uninstall plan describes full teardown"
+rs_plan="$(env -u KUBE_CONTEXT ./scripts/demo-preprod.sh --dry-run --reset 2>&1)"
+assert_contains "$rs_plan" "--reset: CM instance + operator + data (keep infra" "--reset plan describes the instance reset"
+both_out="$(./scripts/demo-preprod.sh --reset --uninstall 2>&1)" && both_rc=0 || both_rc=$?
+assert_eq "$both_rc" "2" "--reset + --uninstall rejected"
+assert_contains "$both_out" "mutually exclusive" "rejection explains the two modes"
+demo_src="$(cat "${ROOT}/scripts/demo-preprod.sh")"
+assert_contains "$demo_src" 'delete_cmsc_robustly || exit 1' "teardown waits for the CMSC CR to be gone before touching the CRD"
+assert_contains "$demo_src" 'delete_koku_crd "$KUBECTL" || exit 1' "both flows fail loudly if the CRD lingers"
+assert_contains "$demo_src" 'recreate_demo_databases "$KUBECTL" "$NAMESPACE" "$INFRA_NAMESPACE"' "reset flow wipes the databases (app-NS credentials, infra-NS postgres)"
+assert_contains "$demo_src" 'delete_keycloak_realm "$KUBECTL" "$KEYCLOAK_NAMESPACE" "$REALM_NAME"' "reset flow deletes the realm"
+assert_contains "$demo_src" 'delete_demo_kafka_topics "$KUBECTL" "$KAFKA_NAMESPACE" "$KAFKA_CLUSTER_NAME"' "reset flow deletes the topics"
+assert_contains "$demo_src" 'delete_amq_streams_operator "$KUBECTL"' "uninstall flow removes the AMQ Streams operator"
+assert_contains "$demo_src" 'delete_infra_crds "$KUBECTL"' "uninstall flow removes infra CRDs"
+assert_contains "$demo_src" 'delete_koku_crd "$KUBECTL"' "both flows remove the CMSC CRD"
+assert_contains "$demo_src" 'delete_ns "$INFRA_NAMESPACE"' "uninstall deletes the infra namespace"
+assert_not_contains "$(sed -n '/DEMO_UNINSTALL.*==.*1/,/ok "uninstalled/p' "${ROOT}/scripts/demo-preprod.sh")" 'recreate_demo_databases' "uninstall does not wipe data (dies with the namespace)"
+assert_contains "$demo_src" 'scripts/deploy-dev.sh" "$NAMESPACE"' "local source bootstraps CRD+RBAC via deploy-dev.sh (#39)"
+assert_contains "$demo_src" "platform.upload.announce" "kafka_ready requires the CM topics after a reset"
+assert_contains "$demo_src" "keycloakrealmimport kubernetes-realm" "keycloak_ready requires the realm import after a reset"
+
+rm -rf "$td"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "demo-preprod tests FAILED" >&2

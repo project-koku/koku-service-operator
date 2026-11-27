@@ -11,7 +11,7 @@ Day-one success does not require ROS images or migrate Jobs.
 Customer install/config: [docs/install/](../install/README.md).
 
 For a fuller BYOI → UI walkthrough (AMQ Streams + Keycloak), see
-[pre-prod-install.md](pre-prod-install.md). For laptop **CRC** with bundled DB,
+[demo-preprod.sh.md](demo-preprod.sh.md). For laptop **CRC** with bundled DB,
 see [crc-testing.md](crc-testing.md).
 
 ## Do not use laptop `make run` / `go run` against Cluster Bot BYOI
@@ -95,7 +95,8 @@ intermediate signal only: `Available` stays `False`
 
 **Success:** `Available=True` (`AllComponentsReady`) and `Phase=Ready`.
 Keycloak is required: deploy it and run `mirror-ui-oauth-secret.sh`
-([pre-prod-install.md](pre-prod-install.md)).
+(steps: [config/samples/byoi/README.md](../../config/samples/byoi/README.md);
+full BYOI→UI flow: [demo-preprod.sh.md](demo-preprod.sh.md)).
 
 | Stage | How to verify | OK if still False? |
 |-------|---------------|--------------------|

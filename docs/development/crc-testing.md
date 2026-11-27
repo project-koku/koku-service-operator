@@ -7,7 +7,7 @@ Two paths:
 
 | Path | What it exercises | Section |
 |------|-------------------|---------|
-| **`./scripts/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the **in-cluster** operator — the same flow as the `clusterbot` demo, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
+| **`./scripts/demo-preprod.sh --crc`** | Full BYOI stack (AMQ Streams + Keycloak + koku + RBAC + ingress + Envoy + UI) with the operator from the published registry (default) or built locally — the same flow as any other cluster, on the local arm64 node | [Full BYOI demo on CRC](#full-byoi-demo-on-crc) |
 | **`make run` + a bundled sample CR** | Operator out-of-cluster, operator-provisioned Postgres/Valkey, no Kafka/Keycloak | rest of this document |
 
 **Scope:** use the minimal koku-only path for **operator + koku API/celery**
@@ -51,24 +51,29 @@ oc delete job -n cost-onprem cost-management-koku-migrate --ignore-not-found
 
 ## Full BYOI demo on CRC
 
-`./scripts/demo-preprod.sh --crc` runs the [pre-prod demo](pre-prod-install.md)
-against local CRC. It layers `scripts/demo-preprod.crc.env` under the normal
-settings:
+`./scripts/demo-preprod.sh --crc` (alias of `--single-node`) runs the
+[pre-prod demo](demo-preprod.sh.md) against local CRC. The profile is **sizing
+only** — 1+1 Kafka (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
+10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC
+disk. It does **not** set `KUBE_CONTEXT`, does not force a build mode, does not
+select an architecture, and does not load image overrides; the amd64 path is
+byte-identical with or without it.
 
-- `KUBE_CONTEXT=crc` (create it once — see below)
-- `BUILD_MODE=openshift` — the operator image is built **on** the CRC node, so
-  it is natively arm64 (no cross build, no external registry)
-- **arm64 workload image overrides** — the BYOI sample pins amd64-only builds of
-  koku, `insights-rbac`, ingress and `koku-ui-onprem` that segfault / fail to
-  pull on the arm64 node; the profile points them at arm64 rebuilds under
-  `quay.io/martin_povolny/*`. Envoy (`proxyv2-rhel9`) and `oauth2-proxy-rhel9`
-  are Red Hat multi-arch and are left as-is.
-- **1+1 Kafka** (`KAFKA_BROKER_REPLICAS`/`KAFKA_CONTROLLER_REPLICAS=1`,
-  10Gi/5Gi PVCs) instead of 3+3 / 360Gi, which never binds on the single CRC
-  disk.
+**arm64 CRC nodes** additionally need arm64 workload images: the published
+koku, `insights-rbac`, ingress and `koku-ui-onprem` builds are amd64-only and
+segfault / fail to pull on the arm64 node (multi-arch is pending upstream:
+[project-koku/koku-service-operator#219](https://github.com/project-koku/koku-service-operator/issues/219)).
+Copy the opt-in template over your local settings:
 
-The amd64 / `clusterbot` path is unaffected: without `--crc` the profile file is
-never read and the rendered CR is byte-identical to before.
+```bash
+cp scripts/demo-preprod.arm64.env scripts/demo-preprod.local.env
+```
+
+It points the four workloads at arm64 rebuilds under `quay.io/martin_povolny/*`
+(Envoy `proxyv2-rhel9` and `oauth2-proxy-rhel9` are Red Hat multi-arch and are
+left as-is). No flag auto-loads it. The image-architecture preflight hard-fails
+an install whose images cannot run on the node — with the template in place it
+passes.
 
 ### One-time: create the `crc` kube context
 
@@ -87,15 +92,17 @@ later reports `Unauthorized`.
 
 ```bash
 # uses this repo's scripts/deploy-rhbk.sh for Keycloak
-./scripts/demo-preprod.sh --crc --dry-run     # show the plan
-./scripts/demo-preprod.sh --crc               # tmux: steps + two klock panes
-./scripts/demo-preprod.sh --crc --reset       # tear the four namespaces down first
+./scripts/demo-preprod.sh --context crc --crc --dry-run     # show the plan
+./scripts/demo-preprod.sh --context crc --crc               # tmux: steps + two klock panes
+./scripts/demo-preprod.sh --context crc --crc --reset       # wipe instance + data first (infra kept Ready: fast re-install)
+./scripts/demo-preprod.sh --context crc --crc --uninstall   # remove everything, then stop
 ```
 
-Override any image from the profile with a matching env var, e.g.
-`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64 ./scripts/demo-preprod.sh --crc`.
-Rebuilding the arm64 workload images: see
-[the profile file](../../scripts/demo-preprod.crc.env) for the source repos.
+(`KUBE_CONTEXT=crc` pins the context — without it the demo uses whatever
+context is current.) Override any image with a matching env var, e.g.
+`DEMO_KOKU_IMAGE=quay.io/you/koku DEMO_KOKU_TAG=arm64`. Rebuilding the arm64
+workload images: see [the arm64
+template](../../scripts/demo-preprod.arm64.env) for the source repos.
 
 ## Prerequisites
 
@@ -279,7 +286,7 @@ costManagement:
 When building locally: `docker build --platform linux/arm64 …`
 
 For **clusterbot / typical OpenShift** (amd64 nodes), build with
-`--platform linux/amd64`. See [pre-prod-install.md](pre-prod-install.md).
+`--platform linux/amd64`. See [demo-preprod.sh.md](demo-preprod.sh.md).
 
 ## Storage class
 

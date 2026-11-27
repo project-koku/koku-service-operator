@@ -19,8 +19,7 @@ Automation scripts for deploying, configuring, and testing the Cost Management O
 | `deploy-incluster.sh` | Deploy the operator in-cluster with webhook TLS | OpenShift |
 | `deploy-test-operator.sh` | Orchestrate operator, infrastructure, CMSC, and optional pytest tests | OpenShift |
 | `clusterbot-smoke.sh` | Provision the Cluster Bot Redpanda smoke path | OpenShift |
-| `demo-preprod.sh` | Run the full pre-production BYOI/operator/UI demo | OpenShift / CRC |
-| `demo-preprod-olm.sh` | Prepare and observe the published OLM pre-production demo | OpenShift |
+| `demo-preprod.sh` | Full pre-prod demo installer: prereqs + operator + UI. Sources `registry\|local\|manual` (default: latest stable from quay), version/arch discovery, `--prereqs-only`, `--skip-prereqs --cr-file`, `--profile=single-node`, `--watch`/`--console`, `--reset` | OpenShift / CRC |
 | `deploy-crc.sh` | Compatibility alias for `deploy-dev.sh` | CRC |
 | `push-image-crc.sh` | Push an operator image to the CRC registry | CRC |
 | `ci/e2e.sh` | Run the Prow BYOI and CMSC end-to-end path | OpenShift CI |

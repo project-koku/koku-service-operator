@@ -117,7 +117,6 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 .PHONY: test-scripts
 test-scripts: ## Run no-cluster script tests (pre-prod demos, deploy-test-operator).
 	./scripts/demo-preprod_test.sh
-	./scripts/demo-preprod-olm_test.sh
 	./scripts/deploy-test-operator_test.sh
 	./scripts/ci/e2e_test.sh
 	./scripts/pytest_markexpr_test.sh

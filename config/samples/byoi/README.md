@@ -156,8 +156,8 @@ for UI smoke without ROS images. Set `enabled: true` only when opting in.
 ```bash
 # 0. Optional one-shot BYOI (Kafka + infra + Keycloak + OAuth mirror + Secrets):
 #    NAMESPACE=cost-byoi CR_NAME=cost-management ./scripts/deploy-byoi.sh
-#    Or step through config/samples/byoi pieces manually — see
-#    docs/development/pre-prod-install.md
+#    Or step through the BYOI pieces manually — the per-component steps are
+#    the numbered sections below (0b onward).
 
 # 0b. If you did not use deploy-byoi.sh: Kafka, infra, Keycloak, OAuth mirror
 
@@ -188,7 +188,7 @@ kubectl -n cost-byoi logs deploy/koku-service-operator -f
 ```
 
 End-to-end pre-prod path (deps → operator → UI):
-[docs/development/pre-prod-install.md](../../../docs/development/pre-prod-install.md).
+[docs/development/demo-preprod.sh.md](../../../docs/development/demo-preprod.sh.md).
 
 ## Monitoring (optional)
 
