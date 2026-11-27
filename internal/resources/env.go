@@ -141,7 +141,37 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		env = append(env, EnvVal("CURRENCY_URL", cfg.Spec.CostManagement.API.Env["CURRENCY_URL"]))
 	}
 
+	// Optional: koku-events coupled HTTP Pull integration (spec.costEvents).
+	if costv1alpha1.CostEventsEnabled(cfg) {
+		env = append(env, EnvVal("COST_EVENTS_URL", CostEventsURL(cfg)))
+		if ref := cfg.Spec.CostEvents.AuthSecretRef; ref != nil && ref.Name != "" {
+			key := ref.Key
+			if key == "" {
+				key = "token"
+			}
+			env = append(env, EnvFromSecret("COST_EVENTS_AUTH_TOKEN", ref.Name, key))
+		}
+	}
+
 	return env
+}
+
+// enforceCostEventsAuthTokenEnv re-applies COST_EVENTS_AUTH_TOKEN from the
+// configured Secret after MergeEnv so a literal CR env override cannot replace
+// (or clear) the SecretKeyRef. Tokens belong in Secrets, not CR plaintext.
+func enforceCostEventsAuthTokenEnv(cfg *costv1alpha1.CostManagementServiceConfig, env []corev1.EnvVar) []corev1.EnvVar {
+	if !costv1alpha1.CostEventsEnabled(cfg) {
+		return env
+	}
+	ref := cfg.Spec.CostEvents.AuthSecretRef
+	if ref == nil || ref.Name == "" {
+		return env
+	}
+	key := ref.Key
+	if key == "" {
+		key = "token"
+	}
+	return SetEnv(env, EnvFromSecret("COST_EVENTS_AUTH_TOKEN", ref.Name, key))
 }
 
 func boolStr(b bool) string {

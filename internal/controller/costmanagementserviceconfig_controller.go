@@ -494,6 +494,24 @@ func (r *CostManagementServiceConfigReconciler) completeProgressing(cfg *costv1a
 // Stage 1 — Shared configuration objects
 // -----------------------------------------------------------------------------
 
+func (r *CostManagementServiceConfigReconciler) validateCostEventsAuthSecret(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) error {
+	if !costv1alpha1.CostEventsEnabled(cfg) {
+		return nil
+	}
+	ref := cfg.Spec.CostEvents.AuthSecretRef
+	if ref == nil || ref.Name == "" {
+		return nil
+	}
+	key := ref.Key
+	if key == "" {
+		key = "token"
+	}
+	if _, err := r.getSecret(ctx, cfg.Namespace, ref.Name, []string{key}); err != nil {
+		return fmt.Errorf("cost-events auth secret: %w", err)
+	}
+	return nil
+}
+
 func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig) (Result, error) {
 	// Secrets — create-if-absent only (never overwrite credentials).
 	// Skip DB credentials when the user named their own external Secret:
@@ -518,6 +536,9 @@ func (r *CostManagementServiceConfigReconciler) reconcileSharedConfig(ctx contex
 		if err := r.ensureSecret(ctx, cfg, resources.StorageCredentialsSecret(cfg)); err != nil {
 			return Result{}, fmt.Errorf("storage credentials secret: %w", err)
 		}
+	}
+	if err := r.validateCostEventsAuthSecret(ctx, cfg); err != nil {
+		return Result{}, err
 	}
 
 	// ConfigMaps

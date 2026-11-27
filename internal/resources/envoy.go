@@ -343,36 +343,7 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	if useTLS {
 		skipVerify := cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify &&
 			cfg.Spec.Auth.Keycloak.TLS.CACertSecretName == ""
-		if skipVerify {
-			tlsBlock = fmt.Sprintf(`
-    transport_socket:
-      name: envoy.transport_sockets.tls
-      typed_config:
-        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-        sni: %s
-        common_tls_context:
-          tls_params:
-            tls_minimum_protocol_version: TLSv1_2
-          validation_context:
-            trust_chain_verification: ACCEPT_UNTRUSTED`, kcHost)
-		} else {
-			tlsBlock = fmt.Sprintf(`
-    transport_socket:
-      name: envoy.transport_sockets.tls
-      typed_config:
-        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-        sni: %s
-        common_tls_context:
-          tls_params:
-            tls_minimum_protocol_version: TLSv1_2
-          validation_context:
-            trusted_ca:
-              filename: /etc/ca-certificates/ca-bundle.crt
-            match_typed_subject_alt_names:
-              - san_type: DNS
-                matcher:
-                  exact: %s`, kcHost, kcHost)
-		}
+		tlsBlock = upstreamTLSBlock(kcHost, skipVerify)
 	}
 
 	rosRoute := ""
@@ -403,6 +374,43 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 `
 	}
 
+	costEventsRoute := ""
+	costEventsCluster := ""
+	if costv1alpha1.CostEventsEnabled(cfg) {
+		ceHost := yamlScalar(CostEventsHost(cfg, ns))
+		cePort := strconv.Itoa(int(CostEventsPort(cfg)))
+		ceTLS := ""
+		if cfg.Spec.CostEvents.TLS.Enabled {
+			skipVerify := cfg.Spec.CostEvents.TLS.InsecureSkipVerify &&
+				cfg.Spec.CostEvents.TLS.CACertSecretName == ""
+			ceTLS = upstreamTLSBlock(ceHost, skipVerify)
+		}
+		costEventsRoute = `              - match:
+                  prefix: "/api/cost-events/"
+                route:
+                  cluster: cost-events-backend
+                  timeout: 60s
+                  prefix_rewrite: "/api/"
+                  retry_policy:
+                    retry_on: 5xx,reset,connect-failure,refused-stream
+                    num_retries: 2
+                    per_try_timeout: 30s
+`
+		costEventsCluster = `  - name: cost-events-backend
+    connect_timeout: 5s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: cost-events-backend
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ` + ceHost + `
+                port_value: ` + cePort + ceTLS + `
+`
+	}
+
 	knobs := ProfileKnobsFor(cfg)
 	replacer := strings.NewReplacer(
 		"__HTTP_PORT__", strconv.Itoa(int(envoyHTTPPort)),
@@ -413,17 +421,50 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 		"__LUA__", indentLua(envoyLuaFilter),
 		"__ROS_ROUTE__", rosRoute,
 		"__ROS_CLUSTER__", rosCluster,
+		"__COST_EVENTS_ROUTE__", costEventsRoute,
+		"__COST_EVENTS_CLUSTER__", costEventsCluster,
 		"__KOKU_HOST__", serviceFQDN(NameKokuAPI(cfg), ns),
 		"__INGRESS_TIMEOUT__", envoyDuration(cfg.Spec.Auth.Envoy.IngressTimeout, knobs.EnvoyIngressTimeout),
 		"__INGRESS_PER_TRY_TIMEOUT__", envoyDuration(cfg.Spec.Auth.Envoy.IngressPerTryTimeout, knobs.EnvoyIngressPerTryTimeout),
 		"__INGRESS_HOST__", serviceFQDN(NameIngress(cfg), ns),
 		"__RBAC_HOST__", serviceFQDN(NameRBACAPI(cfg), ns),
-		"__COST_EVENTS_HOST__", yamlScalar(CostEventsHost(cfg, ns)),
 		"__KC_HOST__", kcHost,
 		"__KC_PORT__", strconv.Itoa(int(kcPort)),
 		"__KC_TLS__", tlsBlock,
 	)
 	return replacer.Replace(envoyYAMLTemplate)
+}
+
+func upstreamTLSBlock(host string, skipVerify bool) string {
+	if skipVerify {
+		return fmt.Sprintf(`
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: %s
+        common_tls_context:
+          tls_params:
+            tls_minimum_protocol_version: TLSv1_2
+          validation_context:
+            trust_chain_verification: ACCEPT_UNTRUSTED`, host)
+	}
+	return fmt.Sprintf(`
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: %s
+        common_tls_context:
+          tls_params:
+            tls_minimum_protocol_version: TLSv1_2
+          validation_context:
+            trusted_ca:
+              filename: /etc/ca-certificates/ca-bundle.crt
+            match_typed_subject_alt_names:
+              - san_type: DNS
+                matcher:
+                  exact: %s`, host, host)
 }
 
 func indentLua(s string) string {
@@ -458,15 +499,42 @@ func isValidHostname(s string) bool {
 	return true
 }
 
+const defaultCostEventsPort int32 = 8020
+
 // CostEventsHost returns the FQDN for the cost-event-consumer backend service.
-// Invalid or empty annotation values fall back to the default in-cluster FQDN.
+// Invalid or empty spec.costEvents.host values fall back to the default in-cluster
+// Service FQDN (cost-event-consumer.<ns>.svc.cluster.local when ns is non-empty).
 func CostEventsHost(cfg *costv1alpha1.CostManagementServiceConfig, ns string) string {
-	if cfg != nil && cfg.Annotations != nil {
-		if host := strings.TrimSpace(cfg.Annotations["koku.costmanagement.io/cost-events-host"]); isValidHostname(host) {
+	if cfg != nil {
+		if host := strings.TrimSpace(cfg.Spec.CostEvents.Host); isValidHostname(host) {
 			return host
 		}
 	}
+	if ns != "" {
+		return serviceFQDN("cost-event-consumer", ns)
+	}
 	return "cost-event-consumer.cost-mgmt.svc.cluster.local"
+}
+
+// CostEventsPort returns the configured port for cost-event-consumer, defaulting to 8020.
+func CostEventsPort(cfg *costv1alpha1.CostManagementServiceConfig) int32 {
+	if cfg != nil && cfg.Spec.CostEvents.Port >= 1 && cfg.Spec.CostEvents.Port <= 65535 {
+		return cfg.Spec.CostEvents.Port
+	}
+	return defaultCostEventsPort
+}
+
+// CostEventsURL returns the base URL used by Koku workloads to pull daily rollups
+// from koku-events. Returns empty string when spec.costEvents.enabled is false.
+func CostEventsURL(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if !costv1alpha1.CostEventsEnabled(cfg) {
+		return ""
+	}
+	scheme := "http"
+	if cfg.Spec.CostEvents.TLS.Enabled {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, CostEventsHost(cfg, cfg.Namespace), CostEventsPort(cfg))
 }
 
 const envoyYAMLTemplate = `static_resources:
@@ -518,17 +586,7 @@ __ROS_ROUTE__              - match:
                     retry_on: 5xx,reset,connect-failure,refused-stream
                     num_retries: 2
                     per_try_timeout: 30s
-              - match:
-                  prefix: "/api/cost-events/"
-                route:
-                  cluster: cost-events-backend
-                  timeout: 60s
-                  prefix_rewrite: "/api/"
-                  retry_policy:
-                    retry_on: 5xx,reset,connect-failure,refused-stream
-                    num_retries: 2
-                    per_try_timeout: 30s
-              - match:
+__COST_EVENTS_ROUTE__              - match:
                   path: "/api/ingress/ready"
                 route:
                   cluster: ingress-backend
@@ -611,19 +669,7 @@ __ROS_CLUSTER__  - name: koku-api-backend
               socket_address:
                 address: __RBAC_HOST__
                 port_value: 8080
-  - name: cost-events-backend
-    connect_timeout: 5s
-    type: STRICT_DNS
-    load_assignment:
-      cluster_name: cost-events-backend
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: __COST_EVENTS_HOST__
-                port_value: 8020
-  - name: keycloak_jwks
+__COST_EVENTS_CLUSTER__  - name: keycloak_jwks
     connect_timeout: 5s
     type: STRICT_DNS
     load_assignment:
@@ -718,14 +764,14 @@ function envoy_on_request(request_handle)
     end
     local account_number = jwt_data["account_number"]
     if account_number == nil or account_number == "" then
-      request_handle:respond({[":status"] = "401"}, "Unauthorized: Missing account_number in JWT claims")
-      return
-    end
-    account_number = tostring(account_number)
-    valid, err_msg = validate_identifier(account_number, "account_number")
-    if not valid then
-      request_handle:respond({[":status"] = "401"}, "Unauthorized: Invalid account_number")
-      return
+      account_number = ""
+    else
+      account_number = tostring(account_number)
+      valid, err_msg = validate_identifier(account_number, "account_number")
+      if not valid then
+        request_handle:respond({[":status"] = "401"}, "Unauthorized: Invalid account_number")
+        return
+      end
     end
     local username = jwt_data["preferred_username"] or jwt_data["sub"] or "user"
     username = tostring(username)

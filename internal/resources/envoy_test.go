@@ -203,6 +203,14 @@ func TestEnvoyLuaFilterExactJWTClaims(t *testing.T) {
 			t.Errorf("envoyLuaFilter must not use Helm claim fallback %q", banned)
 		}
 	}
+	// O1/D13: account_number must be optional (OSAC Keycloak tokens do not emit it),
+	// while non-empty account_number values remain validated.
+	if strings.Contains(envoyLuaFilter, "Missing account_number") {
+		t.Error("envoyLuaFilter must not reject tokens missing account_number")
+	}
+	if !strings.Contains(envoyLuaFilter, `validate_identifier(account_number, "account_number")`) {
+		t.Error("envoyLuaFilter must still validate non-empty account_number claims")
+	}
 }
 
 // envoyROSMarkers are Envoy YAML fragments present only when ROS is enabled.
@@ -268,7 +276,7 @@ func TestEnvoyYAMLContainsIssuerAudiencesAndKokuCluster(t *testing.T) {
 	if !strings.Contains(rbacBlock, "port_value: 8080") {
 		t.Error("rbac-api-backend should use port 8080")
 	}
-	for _, tok := range []string{"__HTTP_PORT__", "__ISSUER__", "__LUA__", "__KOKU_HOST__", "__COST_EVENTS_HOST__", "__KC_TLS__", "__ROS_ROUTE__", "__ROS_CLUSTER__"} {
+	for _, tok := range []string{"__HTTP_PORT__", "__ISSUER__", "__LUA__", "__KOKU_HOST__", "__COST_EVENTS_ROUTE__", "__COST_EVENTS_CLUSTER__", "__KC_TLS__", "__ROS_ROUTE__", "__ROS_CLUSTER__"} {
 		if strings.Contains(yaml, tok) {
 			t.Errorf("EnvoyYAML left unsubstituted token %q", tok)
 		}
@@ -320,12 +328,47 @@ type envoyConfigDoc struct {
 					} `yaml:"lb_endpoints"`
 				} `yaml:"endpoints"`
 			} `yaml:"load_assignment"`
+			TransportSocket *struct {
+				Name        string         `yaml:"name"`
+				TypedConfig map[string]any `yaml:"typed_config"`
+			} `yaml:"transport_socket"`
 		} `yaml:"clusters"`
 	} `yaml:"static_resources"`
 }
 
+func TestEnvoyYAMLOmitsCostEventsWhenDisabled(t *testing.T) {
+	markers := []string{
+		"/api/cost-events/",
+		"cost-events-backend",
+		"__COST_EVENTS_ROUTE__",
+		"__COST_EVENTS_CLUSTER__",
+	}
+	for _, tc := range []struct {
+		name    string
+		enabled *bool
+	}{
+		{"omitted (nil)", nil},
+		{"explicitly false", new(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg()
+			cfg.Spec.CostEvents.Enabled = tc.enabled
+			out := EnvoyYAML(cfg)
+			assertValidYAMLWithStringAudiences(t, out)
+			for _, m := range markers {
+				if strings.Contains(out, m) {
+					t.Errorf("EnvoyYAML should omit %q when costEvents.enabled is %s", m, tc.name)
+				}
+			}
+			if got := CostEventsURL(cfg); got != "" {
+				t.Errorf("CostEventsURL = %q, want empty when disabled", got)
+			}
+		})
+	}
+}
+
 func TestEnvoyCostEventsRouteAndCluster(t *testing.T) {
-	assertRouteAndCluster := func(t *testing.T, yamlStr string, wantAddress string) {
+	assertRouteAndCluster := func(t *testing.T, yamlStr string, wantAddress string, wantPort int, wantTLS bool) map[string]any {
 		t.Helper()
 		var doc envoyConfigDoc
 		if err := yaml.Unmarshal([]byte(yamlStr), &doc); err != nil {
@@ -363,48 +406,107 @@ func TestEnvoyCostEventsRouteAndCluster(t *testing.T) {
 			t.Fatal("EnvoyYAML missing route with prefix /api/cost-events/")
 		}
 
-		foundCluster := false
 		for _, c := range doc.StaticResources.Clusters {
-			if c.Name == targetCluster {
-				foundCluster = true
-				if len(c.LoadAssignment.Endpoints) == 0 || len(c.LoadAssignment.Endpoints[0].LBEndpoints) == 0 {
-					t.Fatalf("cluster %q has no lb_endpoints", targetCluster)
-				}
-				sock := c.LoadAssignment.Endpoints[0].LBEndpoints[0].Endpoint.Address.SocketAddress
-				if sock.Address != wantAddress {
-					t.Errorf("cluster %q address = %q, want %q", targetCluster, sock.Address, wantAddress)
-				}
-				if sock.PortValue != 8020 {
-					t.Errorf("cluster %q port_value = %d, want 8020", targetCluster, sock.PortValue)
-				}
-				break
+			if c.Name != targetCluster {
+				continue
 			}
+			if len(c.LoadAssignment.Endpoints) == 0 || len(c.LoadAssignment.Endpoints[0].LBEndpoints) == 0 {
+				t.Fatalf("cluster %q has no lb_endpoints", targetCluster)
+			}
+			sock := c.LoadAssignment.Endpoints[0].LBEndpoints[0].Endpoint.Address.SocketAddress
+			if sock.Address != wantAddress {
+				t.Errorf("cluster %q address = %q, want %q", targetCluster, sock.Address, wantAddress)
+			}
+			if sock.PortValue != wantPort {
+				t.Errorf("cluster %q port_value = %d, want %d", targetCluster, sock.PortValue, wantPort)
+			}
+			if wantTLS {
+				if c.TransportSocket == nil || c.TransportSocket.Name != "envoy.transport_sockets.tls" {
+					t.Fatalf("cluster %q expected envoy.transport_sockets.tls, got %#v", targetCluster, c.TransportSocket)
+				}
+				return c.TransportSocket.TypedConfig
+			}
+			if c.TransportSocket != nil {
+				t.Errorf("cluster %q unexpected transport_socket when TLS disabled", targetCluster)
+			}
+			return nil
 		}
-		if !foundCluster {
-			t.Fatalf("EnvoyYAML missing cluster %q referenced by cost-events route", targetCluster)
-		}
+		t.Fatalf("EnvoyYAML missing cluster %q referenced by cost-events route", targetCluster)
+		return nil
 	}
 
-	const defaultHost = "cost-event-consumer.cost-mgmt.svc.cluster.local"
+	const defaultHost = "cost-event-consumer.cost-onprem.svc.cluster.local"
 
+	// Default host/port when enabled
 	cfg := testCfg()
-	assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost)
-
-	// Custom valid annotation override
-	cfg.Annotations = map[string]string{
-		"koku.costmanagement.io/cost-events-host": "my-custom-events.namespace.svc.cluster.local",
+	cfg.Spec.CostEvents.Enabled = new(true)
+	assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost, 8020, false)
+	if got := CostEventsURL(cfg); got != "http://"+defaultHost+":8020" {
+		t.Errorf("CostEventsURL default = %q", got)
 	}
-	assertRouteAndCluster(t, EnvoyYAML(cfg), "my-custom-events.namespace.svc.cluster.local")
+	if envoyConfigHash(testCfg()) == envoyConfigHash(cfg) {
+		t.Error("envoyConfigHash must change when spec.costEvents.enabled flips true")
+	}
 
-	// Malformed annotations (colon-space, embedded newline) must be rejected and fall back to defaultHost
+	// Empty namespace fallback
+	if got := CostEventsHost(nil, ""); got != "cost-event-consumer.cost-mgmt.svc.cluster.local" {
+		t.Errorf("CostEventsHost(nil, \"\") = %q", got)
+	}
+	if got := CostEventsPort(nil); got != 8020 {
+		t.Errorf("CostEventsPort(nil) = %d, want 8020", got)
+	}
+
+	// Custom valid host and port override
+	cfg.Spec.CostEvents.Host = "my-custom-events.cost-mgmt.svc.cluster.local"
+	cfg.Spec.CostEvents.Port = 8443
+	assertRouteAndCluster(t, EnvoyYAML(cfg), "my-custom-events.cost-mgmt.svc.cluster.local", 8443, false)
+
+	// Malformed host values (YAML injection defense-in-depth) must fall back to defaultHost
 	for _, invalid := range []string{
 		"evil: value",
 		"evil.example.com\nport_value: 9999",
 		"http://not-a-hostname:8020",
 		"-leading-hyphen.example.com",
+		"trailing-hyphen-.example.com",
+		strings.Repeat("a", 64) + ".example.com",
+		strings.Repeat("a.", 127) + "a",
 	} {
-		cfg.Annotations["koku.costmanagement.io/cost-events-host"] = invalid
-		assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost)
+		cfg.Spec.CostEvents.Host = invalid
+		cfg.Spec.CostEvents.Port = 8020
+		assertRouteAndCluster(t, EnvoyYAML(cfg), defaultHost, 8020, false)
+	}
+
+	// Upstream TLS with trusted CA (default verification)
+	cfg.Spec.CostEvents.Host = "cost-event-consumer.cost-mgmt.svc.cluster.local"
+	cfg.Spec.CostEvents.Port = 8443
+	cfg.Spec.CostEvents.TLS.Enabled = true
+	if got := CostEventsURL(cfg); got != "https://cost-event-consumer.cost-mgmt.svc.cluster.local:8443" {
+		t.Errorf("CostEventsURL https = %q", got)
+	}
+	tlsTC := assertRouteAndCluster(t, EnvoyYAML(cfg), "cost-event-consumer.cost-mgmt.svc.cluster.local", 8443, true)
+	vc, _ := yamlWalk(tlsTC, "common_tls_context", "validation_context").(map[string]any)
+	if got := yamlWalk(vc, "trusted_ca", "filename"); got != "/etc/ca-certificates/ca-bundle.crt" {
+		t.Errorf("trusted_ca.filename = %v, want /etc/ca-certificates/ca-bundle.crt", got)
+	}
+
+	// Upstream TLS with insecureSkipVerify (no caCertSecretName)
+	cfg.Spec.CostEvents.TLS.InsecureSkipVerify = true
+	tlsTC = assertRouteAndCluster(t, EnvoyYAML(cfg), "cost-event-consumer.cost-mgmt.svc.cluster.local", 8443, true)
+	vc, _ = yamlWalk(tlsTC, "common_tls_context", "validation_context").(map[string]any)
+	if got := vc["trust_chain_verification"]; got != "ACCEPT_UNTRUSTED" {
+		t.Errorf("trust_chain_verification = %v, want ACCEPT_UNTRUSTED", got)
+	}
+
+	// caCertSecretName wins over insecureSkipVerify and mounts into Envoy ca-extra volume
+	cfg.Spec.CostEvents.TLS.CACertSecretName = "cost-events-ca"
+	tlsTC = assertRouteAndCluster(t, EnvoyYAML(cfg), "cost-event-consumer.cost-mgmt.svc.cluster.local", 8443, true)
+	vc, _ = yamlWalk(tlsTC, "common_tls_context", "validation_context").(map[string]any)
+	if _, ok := vc["trust_chain_verification"]; ok {
+		t.Error("caCertSecretName must win over insecureSkipVerify on cost-events-backend")
+	}
+	dep := EnvoyDeployment(cfg)
+	if !volumeProjectsSecret(dep.Spec.Template.Spec.Volumes, "cost-events-ca", "cost-events-ca.crt") {
+		t.Error("EnvoyDeployment missing projected volume for costEvents.tls.caCertSecretName")
 	}
 }
 

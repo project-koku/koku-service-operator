@@ -369,6 +369,67 @@ spec:
                     is false
                   rule: self.deploy != false || (size(self.host) > 0 && has(self.auth.secretName)
                     && size(self.auth.secretName) > 0)
+              costEvents:
+                properties:
+                  authSecretRef:
+                    description: |-
+                      AuthSecretRef points to an existing Secret holding the shared service
+                      token injected as COST_EVENTS_AUTH_TOKEN into Koku workloads for Pull
+                      export requests (/api/v1/export/*).
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled opts in to koku-events integration: Envoy exposes /api/cost-events/*
+                      routed to cost-events-backend, and Koku workloads receive COST_EVENTS_URL
+                      (plus optional COST_EVENTS_AUTH_TOKEN) for coupled HTTP Pull ingestion.
+                    type: boolean
+                  host:
+                    description: |-
+                      Host is the DNS hostname or FQDN of the cost-event-consumer Service.
+                      Defaults to cost-event-consumer.<namespace>.svc.cluster.local when empty.
+                    maxLength: 253
+                    pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)?$
+                    type: string
+                  port:
+                    default: 8020
+                    description: Port is the port of the cost-event-consumer Service.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  tls:
+                    description: TLS configures optional upstream TLS between Envoy
+                      / Koku and cost-event-consumer.
+                    properties:
+                      caCertSecretName:
+                        description: |-
+                          CACertSecretName is an existing Secret with key ca.crt merged into the
+                          combined CA bundle used by Envoy and Koku workloads.
+                        type: string
+                      enabled:
+                        description: Enabled uses HTTPS between Envoy / Koku and cost-event-consumer.
+                        type: boolean
+                      insecureSkipVerify:
+                        description: |-
+                          InsecureSkipVerify disables TLS verification for cost-event-consumer.
+                          Ignored when CACertSecretName is set.
+                        type: boolean
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: authSecretRef.name and authSecretRef.key must be non-empty
+                    when authSecretRef is set
+                  rule: '!has(self.authSecretRef) || (size(self.authSecretRef.name)
+                    > 0 && size(self.authSecretRef.key) > 0)'
               costManagement:
                 properties:
                   api:

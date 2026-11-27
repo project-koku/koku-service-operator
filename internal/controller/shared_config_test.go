@@ -479,6 +479,90 @@ func TestReconcileSharedConfig_AppliesRBACSeedConfigMaps(t *testing.T) {
 	}
 }
 
+func TestReconcileSharedConfig_ValidatesCostEventsAuthSecret(t *testing.T) {
+	const ns = "test"
+	enabled := true
+
+	t.Run("succeeds with valid secret and key", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-ce-auth-ok"},
+			Spec: costv1alpha1.CostManagementServiceConfigSpec{
+				CostEvents: costv1alpha1.CostEventsConfig{
+					Enabled: &enabled,
+					AuthSecretRef: &costv1alpha1.SecretKeyRef{
+						Name: "ce-auth-secret",
+						Key:  "export-token",
+					},
+				},
+			},
+		}
+		sec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "ce-auth-secret", Namespace: ns},
+			Data:       map[string][]byte{"export-token": []byte("s3cr3t")},
+		}
+		r := &CostManagementServiceConfigReconciler{
+			Client:   fakeClientWithApplySupport(sharedConfigScheme(t), sec),
+			Recorder: &noopRecorder{},
+		}
+		if _, err := r.reconcileSharedConfig(context.Background(), cfg); err != nil {
+			t.Fatalf("reconcileSharedConfig: %v", err)
+		}
+	})
+
+	t.Run("fails when secret is missing", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-ce-auth-missing"},
+			Spec: costv1alpha1.CostManagementServiceConfigSpec{
+				CostEvents: costv1alpha1.CostEventsConfig{
+					Enabled:       &enabled,
+					AuthSecretRef: &costv1alpha1.SecretKeyRef{Name: "missing-secret"},
+				},
+			},
+		}
+		r := &CostManagementServiceConfigReconciler{
+			Client:   fakeClientWithApplySupport(sharedConfigScheme(t)),
+			Recorder: &noopRecorder{},
+		}
+		_, err := r.reconcileSharedConfig(context.Background(), cfg)
+		if err == nil {
+			t.Fatal("expected error when cost-events auth secret is missing")
+		}
+		if !strings.Contains(err.Error(), "cost-events auth secret") {
+			t.Errorf("error = %v, want cost-events auth secret prefix", err)
+		}
+	})
+
+	t.Run("fails when key is missing from secret", func(t *testing.T) {
+		cfg := &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: ns, UID: "uid-ce-auth-badkey"},
+			Spec: costv1alpha1.CostManagementServiceConfigSpec{
+				CostEvents: costv1alpha1.CostEventsConfig{
+					Enabled: &enabled,
+					AuthSecretRef: &costv1alpha1.SecretKeyRef{
+						Name: "ce-auth-secret",
+						Key:  "expected-key",
+					},
+				},
+			},
+		}
+		sec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "ce-auth-secret", Namespace: ns},
+			Data:       map[string][]byte{"other-key": []byte("val")},
+		}
+		r := &CostManagementServiceConfigReconciler{
+			Client:   fakeClientWithApplySupport(sharedConfigScheme(t), sec),
+			Recorder: &noopRecorder{},
+		}
+		_, err := r.reconcileSharedConfig(context.Background(), cfg)
+		if err == nil {
+			t.Fatal("expected error when cost-events auth secret lacks expected key")
+		}
+		if !strings.Contains(err.Error(), "expected-key") {
+			t.Errorf("error = %v, want mention of missing key", err)
+		}
+	})
+}
+
 // noopRecorder satisfies record.EventRecorder for tests that don't inspect events.
 type noopRecorder struct{}
 

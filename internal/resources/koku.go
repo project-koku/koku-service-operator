@@ -36,6 +36,7 @@ func KokuAPIDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		EnvFromFieldRef("POD_CPU_LIMIT", containerName, "limits.cpu"),
 	)
 	env = MergeEnv(env, spec.Env)
+	env = enforceCostEventsAuthTokenEnv(cfg, env)
 
 	d := deploymentWithContainerName(cfg, NameKokuAPI(cfg), "cost-management-api", containerName,
 		image, replicas, ProfileResources(cfg, WorkloadKokuAPI, spec.Resources),
@@ -99,6 +100,7 @@ func MasuDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deplo
 	// MASU_ADMIN_TOKEN in spec.costManagement.masu.env cannot replace (or empty)
 	// the secretKeyRef. Tokens belong in Secrets, not the CR.
 	env = SetEnv(env, EnvFromSecret("MASU_ADMIN_TOKEN", NameMasuAdminSecret(cfg), "token"))
+	env = enforceCostEventsAuthTokenEnv(cfg, env)
 
 	d := deploymentWithContainerName(cfg, NameMasu(cfg), "cost-processor", containerName,
 		image, replicas, ProfileResources(cfg, WorkloadMasu, spec.Resources),
@@ -150,6 +152,7 @@ func ListenerDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.D
 		EnvVal("KOKU_LOG_LEVEL", "INFO"),
 	)
 	env = MergeEnv(env, spec.Env)
+	env = enforceCostEventsAuthTokenEnv(cfg, env)
 
 	return deployment(cfg, NameListener(cfg), "listener", image, replicas, ProfileResources(cfg, WorkloadListener, spec.Resources),
 		nil, kokuAPIProbe("/livez"), env,

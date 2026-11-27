@@ -203,6 +203,9 @@ func userCAFiles(cfg *costv1alpha1.CostManagementServiceConfig) []userCAFile {
 	if s := cfg.Spec.ObjectStorage.CACertSecretName; s != "" {
 		files = append(files, userCAFile{s, "object-storage-ca.crt"})
 	}
+	if costv1alpha1.CostEventsEnabled(cfg) && cfg.Spec.CostEvents.TLS.Enabled && cfg.Spec.CostEvents.TLS.CACertSecretName != "" {
+		files = append(files, userCAFile{cfg.Spec.CostEvents.TLS.CACertSecretName, "cost-events-ca.crt"})
+	}
 	return files
 }
 
