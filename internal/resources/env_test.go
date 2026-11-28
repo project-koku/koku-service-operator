@@ -425,3 +425,100 @@ func TestWorkloadKokuLogLevelOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestKokuCommonEnvCostEventsWiring(t *testing.T) {
+	baseCfg := func() *costv1alpha1.CostManagementServiceConfig {
+		return &costv1alpha1.CostManagementServiceConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+			Spec: costv1alpha1.CostManagementServiceConfigSpec{
+				CostManagement: costv1alpha1.CostManagementConfig{
+					API: costv1alpha1.KokuAPISpec{
+						Image: costv1alpha1.ImageSpec{Repository: "quay.io/example/koku", Tag: "v1"},
+					},
+				},
+			},
+		}
+	}
+
+	// Disabled by default: neither COST_EVENTS_URL nor COST_EVENTS_AUTH_TOKEN present.
+	cfgOff := baseCfg()
+	if _, ok := envValue(KokuCommonEnv(cfgOff), "COST_EVENTS_URL"); ok {
+		t.Error("COST_EVENTS_URL should be omitted when costEvents.enabled is false")
+	}
+	if _, ok := envValue(KokuCommonEnv(cfgOff), "COST_EVENTS_AUTH_TOKEN"); ok {
+		t.Error("COST_EVENTS_AUTH_TOKEN should be omitted when costEvents.enabled is false")
+	}
+
+	// Enabled without authSecretRef: COST_EVENTS_URL set, no auth token.
+	cfgNoAuth := baseCfg()
+	cfgNoAuth.Spec.CostEvents.Enabled = new(true)
+	envNoAuth := KokuCommonEnv(cfgNoAuth)
+	if got, ok := envValue(envNoAuth, "COST_EVENTS_URL"); !ok || got != "http://cost-event-consumer.cost-onprem.svc.cluster.local:8020" {
+		t.Errorf("COST_EVENTS_URL = %q (ok=%v), want default http URL", got, ok)
+	}
+	if _, ok := envValue(envNoAuth, "COST_EVENTS_AUTH_TOKEN"); ok {
+		t.Error("COST_EVENTS_AUTH_TOKEN should be omitted when authSecretRef is nil")
+	}
+
+	// Enabled with TLS, custom host/port, and authSecretRef; literal CR env override must not win.
+	cfg := baseCfg()
+	cfg.Spec.CostEvents = costv1alpha1.CostEventsConfig{
+		Enabled: new(true),
+		Host:    "cost-event-consumer.cost-mgmt.svc.cluster.local",
+		Port:    8443,
+		TLS:     costv1alpha1.CostEventsTLSSpec{Enabled: true},
+		AuthSecretRef: &costv1alpha1.SecretKeyRef{
+			Name: "cost-events-pull-secret",
+			Key:  "export-token",
+		},
+	}
+	cfg.Spec.CostManagement.API.Env = map[string]string{"COST_EVENTS_AUTH_TOKEN": "literal-override"}
+	cfg.Spec.CostManagement.Masu.Env = map[string]string{"COST_EVENTS_AUTH_TOKEN": "literal-override"}
+	cfg.Spec.CostManagement.Listener.Env = map[string]string{"COST_EVENTS_AUTH_TOKEN": "literal-override"}
+
+	const wantURL = "https://cost-event-consumer.cost-mgmt.svc.cluster.local:8443"
+	workloads := []struct {
+		name string
+		env  []corev1.EnvVar
+	}{
+		{"koku-api", KokuAPIDeployment(cfg).Spec.Template.Spec.Containers[0].Env},
+		{"masu", MasuDeployment(cfg).Spec.Template.Spec.Containers[0].Env},
+		{"listener", ListenerDeployment(cfg).Spec.Template.Spec.Containers[0].Env},
+		{"celery-worker", CeleryWorkerDeployment(cfg, "celery", costv1alpha1.CeleryWorkerSpec{Replicas: ptr.To[int32](1)}).Spec.Template.Spec.Containers[0].Env},
+	}
+	for _, wl := range workloads {
+		if got, ok := envValue(wl.env, "COST_EVENTS_URL"); !ok || got != wantURL {
+			t.Errorf("%s: COST_EVENTS_URL = %q (ok=%v), want %q", wl.name, got, ok, wantURL)
+		}
+		var tokCount int
+		for _, e := range wl.env {
+			if e.Name != "COST_EVENTS_AUTH_TOKEN" {
+				continue
+			}
+			tokCount++
+			if e.Value != "" {
+				t.Errorf("%s: COST_EVENTS_AUTH_TOKEN must not be literal, got %q", wl.name, e.Value)
+			}
+			if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil ||
+				e.ValueFrom.SecretKeyRef.Name != "cost-events-pull-secret" ||
+				e.ValueFrom.SecretKeyRef.Key != "export-token" {
+				t.Errorf("%s: COST_EVENTS_AUTH_TOKEN secretKeyRef = %#v, want cost-events-pull-secret/export-token", wl.name, e.ValueFrom)
+			}
+		}
+		if tokCount != 1 {
+			t.Errorf("%s: COST_EVENTS_AUTH_TOKEN count = %d, want 1", wl.name, tokCount)
+		}
+	}
+
+	// Empty key in authSecretRef defaults to "token".
+	cfgDefaultKey := baseCfg()
+	cfgDefaultKey.Spec.CostEvents.Enabled = new(true)
+	cfgDefaultKey.Spec.CostEvents.AuthSecretRef = &costv1alpha1.SecretKeyRef{Name: "my-secret"}
+	for _, e := range MasuDeployment(cfgDefaultKey).Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "COST_EVENTS_AUTH_TOKEN" {
+			if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil || e.ValueFrom.SecretKeyRef.Key != "token" {
+				t.Errorf("default authSecretRef key = %#v, want token", e.ValueFrom)
+			}
+		}
+	}
+}

@@ -494,6 +494,61 @@ func ROSEnabled(cfg *CostManagementServiceConfig) bool {
 	return BoolVal(cfg.Spec.ROS.Enabled, false)
 }
 
+// -----------------------------------------------------------------------------
+// CostEventsConfig (koku-events / cost-event-consumer integration)
+// -----------------------------------------------------------------------------
+
+// +kubebuilder:validation:XValidation:rule="!has(self.authSecretRef) || (size(self.authSecretRef.name) > 0 && size(self.authSecretRef.key) > 0)",message="authSecretRef.name and authSecretRef.key must be non-empty when authSecretRef is set"
+type CostEventsConfig struct {
+	// Enabled opts in to koku-events integration: Envoy exposes /api/cost-events/*
+	// routed to cost-events-backend, and Koku workloads receive COST_EVENTS_URL
+	// (plus optional COST_EVENTS_AUTH_TOKEN) for coupled HTTP Pull ingestion.
+	// +kubebuilder:default:=false
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Host is the DNS hostname or FQDN of the cost-event-consumer Service.
+	// Defaults to cost-event-consumer.<namespace>.svc.cluster.local when empty.
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)?$`
+	Host string `json:"host,omitempty"`
+
+	// Port is the port of the cost-event-consumer Service.
+	// +kubebuilder:default:=8020
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// TLS configures optional upstream TLS between Envoy / Koku and cost-event-consumer.
+	TLS CostEventsTLSSpec `json:"tls,omitempty"`
+
+	// AuthSecretRef points to an existing Secret holding the shared service
+	// token injected as COST_EVENTS_AUTH_TOKEN into Koku workloads for Pull
+	// export requests (/api/v1/export/*).
+	AuthSecretRef *SecretKeyRef `json:"authSecretRef,omitempty"`
+}
+
+type CostEventsTLSSpec struct {
+	// Enabled uses HTTPS between Envoy / Koku and cost-event-consumer.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// InsecureSkipVerify disables TLS verification for cost-event-consumer.
+	// Ignored when CACertSecretName is set.
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+
+	// CACertSecretName is an existing Secret with key ca.crt merged into the
+	// combined CA bundle used by Envoy and Koku workloads.
+	CACertSecretName string `json:"caCertSecretName,omitempty"`
+}
+
+// CostEventsEnabled reports whether koku-events integration is enabled for this CR.
+// Omitted / nil defaults to false.
+func CostEventsEnabled(cfg *CostManagementServiceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	return BoolVal(cfg.Spec.CostEvents.Enabled, false)
+}
+
 type ROSAPISpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +kubebuilder:default:=INFO
@@ -716,6 +771,7 @@ type CostManagementServiceConfigSpec struct {
 	Auth           AuthConfig           `json:"auth,omitempty"`
 	RBAC           RBACConfig           `json:"rbac,omitempty"`
 	CostManagement CostManagementConfig `json:"costManagement,omitempty"`
+	CostEvents     CostEventsConfig     `json:"costEvents,omitempty"`
 	ROS            ROSConfig            `json:"ros,omitempty"`
 	Kruize         KruizeConfig         `json:"kruize,omitempty"`
 	Ingress        IngressConfig        `json:"ingress,omitempty"`
